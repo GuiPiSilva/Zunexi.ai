@@ -1,8 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useCallback } from "react";
 import * as fabric from "fabric";
 import type { ElementDesc } from "@/lib/layouts";
-import { Type, Image as ImageIcon, Square, Circle as CircleIcon, Trash2, Copy, Undo2, Redo2, Download, Upload, Bold, Italic, AlignLeft, AlignCenter, AlignRight } from "lucide-react";
-import { loadLibrary } from "@/lib/storage";
+import { Type, Image as ImageIcon, Square, Circle as CircleIcon, Trash2, Copy, Undo2, Redo2, Download, Bold, Italic, AlignLeft, AlignCenter, AlignRight } from "lucide-react";
 
 export interface EditorHandle {
   exportPng: (filename?: string, multiplier?: number) => string | null;
@@ -46,7 +45,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
   const emit = useCallback(() => {
     const c = fcRef.current; if (!c) return;
     const json = c.toJSON();
-    const thumb = c.toDataURL({ format: "png", multiplier: 0.2 });
+    const thumb = c.toDataURL({ format: "jpeg", quality: 0.55, multiplier: 0.08 });
     onChange?.(json, thumb);
   }, [onChange]);
 
@@ -61,22 +60,15 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
 
   useEffect(() => {
     if (!canvasRef.current) return;
-    const c = new fabric.Canvas(canvasRef.current, { width, height, backgroundColor: "#111", preserveObjectStacking: true });
+    const c = new fabric.Canvas(canvasRef.current, {
+      width,
+      height,
+      backgroundColor: "#111",
+      preserveObjectStacking: true,
+    });
     fcRef.current = c;
-
-    async function loadInitial() {
-      if (initial && "elements" in initial) {
-        c.backgroundColor = initial.background;
-        for (const el of initial.elements as ElementDesc[]) {
-          await addDesc(c, el);
-        }
-      } else if (initial) {
-        await c.loadFromJSON(initial);
-      }
-      c.renderAll();
-      snapshot();
-    }
-    loadInitial();
+    skipHistory.current = true;
+    let cancelled = false;
 
     const onSel = () => setSel(c.getActiveObject() || null);
     c.on("selection:created", onSel);
@@ -86,7 +78,36 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
     c.on("object:added", snapshot);
     c.on("object:removed", snapshot);
 
-    return () => { c.dispose(); fcRef.current = null; };
+    async function loadInitial() {
+      try {
+        if (initial && "elements" in initial) {
+          c.backgroundColor = initial.background || "#111";
+          for (const el of initial.elements as ElementDesc[]) {
+            await addDesc(c, el);
+          }
+        } else if (initial) {
+          await c.loadFromJSON(normalizeCanvasJson(initial));
+        }
+
+        if (cancelled) return;
+        c.requestRenderAll();
+        const json = JSON.stringify(c.toJSON());
+        history.current = [json];
+        historyIdx.current = 0;
+      } catch (error) {
+        console.error("Falha ao carregar o projeto no editor", error);
+      } finally {
+        skipHistory.current = false;
+      }
+    }
+
+    void loadInitial();
+
+    return () => {
+      cancelled = true;
+      c.dispose();
+      fcRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [width, height]);
 
@@ -144,10 +165,17 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
   }
   async function addImageUrl(url: string) {
     const c = fcRef.current; if (!c) return;
-    const img = await fabric.FabricImage.fromURL(url, { crossOrigin: "anonymous" });
-    const s = Math.min(width*0.6/img.width!, height*0.6/img.height!);
-    img.scale(s); img.set({ left: width/2 - (img.width!*s)/2, top: height/2 - (img.height!*s)/2 });
-    c.add(img); c.setActiveObject(img); c.renderAll();
+    const img = await loadFabricImage(url);
+    const imageWidth = img.width || 1;
+    const imageHeight = img.height || 1;
+    const scale = Math.min((width * 0.6) / imageWidth, (height * 0.6) / imageHeight);
+    img.set({
+      left: width / 2 - (imageWidth * scale) / 2,
+      top: height / 2 - (imageHeight * scale) / 2,
+      scaleX: scale,
+      scaleY: scale,
+    });
+    c.add(img); c.setActiveObject(img); c.requestRenderAll();
   }
   function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
@@ -167,9 +195,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
   const isText = sel instanceof fabric.Textbox;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-1 p-2 border-b border-border bg-card overflow-x-auto">
+      <div className="flex shrink-0 flex-wrap items-center gap-1 overflow-x-auto border-b border-border bg-card p-2">
         <ToolBtn onClick={addText} icon={Type} label="Texto"/>
         <ToolBtn onClick={()=>document.getElementById("editor-upload")?.click()} icon={ImageIcon} label="Imagem"/>
         <input id="editor-upload" type="file" accept="image/*" onChange={onUpload} className="hidden"/>
@@ -216,7 +244,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
       )}
 
       {/* Canvas viewport */}
-      <div ref={viewportRef} className="flex-1 overflow-hidden bg-background grid place-items-center p-3">
+      <div ref={viewportRef} className="grid min-h-0 flex-1 place-items-center overflow-hidden bg-background p-3">
         <div style={{ width: width*zoom, height: height*zoom }} className="relative shadow-2xl">
           <div style={{ transform: `scale(${zoom})`, transformOrigin: "top left", width, height }}>
             <canvas ref={canvasRef} />
@@ -245,16 +273,72 @@ async function addDesc(c: fabric.Canvas, el: ElementDesc) {
     if (el.shadow) t.set("shadow", new fabric.Shadow({ color: "rgba(0,0,0,0.5)", blur: 20, offsetX: 0, offsetY: 4 }));
     c.add(t);
   } else if (el.kind === "image") {
-    try {
-      const img = await fabric.FabricImage.fromURL(el.url, { crossOrigin: "anonymous" });
-      const sx = el.w / img.width!;
-      const sy = el.h / img.height!;
-      const s = Math.max(sx, sy);
-      img.scale(s);
-      img.set({ left: el.x, top: el.y, opacity: el.opacity ?? 1, clipPath: new fabric.Rect({ left: -img.width!/2 + (el.x - el.x)/s, top: -img.height!/2, width: el.w/s, height: el.h/s, absolutePositioned: false }) });
-      // Simpler: just place without clip
-      img.set({ left: el.x, top: el.y, opacity: el.opacity ?? 1 });
-      c.add(img);
-    } catch (e) { console.warn("image load failed", e); }
+    const img = await loadFabricImage(el.url);
+    const sourceWidth = img.width || 1;
+    const sourceHeight = img.height || 1;
+    const scale = Math.max(el.w / sourceWidth, el.h / sourceHeight);
+    const cropWidth = Math.min(sourceWidth, el.w / scale);
+    const cropHeight = Math.min(sourceHeight, el.h / scale);
+
+    img.set({
+      left: el.x,
+      top: el.y,
+      width: cropWidth,
+      height: cropHeight,
+      cropX: Math.max(0, (sourceWidth - cropWidth) / 2),
+      cropY: Math.max(0, (sourceHeight - cropHeight) / 2),
+      scaleX: scale,
+      scaleY: scale,
+      opacity: el.opacity ?? 1,
+    });
+    c.add(img);
+  }
+}
+
+async function loadFabricImage(source: string) {
+  const normalizedSource = normalizeImageSource(source);
+  if (!/^https?:\/\//i.test(normalizedSource)) {
+    return fabric.FabricImage.fromURL(normalizedSource);
+  }
+
+  try {
+    return await fabric.FabricImage.fromURL(normalizedSource, { crossOrigin: "anonymous" });
+  } catch {
+    return fabric.FabricImage.fromURL(normalizedSource);
+  }
+}
+
+function normalizeCanvasJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(normalizeCanvasJson);
+  if (!value || typeof value !== "object") return value;
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      key === "src" && typeof item === "string" ? normalizeImageSource(item) : normalizeCanvasJson(item),
+    ]),
+  );
+}
+
+function normalizeImageSource(source: string) {
+  const match = source.match(/^data:([^;,]*)(;base64)?,(.*)$/s);
+  if (!match || !match[2]) return source;
+
+  const currentType = match[1].toLowerCase();
+  if (currentType.startsWith("image/")) return source;
+
+  try {
+    const header = atob(match[3].slice(0, 96));
+    const bytes = Array.from(header, (char) => char.charCodeAt(0));
+    let mime = "image/png";
+
+    if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) mime = "image/jpeg";
+    else if (header.startsWith("GIF8")) mime = "image/gif";
+    else if (header.startsWith("RIFF") && header.slice(8, 12) === "WEBP") mime = "image/webp";
+    else if (header.includes("<svg")) mime = "image/svg+xml";
+
+    return `data:${mime};base64,${match[3]}`;
+  } catch {
+    return source;
   }
 }

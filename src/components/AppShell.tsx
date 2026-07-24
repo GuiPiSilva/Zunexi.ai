@@ -14,7 +14,7 @@ import {
   Settings,
   X,
 } from "lucide-react";
-import { clearAccessKey, getAccessKey } from "@/lib/session";
+import { clearAccessKey, getAccessKey, getAccessUserName } from "@/lib/session";
 import logoFull from "@/assets/logo-full.png";
 import logoIcon from "@/assets/logo-icon.png";
 
@@ -41,10 +41,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const loc = useLocation();
   const [ready, setReady] = useState(false);
   const [authed, setAuthed] = useState(false);
+  const [userName, setUserName] = useState("Usuário InLabs");
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     setAuthed(!!getAccessKey());
+    setUserName(getAccessUserName());
     setReady(true);
   }, [loc.pathname]);
 
@@ -75,8 +77,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         }`}
       >
-        <div className="flex h-[76px] items-center border-b border-sidebar-border px-5">
-          <img src={logoFull} alt="InLabs.Ia Studios" className="h-10 w-auto max-w-[185px] object-contain" />
+        <div className="flex h-[76px] items-center border-b border-sidebar-border px-4">
+          <img
+            src={logoFull}
+            alt="InLabs.Ia Studios"
+            className="h-14 w-auto max-w-[225px] object-contain drop-shadow-[0_0_18px_rgba(99,102,241,.22)]"
+          />
         </div>
 
         <div className="px-4 pt-5">
@@ -104,7 +110,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <img src={logoIcon} alt="InLabs" className="h-full w-full object-contain" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-semibold">Usuário InLabs</div>
+              <div className="truncate text-sm font-semibold" title={userName}>{userName}</div>
               <div className="truncate text-[11px] text-muted-foreground">Acesso autorizado</div>
             </div>
             <button onClick={logout} title="Sair" className="rounded-lg p-2 text-muted-foreground transition hover:bg-white/5 hover:text-white">
@@ -139,7 +145,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <img src={logoIcon} alt="InLabs" className="h-full w-full object-contain" />
             </div>
             <div className="text-left">
-              <div className="text-xs font-semibold">Usuário InLabs</div>
+              <div className="max-w-[130px] truncate text-xs font-semibold" title={userName}>{userName}</div>
               <div className="text-[10px] text-muted-foreground">Conta autorizada</div>
             </div>
             <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
