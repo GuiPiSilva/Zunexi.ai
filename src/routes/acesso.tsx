@@ -69,6 +69,17 @@ function Access() {
                 className="relative h-full w-full scale-[1.08] object-contain drop-shadow-[0_22px_45px_rgba(101,80,255,.42)]"
               />
             </div>
+            <div className="mx-auto mt-2 max-w-md text-center">
+  <div className="eyebrow mb-3 flex items-center justify-center gap-2">
+    <Sparkles className="h-3.5 w-3.5 text-primary" />
+    Conteúdo profissional com IA
+  </div>
+
+  <h1 className="section-title text-3xl">
+    Seu estúdio criativo, pronto para transformar ideias em conteúdo.
+  </h1>
+</div>
+            
             <span className="absolute left-[14%] top-[18%] h-2 w-2 rounded-full bg-primary shadow-[0_0_20px_6px_rgba(168,85,247,.5)]" />
             <span className="absolute bottom-[22%] right-[10%] h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_20px_6px_rgba(59,130,246,.5)]" />
           </div>
