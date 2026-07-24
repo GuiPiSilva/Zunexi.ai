@@ -105,20 +105,15 @@ const CartazInput = z.object({
 export const generateCartaz = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => CartazInput.parse(d))
   .handler(async ({ data }): Promise<SlideOut> => {
-    const CARTAZ_METAPHORS = [
-      "a classical marble statue with its head replaced by a glowing lightbulb, floating dust particles, dramatic surreal studio light",
-      "a giant hand made of liquid chrome reaching out of a tiny doorway, impossible scale, dramatic shadows",
-      "an hourglass where falling sand turns into a flock of birds mid-fall, cinematic dramatic light",
-      "a door standing alone in an open field, opening into a galaxy instead of a room, surreal contrast",
-      "a megaphone made of cracked stone with sound waves visualized as shattering glass shards frozen in air",
-      "a staircase folding into an impossible Escher-like loop, one figure walking upward into the sky",
-      "a mirror reflecting a completely different scene than what's in front of it, surreal juxtaposition",
-      "a birdcage made of light rays, wide open, glowing particles escaping upward, dark surreal background",
-    ];
-    const metaphor = CARTAZ_METAPHORS[Math.floor(Math.random() * CARTAZ_METAPHORS.length)];
+    const sys = `Você é diretor de arte especializado em cartazes profissionais para Instagram. Retorne apenas JSON válido: { "title": "...", "body": "...", "imagePrompt": "..." }.
 
-    const sys = `Você cria cartazes de eventos SURREAIS e chamativos para Instagram, no nível de campanhas premiadas — nunca foto de banco de imagens genérica ("pessoas sorrindo", "mesa de escritório"). Retorne JSON: { "title": "...", "body": "...", "imagePrompt": "..." }. Body inclui data, hora e local formatados.
-imagePrompt sempre em inglês: parta OBRIGATORIAMENTE desta direção visual surreal e adapte-a ao tema/tipo do evento como elemento central: "${metaphor}". Escreva como still cinematográfico completo (iluminação, composição, cores), mantendo o caráter surreal.`;
+REGRAS:
+- title: chamada principal curta e impactante em português.
+- body: somente as informações reais fornecidas pelo usuário, organizadas de forma clara; inclua data, horário e local apenas quando existirem.
+- imagePrompt: em inglês, descreva UMA ARTE FINAL COMPLETA de cartaz, já diagramada, com fotografia ou ilustração coerente com o evento, tipografia profissional, hierarquia, contraste, iluminação, textura e elementos gráficos.
+- A arte deve parecer criada por uma agência, pronta para publicação, sem blocos vazios, sem mockup, sem moldura de editor e sem aparência de template simples.
+- Não invente preço, telefone, endereço, atrações, datas, logotipo ou qualquer informação que não foi enviada.
+- Adapte a direção visual ao tipo do evento: igreja deve ser elegante e inspiradora; música deve ser energética; palestra deve ser sofisticada; promoção deve ser comercial e clara.`;
     const user = `Evento: ${data.title}
 Tipo: ${data.kind}
 Data: ${data.date} ${data.time}
@@ -155,6 +150,7 @@ const ImageInput = z.object({
   brand: z.string().optional().default(""),
   palette: z.string().optional().default(""),
   style: z.string().optional().default(""),
+  aspectRatio: z.enum(["1:1", "4:5", "9:16"]).optional().default("1:1"),
 });
 
 type KieCreateResponse = {
@@ -185,7 +181,7 @@ function kieErrorMessage(status: number, body: string): string {
   return `A Kie.ai retornou um erro (${status}): ${body.slice(0, 180)}`;
 }
 
-async function createKieImageTask(apiKey: string, prompt: string, signal: AbortSignal): Promise<string> {
+async function createKieImageTask(apiKey: string, prompt: string, aspectRatio: "1:1" | "4:5" | "9:16", signal: AbortSignal): Promise<string> {
   const response = await fetch(`${KIE_API_BASE_URL}/api/v1/jobs/createTask`, {
     method: "POST",
     headers: {
@@ -198,7 +194,7 @@ async function createKieImageTask(apiKey: string, prompt: string, signal: AbortS
       input: {
         prompt,
         output_format: "png",
-        aspect_ratio: "1:1",
+        aspect_ratio: aspectRatio,
       },
     }),
   });
@@ -286,8 +282,8 @@ export const generateImage = createServerFn({ method: "POST" })
 
     const fullPrompt = `${data.prompt}
 
-CREATE THE FINAL, FULLY DESIGNED INSTAGRAM CAROUSEL SLIDE — not a background photo and not a blank template.
-Canvas: square 1:1, 1080x1080 composition, full bleed, premium advertising finish.
+CREATE THE FINAL, FULLY DESIGNED INSTAGRAM ARTWORK — not a background photo, not a blank template and not a mockup.
+Canvas aspect ratio: ${data.aspectRatio}. Full bleed, premium advertising finish.
 Slide role: ${data.slideKind || "content"}. Slide ${data.slideIndex || 1} of ${data.slideTotal || 1}.
 Brand: ${brand || "use only the brand information explicitly present in the art direction"}.
 Visual style: ${data.style || "premium commercial art direction, bold editorial hierarchy"}.
@@ -302,7 +298,7 @@ DESIGN REQUIREMENTS:
 - Strong professional typography hierarchy, intentional grid, safe margins and excellent mobile readability.
 - Build a complete campaign layout with product photography/illustration, graphic shapes, lines, badges, icons, dividers or labels only when relevant.
 - Make the product or core subject the visual hero. Use realistic textures, premium lighting and commercial retouching.
-- Keep the slide visually consistent with a real Instagram advertising campaign, not a generic AI image.
+- Make it look like a finished professional poster or campaign artwork, not a generic AI image and not an editable template preview.
 - Do not add any invented words, prices, phone numbers, dates, handles, logos or claims.
 - Do not add slide counters, watermarks, mockup frames, UI chrome or meaningless decorative text.
 - Every element must look intentionally designed and production-ready.
@@ -313,7 +309,7 @@ Unique variation seed: ${data.seed}.`;
     const timeout = setTimeout(() => controller.abort(), KIE_IMAGE_TIMEOUT_MS);
 
     try {
-      const taskId = await createKieImageTask(apiKey, fullPrompt, controller.signal);
+      const taskId = await createKieImageTask(apiKey, fullPrompt, data.aspectRatio, controller.signal);
       const imageUrl = await waitForKieImage(apiKey, taskId, controller.signal);
       const dataUrl = await imageUrlToDataUrl(imageUrl, controller.signal);
       return { dataUrl };
@@ -344,7 +340,7 @@ export const testNanoBananaConnection = createServerFn({ method: "POST" })
     const testPrompt = `Create a polished square Instagram advertising test card, 1:1, dark premium background with subtle orange and gold lighting, one realistic gourmet burger as the hero product, professional editorial composition, clean safe margins. Render exactly this short Portuguese text: "NANO BANANA OK". Do not add any other words, prices, logos, watermarks or contact details.`;
 
     try {
-      const taskId = await createKieImageTask(apiKey, testPrompt, controller.signal);
+      const taskId = await createKieImageTask(apiKey, testPrompt, "1:1", controller.signal);
       const imageUrl = await waitForKieImage(apiKey, taskId, controller.signal);
       const dataUrl = await imageUrlToDataUrl(imageUrl, controller.signal);
       return {
