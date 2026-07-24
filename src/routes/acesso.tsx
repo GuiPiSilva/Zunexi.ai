@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ArrowRight, KeyRound, LifeBuoy, Loader2, LockKeyhole, ShieldCheck, Sparkles } from "lucide-react";
 import logoFull from "@/assets/logo-full.png";
 import logoIcon from "@/assets/logo-icon.png";
-import { setAccessKey } from "@/lib/session";
+import { setAccessKey, setAccessUserName } from "@/lib/session";
 import { verifyAccessKey } from "@/lib/access.functions";
 import { toast } from "sonner";
 
@@ -39,7 +39,8 @@ function Access() {
         return;
       }
       setAccessKey(key.trim().toUpperCase());
-      toast.success("Acesso autorizado.");
+      setAccessUserName(res.name);
+      toast.success(`Acesso autorizado para ${res.name}.`);
       nav({ to: "/", replace: true });
     } catch (err) {
       toast.error((err as Error).message || "Não foi possível validar a chave.");
@@ -82,7 +83,7 @@ function Access() {
             <div className="pointer-events-none absolute -right-28 -top-28 h-64 w-64 rounded-full bg-primary/15 blur-3xl" />
             <div className="relative">
               <div className="mb-8 flex justify-center">
-                <img src={logoFull} alt="InLabs.Ia Studios" className="h-14 w-auto max-w-[270px] object-contain" />
+                <img src={logoFull} alt="InLabs.Ia Studios" className="h-20 w-auto max-w-[390px] object-contain" />
               </div>
 
               <div className="text-center">

@@ -190,8 +190,8 @@ function EditorPage() {
 
   return (
     <AppShell>
-      <div className="flex min-h-[calc(100vh-76px)] flex-col bg-[#080b14]">
-        <header className="flex min-h-[66px] flex-wrap items-center gap-3 border-b border-border bg-card/90 px-3 py-2 sm:px-5">
+      <div className="flex h-[calc(100dvh-76px)] min-h-0 flex-col overflow-hidden bg-[#080b14]">
+        <header className="flex min-h-[66px] shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card/90 px-3 py-2 sm:px-5">
           <Link
             to="/projetos"
             className="rounded-xl p-2 text-muted-foreground hover:bg-white/5 hover:text-white"
@@ -234,7 +234,7 @@ function EditorPage() {
           </button>
         </header>
 
-        <section className="border-b border-border bg-[#0b0e19] px-3 py-3 sm:px-5">
+        <section className="shrink-0 border-b border-border bg-[#0b0e19] px-3 py-3 sm:px-5">
           <div className="flex flex-wrap gap-2">
             <button onClick={() => exportCurrent(1)} className="secondary-button px-3 py-2 text-xs">
               <Download className="h-4 w-4" /> Baixar PNG
@@ -259,7 +259,7 @@ function EditorPage() {
           </div>
         </section>
 
-        <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
           {project.type === "carrossel" && (
             <aside className="hidden w-40 shrink-0 flex-col border-r border-border bg-[#0b0e19] md:flex">
               <div className="flex items-center justify-between border-b border-border px-3 py-3">
@@ -308,7 +308,7 @@ function EditorPage() {
             </aside>
           )}
 
-          <div className="min-w-0 flex-1">
+          <div className="h-full min-h-0 min-w-0 flex-1 overflow-hidden">
             <Editor
               ref={editorRef}
               key={editorKey}
@@ -321,7 +321,7 @@ function EditorPage() {
         </div>
 
         {project.type === "carrossel" && (
-          <div className="flex gap-2 overflow-x-auto border-t border-border bg-card p-2 md:hidden">
+          <div className="flex shrink-0 gap-2 overflow-x-auto border-t border-border bg-card p-2 md:hidden">
             {project.slides.map((item, index) => (
               <button
                 key={item.id}

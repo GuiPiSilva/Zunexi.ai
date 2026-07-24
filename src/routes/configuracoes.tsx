@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Bell, KeyRound, LogOut, Monitor, Palette, Save, ShieldCheck, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
-import { clearAccessKey, getAccessKey } from "@/lib/session";
+import { clearAccessKey, getAccessKey, getAccessUserName } from "@/lib/session";
 
 export const Route = createFileRoute("/configuracoes")({
   head: () => ({ meta: [{ title: "Configurações — InLabs.Ia Studios" }] }),
@@ -14,13 +14,13 @@ type Theme = "escuro" | "sistema";
 
 function Configuracoes() {
   const nav = useNavigate();
-  const [name, setName] = useState("Usuário InLabs");
+  const [name, setName] = useState("");
   const [theme, setTheme] = useState<Theme>("escuro");
   const [notifications, setNotifications] = useState(true);
   const [accessKey, setAccessKeyState] = useState("");
 
   useEffect(() => {
-    setName(localStorage.getItem("inlabs.profileName") || "Usuário InLabs");
+    setName(getAccessUserName());
     setTheme((localStorage.getItem("inlabs.theme") as Theme) || "escuro");
     setNotifications(localStorage.getItem("inlabs.notifications") !== "false");
     setAccessKeyState(getAccessKey() || "");
@@ -34,7 +34,6 @@ function Configuracoes() {
   }, [accessKey]);
 
   function saveSettings() {
-    localStorage.setItem("inlabs.profileName", name.trim() || "Usuário InLabs");
     localStorage.setItem("inlabs.theme", theme);
     localStorage.setItem("inlabs.notifications", String(notifications));
     toast.success("Preferências salvas.");
@@ -72,7 +71,11 @@ function Configuracoes() {
                 </div>
               </div>
               <div className="grid gap-5 md:grid-cols-2">
-                <label className="block md:col-span-2"><span className="mb-2 block text-sm font-medium">Nome de exibição</span><input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} className="app-input" /></label>
+                <label className="block md:col-span-2">
+                  <span className="mb-2 block text-sm font-medium">Nome de exibição</span>
+                  <input value={name} readOnly className="app-input cursor-not-allowed opacity-80" />
+                  <span className="mt-2 block text-xs text-muted-foreground">Nome definido pelo administrador ao criar sua chave de acesso.</span>
+                </label>
                 <div><span className="mb-2 block text-sm font-medium">Tipo de acesso</span><div className="app-input flex items-center gap-2 text-muted-foreground"><KeyRound className="h-4 w-4 text-primary" /> Chave liberada pelo administrador</div></div>
                 <div><span className="mb-2 block text-sm font-medium">Status</span><div className="app-input flex items-center gap-2 text-emerald-300"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Acesso ativo</div></div>
               </div>
