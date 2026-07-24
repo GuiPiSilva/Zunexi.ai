@@ -13,7 +13,7 @@ function admin() {
 
 const Input = z.object({
   accessKey: z.string().trim().min(4).max(64),
-  tema: z.string().trim().min(3).max(500),
+  tema: z.string().trim().min(3).max(3000),
   objetivo: z.string().trim().max(300).optional().default(""),
   publicoAlvo: z.string().trim().max(300).optional().default(""),
   tom: z.string().trim().max(100).optional().default("profissional"),
@@ -297,12 +297,49 @@ export const testGroqConnection = createServerFn({ method: "POST" })
 
 const PromptCreatorInput = z.object({
   accessKey: z.string().trim().min(4).max(64),
-  pedido: z.string().trim().min(3).max(1500),
+  pedido: z.string().trim().min(3).max(500),
 });
+
+export type CarouselPromptData = {
+  prompt: string;
+  tema: string;
+  empresa: string;
+  produto: string;
+  objetivo: string;
+  publicoAlvo: string;
+  tom: string;
+  quantidadeSlides: number;
+  estilo: string;
+  paleta: string;
+  cta: string;
+  informacoesAdicionais: string;
+};
+
+function normalizePromptData(value: Partial<CarouselPromptData>): CarouselPromptData {
+  const allowedObjectives = ["vender", "educar", "engajar", "informar", "captar clientes"];
+  const objetivo = allowedObjectives.includes(String(value.objetivo || "").toLowerCase())
+    ? String(value.objetivo).toLowerCase()
+    : "informar";
+
+  return {
+    prompt: String(value.prompt || "").trim().slice(0, 500),
+    tema: String(value.tema || "").trim(),
+    empresa: String(value.empresa || "").trim(),
+    produto: String(value.produto || "").trim(),
+    objetivo,
+    publicoAlvo: String(value.publicoAlvo || "").trim(),
+    tom: String(value.tom || "profissional").trim() || "profissional",
+    quantidadeSlides: Math.min(20, Math.max(1, Number(value.quantidadeSlides) || 5)),
+    estilo: String(value.estilo || "moderno e tecnológico").trim() || "moderno e tecnológico",
+    paleta: String(value.paleta || "roxo, azul, ciano e branco").trim() || "roxo, azul, ciano e branco",
+    cta: String(value.cta || "").trim(),
+    informacoesAdicionais: String(value.informacoesAdicionais || "").trim(),
+  };
+}
 
 export const generateCarouselPrompt = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => PromptCreatorInput.parse(d))
-  .handler(async ({ data }): Promise<{ prompt: string }> => {
+  .handler(async ({ data }): Promise<CarouselPromptData> => {
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) throw new Error("GROQ_API_KEY não configurada no servidor.");
 
@@ -322,11 +359,12 @@ export const generateCarouselPrompt = createServerFn({ method: "POST" })
         signal: controller.signal,
         body: JSON.stringify({
           model: process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile",
-          temperature: 0.75,
+          temperature: 0.45,
+          response_format: { type: "json_object" },
           messages: [
             {
               role: "system",
-              content: `Você é especialista em criação de prompts para carrosséis profissionais de Instagram. Transforme o pedido do usuário em um único prompt completo, claro e pronto para colar em uma IA criadora de carrosséis. Escreva em português brasileiro. Inclua, quando fizer sentido: tema, negócio ou marca, objetivo, público, quantidade de 5 slides, estrutura de cada slide, estilo visual, paleta, imagens realistas, hierarquia dos textos, formato 1080x1080, consistência entre slides e CTA final. Não invente preços, telefones, endereços ou dados comerciais. Retorne somente o prompt final, sem introdução, aspas, markdown ou explicações.`,
+              content: `Transforme o pedido em dados para um carrossel profissional de Instagram. Retorne SOMENTE JSON válido com as chaves: prompt, tema, empresa, produto, objetivo, publicoAlvo, tom, quantidadeSlides, estilo, paleta, cta, informacoesAdicionais. O campo prompt deve ter no máximo 500 caracteres e resumir tudo de forma clara. objetivo deve ser um destes: vender, educar, engajar, informar, captar clientes. quantidadeSlides deve ser um número entre 1 e 20, normalmente 5. Não invente nome de empresa, preço, telefone, endereço ou informação comercial. Quando o usuário não informar algo, use string vazia, exceto tom, estilo, paleta e quantidadeSlides, que podem receber padrões coerentes.`,
             },
             { role: "user", content: data.pedido },
           ],
@@ -340,9 +378,20 @@ export const generateCarouselPrompt = createServerFn({ method: "POST" })
       }
 
       const json = await response.json() as { choices?: { message?: { content?: string } }[] };
-      const prompt = json.choices?.[0]?.message?.content?.trim();
-      if (!prompt) throw new Error("A Groq retornou um prompt vazio.");
-      return { prompt };
+      const content = json.choices?.[0]?.message?.content?.trim();
+      if (!content) throw new Error("A Groq retornou um prompt vazio.");
+
+      let parsed: Partial<CarouselPromptData>;
+      try {
+        parsed = JSON.parse(content) as Partial<CarouselPromptData>;
+      } catch {
+        parsed = { prompt: content, tema: data.pedido };
+      }
+
+      const normalized = normalizePromptData(parsed);
+      if (!normalized.prompt) normalized.prompt = data.pedido.slice(0, 500);
+      if (!normalized.tema) normalized.tema = normalized.prompt;
+      return normalized;
     } catch (error) {
       if ((error as Error).name === "AbortError") throw new Error("Tempo esgotado ao criar o prompt. Tente novamente.");
       throw error;

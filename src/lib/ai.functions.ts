@@ -135,6 +135,8 @@ Seed única: ${data.seed}-${Math.random().toString(36).slice(2)}`;
 
 const KIE_API_BASE_URL = "https://api.kie.ai";
 const KIE_IMAGE_MODEL = process.env.KIE_IMAGE_MODEL || "google/nano-banana";
+const KIE_IMAGE_EDIT_MODEL = process.env.KIE_IMAGE_EDIT_MODEL || "google/nano-banana-edit";
+const KIE_UPLOAD_BASE_URL = "https://kieai.redpandaai.co";
 const KIE_IMAGE_TIMEOUT_MS = Number(process.env.KIE_IMAGE_TIMEOUT_MS || 180_000);
 const KIE_POLL_INITIAL_MS = 2_500;
 const KIE_POLL_MAX_MS = 8_000;
@@ -151,6 +153,12 @@ const ImageInput = z.object({
   palette: z.string().optional().default(""),
   style: z.string().optional().default(""),
   aspectRatio: z.enum(["1:1", "4:5", "9:16"]).optional().default("1:1"),
+  referenceImageUrl: z.string().url().optional(),
+});
+
+const ReferenceImageInput = z.object({
+  dataUrl: z.string().min(20).max(15_000_000),
+  fileName: z.string().trim().min(1).max(120).default("referencia.png"),
 });
 
 type KieCreateResponse = {
@@ -181,7 +189,11 @@ function kieErrorMessage(status: number, body: string): string {
   return `A Kie.ai retornou um erro (${status}): ${body.slice(0, 180)}`;
 }
 
-async function createKieImageTask(apiKey: string, prompt: string, aspectRatio: "1:1" | "4:5" | "9:16", signal: AbortSignal): Promise<string> {
+async function createKieImageTask(apiKey: string, prompt: string, aspectRatio: "1:1" | "4:5" | "9:16", signal: AbortSignal, referenceImageUrl?: string): Promise<string> {
+  const input = referenceImageUrl
+    ? { prompt, image_urls: [referenceImageUrl], output_format: "png", aspect_ratio: aspectRatio }
+    : { prompt, output_format: "png", aspect_ratio: aspectRatio };
+
   const response = await fetch(`${KIE_API_BASE_URL}/api/v1/jobs/createTask`, {
     method: "POST",
     headers: {
@@ -190,12 +202,8 @@ async function createKieImageTask(apiKey: string, prompt: string, aspectRatio: "
     },
     signal,
     body: JSON.stringify({
-      model: KIE_IMAGE_MODEL,
-      input: {
-        prompt,
-        output_format: "png",
-        aspect_ratio: aspectRatio,
-      },
+      model: referenceImageUrl ? KIE_IMAGE_EDIT_MODEL : KIE_IMAGE_MODEL,
+      input,
     }),
   });
 
@@ -285,6 +293,34 @@ function detectImageContentType(bytes: Buffer, responseType: string | null): str
   throw new Error("A Kie.ai retornou um arquivo que não foi reconhecido como imagem.");
 }
 
+
+export const uploadReferenceImage = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => ReferenceImageInput.parse(d))
+  .handler(async ({ data }): Promise<{ url: string }> => {
+    const apiKey = process.env.KIE_API_KEY?.trim();
+    if (!apiKey) throw new Error("KIE_API_KEY não configurada no servidor.");
+    if (!/^data:image\/(png|jpeg|jpg|webp);base64,/i.test(data.dataUrl)) {
+      throw new Error("Envie uma imagem PNG, JPG ou WebP válida.");
+    }
+
+    const response = await fetch(`${KIE_UPLOAD_BASE_URL}/api/file-base64-upload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        base64Data: data.dataUrl,
+        uploadPath: "images/inlabs-references",
+        fileName: `${Date.now()}-${data.fileName.replace(/[^a-zA-Z0-9._-]/g, "-")}`,
+      }),
+    });
+
+    const body = await response.text();
+    if (!response.ok) throw new Error(kieErrorMessage(response.status, body));
+    const json = JSON.parse(body) as { success?: boolean; msg?: string; data?: { downloadUrl?: string; fileUrl?: string } };
+    const url = json.data?.downloadUrl || json.data?.fileUrl;
+    if (!json.success || !url) throw new Error(json.msg || "Não foi possível enviar a imagem de referência.");
+    return { url };
+  });
+
 export const generateImage = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => ImageInput.parse(d))
   .handler(async ({ data }): Promise<{ dataUrl: string }> => {
@@ -318,13 +354,18 @@ DESIGN REQUIREMENTS:
 - Do not add slide counters, watermarks, mockup frames, UI chrome or meaningless decorative text.
 - Every element must look intentionally designed and production-ready.
 
+${data.referenceImageUrl ? `REFERENCE IMAGE INSTRUCTIONS:
+- Use the uploaded image as the main visual reference for subject, product, logo, colors or composition.
+- Preserve recognizable brand/product characteristics when present.
+- Integrate it naturally into the final campaign artwork instead of merely placing it unchanged on the canvas.` : ""}
+
 Unique variation seed: ${data.seed}.`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), KIE_IMAGE_TIMEOUT_MS);
 
     try {
-      const taskId = await createKieImageTask(apiKey, fullPrompt, data.aspectRatio, controller.signal);
+      const taskId = await createKieImageTask(apiKey, fullPrompt, data.aspectRatio, controller.signal, data.referenceImageUrl);
       const imageUrl = await waitForKieImage(apiKey, taskId, controller.signal);
       const dataUrl = await imageUrlToDataUrl(imageUrl, controller.signal);
       return { dataUrl };
