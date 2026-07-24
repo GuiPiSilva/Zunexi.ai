@@ -323,7 +323,7 @@ export const uploadReferenceImage = createServerFn({ method: "POST" })
 
 export const generateImage = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => ImageInput.parse(d))
-  .handler(async ({ data }): Promise<{ dataUrl: string }> => {
+  .handler(async ({ data }): Promise<{ dataUrl: string; url: string }> => {
     const apiKey = process.env.KIE_API_KEY?.trim();
     if (!apiKey) throw new Error("KIE_API_KEY não configurada no servidor.");
 
@@ -368,7 +368,7 @@ Unique variation seed: ${data.seed}.`;
       const taskId = await createKieImageTask(apiKey, fullPrompt, data.aspectRatio, controller.signal, data.referenceImageUrl);
       const imageUrl = await waitForKieImage(apiKey, taskId, controller.signal);
       const dataUrl = await imageUrlToDataUrl(imageUrl, controller.signal);
-      return { dataUrl };
+      return { dataUrl, url: imageUrl };
     } catch (error) {
       const err = error as Error;
       if (err.name === "AbortError") throw new Error("Tempo esgotado ao gerar imagem na Kie.ai.");
