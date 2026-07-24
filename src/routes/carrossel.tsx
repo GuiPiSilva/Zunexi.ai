@@ -177,7 +177,7 @@ function NovoCarrossel() {
     <AppShell>
       <div className="page-wrap space-y-7">
         <section>
-          <div className="eyebrow mb-2 flex items-center gap-2"><Sparkles className="h-3.5 w-3.5 text-primary" /> Criação guiada por IA</div>
+         
           <h1 className="section-title text-3xl sm:text-4xl">Criar carrossel</h1>
           <p className="mt-2 text-sm text-muted-foreground">Crie roteiro, textos e imagens em poucos passos com a IA da Groq (roteiro) e Kie.ai/Nano Banana (artes finais).</p>
         </section>
