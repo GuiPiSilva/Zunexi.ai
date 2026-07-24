@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Check,
+  Coins,
   Copy,
   KeyRound,
   Loader2,
@@ -12,6 +13,7 @@ import {
   Plus,
   Power,
   Search,
+  Save,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
@@ -22,6 +24,7 @@ import {
   adminListKeys,
   adminLogin,
   adminToggleKey,
+  adminUpdateCredits,
 } from "@/lib/access.functions";
 import { clearAdminToken, getAdminToken, setAdminToken } from "@/lib/session";
 
@@ -43,6 +46,10 @@ type Row = {
   uses: number;
   last_used_at: string | null;
   created_at: string;
+  credits_per_day: number;
+  unlimited_credits: boolean;
+  credits_used_today: number;
+  credits_reset_date: string;
 };
 
 function Admin() {
@@ -113,6 +120,7 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
   const list = useServerFn(adminListKeys);
   const create = useServerFn(adminCreateKey);
   const toggle = useServerFn(adminToggleKey);
+  const updateCredits = useServerFn(adminUpdateCredits);
   const remove = useServerFn(adminDeleteKey);
 
   const [rows, setRows] = useState<Row[]>([]);
@@ -120,6 +128,8 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
   const [label, setLabel] = useState("");
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
+  const [creditsPerDay, setCreditsPerDay] = useState(30);
+  const [unlimited, setUnlimited] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -154,14 +164,27 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
     }
     setCreating(true);
     try {
-      const row = await create({ data: { token, label: label.trim() } });
+      const row = await create({ data: { token, label: label.trim(), creditsPerDay, unlimited } });
       setRows((current) => [row as Row, ...current]);
       setLabel("");
+      setCreditsPerDay(30);
+      setUnlimited(false);
       toast.success("Chave criada pelo administrador.");
     } catch (error) {
       toast.error((error as Error).message);
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function doSaveCredits(row: Row, nextCredits: number, nextUnlimited: boolean) {
+    try {
+      const updated = await updateCredits({ data: { token, id: row.id, creditsPerDay: nextCredits, unlimited: nextUnlimited } });
+      setRows((current) => current.map((item) => item.id === row.id ? updated as Row : item));
+      toast.success(nextUnlimited ? "Créditos infinitos ativados." : "Limite diário atualizado.");
+    } catch (error) {
+      toast.error((error as Error).message);
+      throw error;
     }
   }
 
@@ -217,8 +240,16 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
             <h2 className="section-title text-lg">Criar nova chave</h2>
             <p className="mt-1 text-xs text-muted-foreground">Esta ação é exclusiva do administrador. Identifique claramente o responsável pela chave.</p>
           </div>
-          <form onSubmit={doCreate} className="flex flex-col gap-3 sm:flex-row">
-            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Nome do cliente, equipe ou responsável" className="app-input flex-1" />
+          <form onSubmit={doCreate} className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_190px_190px_auto] lg:items-center">
+            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Nome do cliente, equipe ou responsável" className="app-input" />
+            <label className="relative">
+              <Coins className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input type="number" min={0} max={1000000} disabled={unlimited} value={creditsPerDay} onChange={(e) => setCreditsPerDay(Math.max(0, Number(e.target.value) || 0))} className="app-input pl-10 disabled:opacity-45" aria-label="Créditos por dia" />
+            </label>
+            <label className="flex h-12 cursor-pointer items-center gap-3 rounded-xl border border-border bg-[#0a0e1a] px-4 text-sm">
+              <input type="checkbox" checked={unlimited} onChange={(e) => setUnlimited(e.target.checked)} className="h-4 w-4 accent-violet-500" />
+              Créditos infinitos
+            </label>
             <button disabled={creating} className="primary-button shrink-0 disabled:opacity-60">
               {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Gerar chave
             </button>
@@ -243,13 +274,14 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
             <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">Nenhuma chave encontrada.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px] text-sm">
+              <table className="w-full min-w-[1120px] text-sm">
                 <thead className="bg-white/[0.025] text-left text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
                   <tr>
                     <th className="px-5 py-4">Chave</th>
                     <th className="px-5 py-4">Responsável</th>
                     <th className="px-5 py-4">Status</th>
-                    <th className="px-5 py-4">Usos</th>
+                    <th className="px-5 py-4">Acessos</th>
+                    <th className="px-5 py-4">Créditos diários</th>
                     <th className="px-5 py-4">Criada em</th>
                     <th className="px-5 py-4 text-right">Ações</th>
                   </tr>
@@ -261,6 +293,7 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
                       <td className="px-5 py-4"><div className="font-medium">{row.label || "Sem identificação"}</div><div className="mt-0.5 text-[11px] text-muted-foreground">Último uso: {row.last_used_at ? new Date(row.last_used_at).toLocaleString("pt-BR") : "nunca"}</div></td>
                       <td className="px-5 py-4"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${row.active ? "bg-emerald-500/12 text-emerald-300" : "bg-amber-500/12 text-amber-300"}`}>{row.active ? "Ativa" : "Bloqueada"}</span></td>
                       <td className="px-5 py-4">{row.uses}</td>
+                      <td className="px-5 py-4"><CreditEditor row={row} onSave={doSaveCredits} /></td>
                       <td className="px-5 py-4 text-muted-foreground">{new Date(row.created_at).toLocaleDateString("pt-BR")}</td>
                       <td className="px-5 py-4"><div className="flex justify-end gap-2"><button onClick={() => doToggle(row)} className="secondary-button px-3 py-2 text-xs"><Power className="h-3.5 w-3.5" />{row.active ? "Bloquear" : "Ativar"}</button><button onClick={() => doDelete(row)} className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/25 bg-destructive/8 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/15"><Trash2 className="h-3.5 w-3.5" />Excluir</button></div></td>
                     </tr>
@@ -272,6 +305,47 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
         </section>
       </div>
     </main>
+  );
+}
+
+
+function brazilDate() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
+
+function CreditEditor({ row, onSave }: { row: Row; onSave: (row: Row, credits: number, unlimited: boolean) => Promise<void> }) {
+  const [credits, setCredits] = useState(row.credits_per_day);
+  const [unlimited, setUnlimited] = useState(row.unlimited_credits);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setCredits(row.credits_per_day);
+    setUnlimited(row.unlimited_credits);
+  }, [row.credits_per_day, row.unlimited_credits]);
+
+  const used = row.credits_reset_date === brazilDate() ? row.credits_used_today : 0;
+
+  return (
+    <div className="min-w-[280px]">
+      <div className="flex items-center gap-2">
+        <input type="number" min={0} max={1000000} disabled={unlimited || saving} value={credits} onChange={(event) => setCredits(Math.max(0, Number(event.target.value) || 0))} className="h-9 w-24 rounded-lg border border-border bg-[#0a0e1a] px-2 text-xs outline-none disabled:opacity-40" />
+        <label className="flex items-center gap-1.5 text-xs">
+          <input type="checkbox" checked={unlimited} disabled={saving} onChange={(event) => setUnlimited(event.target.checked)} className="accent-violet-500" />
+          Infinito
+        </label>
+        <button type="button" disabled={saving} onClick={async () => { setSaving(true); try { await onSave(row, credits, unlimited); } finally { setSaving(false); } }} className="rounded-lg border border-primary/25 bg-primary/10 p-2 text-primary disabled:opacity-50" title="Salvar créditos">
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+        </button>
+      </div>
+      <div className="mt-1 text-[10px] text-muted-foreground">{unlimited ? "Uso ilimitado" : `${Math.max(credits - used, 0)} restantes hoje · ${used} usados`}</div>
+    </div>
   );
 }
 

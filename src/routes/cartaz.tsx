@@ -1,11 +1,22 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CalendarDays, Clock3, ImagePlus, Loader2, MapPin, Palette, Sparkles, Upload, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { generateCartaz, generateImage } from "@/lib/ai.functions";
 import { newProject, upsertProject } from "@/lib/storage";
+import { getAccessKey } from "@/lib/session";
+import {
+  createCreationJob,
+  getActiveCreationJob,
+  getCreationJob,
+  subscribeCreationJobs,
+  updateCreationJob,
+  withCreationJobLock,
+  type CreationJob,
+} from "@/lib/generation-jobs";
+import { addNotification, requestNotificationPermission } from "@/lib/notifications";
 
 export const Route = createFileRoute("/cartaz")({
   head: () => ({ meta: [{ title: "Criar cartaz — InLabs.Ia Studios" }] }),
@@ -25,7 +36,9 @@ function NovoCartaz() {
   const nav = useNavigate();
   const generateText = useServerFn(generateCartaz);
   const generateImageFn = useServerFn(generateImage);
+  const [accessKey, setAccessKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [photo, setPhoto] = useState<string | undefined>();
   const [form, setForm] = useState({
     title: "",
@@ -44,6 +57,35 @@ function NovoCartaz() {
     format: "1080x1350",
   });
 
+  useEffect(() => {
+    const key = getAccessKey();
+    if (!key) {
+      nav({ to: "/acesso", replace: true });
+      return;
+    }
+    setAccessKey(key);
+  }, [nav]);
+
+  useEffect(() => {
+    if (!accessKey) return;
+
+    function syncFromJob() {
+      const latest = getActiveCreationJob("cartaz");
+      if (!latest) return;
+      setBusy(latest.status === "queued" || latest.status === "running");
+      setProgress(latest.progress);
+      const savedForm = latest.payload.form as typeof form | undefined;
+      if (savedForm) setForm(savedForm);
+    }
+
+    syncFromJob();
+    const unsubscribe = subscribeCreationJobs(syncFromJob);
+    const active = getActiveCreationJob("cartaz");
+    if (active) void executeCartazJob(active);
+    return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessKey]);
+
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -56,82 +98,142 @@ function NovoCartaz() {
     reader.readAsDataURL(file);
   }
 
+  async function executeCartazJob(initialJob: CreationJob, memoryPhoto?: string) {
+    if (!accessKey) return;
+
+    const started = await withCreationJobLock(initialJob.id, async () => {
+      let job = getCreationJob(initialJob.id, initialJob.ownerScope) || initialJob;
+      const payload = job.payload as { form: typeof form; photo?: string };
+      const currentForm = payload.form;
+      setBusy(true);
+      setProgress(job.progress);
+      updateCreationJob(job.id, { status: "running", error: undefined }, job.ownerScope);
+
+      try {
+        const seed = String(job.payload.seed || job.id);
+        const extra = [
+          currentForm.description,
+          currentForm.address && `Endereço: ${currentForm.address}`,
+          currentForm.attractions && `Atrações: ${currentForm.attractions}`,
+          currentForm.price && `Preço: ${currentForm.price}`,
+          currentForm.contact && `Contato: ${currentForm.contact}`,
+          currentForm.cta && `CTA: ${currentForm.cta}`,
+          currentForm.palette && `Paleta: ${currentForm.palette}`,
+        ].filter(Boolean).join("\n");
+
+        let generated = job.result as { title: string; body: string; imagePrompt: string } | undefined;
+        if (!generated) {
+          const generatedOutput = await generateText({ data: {
+            jobId: job.id,
+            accessKey,
+            title: currentForm.title,
+            kind: currentForm.kind,
+            date: currentForm.date,
+            time: currentForm.time,
+            place: currentForm.place,
+            style: currentForm.style,
+            extra,
+            seed,
+          } });
+          generated = generatedOutput;
+          job = updateCreationJob(job.id, { result: generatedOutput, progress: 40 }, job.ownerScope) || job;
+          setProgress(40);
+          window.dispatchEvent(new CustomEvent("inlabs:credits-changed"));
+        }
+
+        if (!generated) throw new Error("O texto do cartaz não pôde ser recuperado.");
+
+        const dimensions = currentForm.format === "1080x1080" ? [1080, 1080] : currentForm.format === "1080x1920" ? [1080, 1920] : [1080, 1350];
+        const [width, height] = dimensions;
+        const aspectRatio = currentForm.format === "1080x1080" ? "1:1" : currentForm.format === "1080x1920" ? "9:16" : "4:5";
+
+        let imageUrl = job.assets.main?.url || memoryPhoto || payload.photo;
+        if (!imageUrl) {
+          const image = await generateImageFn({
+            data: {
+              prompt: generated.imagePrompt,
+              seed,
+              slideTitle: generated.title,
+              slideBody: generated.body,
+              slideKind: `cartaz profissional de ${currentForm.kind}`,
+              brand: currentForm.title,
+              palette: currentForm.palette,
+              style: `${currentForm.style}; cartaz de evento premium; arte final pronta para publicação`,
+              aspectRatio,
+            },
+          });
+          imageUrl = image.url;
+          job = updateCreationJob(job.id, { assets: { ...job.assets, main: { url: image.url } }, progress: 90 }, job.ownerScope) || job;
+          setProgress(90);
+        }
+
+        if (!imageUrl) throw new Error("A IA não retornou a arte do cartaz.");
+
+        let projectId = job.projectId;
+        if (!projectId) {
+          const project = newProject("cartaz", currentForm.title, { style: currentForm.style, ratio: currentForm.format });
+          project.slides = [{
+            id: crypto.randomUUID(),
+            width,
+            height,
+            canvas: {
+              elements: [{ kind: "image" as const, x: 0, y: 0, w: width, h: height, url: imageUrl }],
+              background: "#05050a",
+              fonts: { display: "Bebas Neue", body: "Inter" },
+            },
+          }];
+          upsertProject(project, job.ownerScope);
+          projectId = project.id;
+        }
+
+        if (!projectId) throw new Error("Não foi possível salvar o projeto.");
+        updateCreationJob(job.id, { status: "completed", progress: 100, projectId }, job.ownerScope);
+        setProgress(100);
+        addNotification({
+          title: "Cartaz concluído",
+          message: `“${currentForm.title}” foi salvo em Meus projetos.`,
+          href: `/editor/${projectId}`,
+          kind: "success",
+        }, job.ownerScope);
+        toast.success("Cartaz criado e salvo em Meus projetos.");
+        if (window.location.pathname === "/cartaz") nav({ to: "/editor/$id", params: { id: projectId } });
+      } catch (error) {
+        window.dispatchEvent(new CustomEvent("inlabs:credits-changed"));
+        const message = (error as Error).message || "Erro ao gerar o cartaz.";
+        updateCreationJob(job.id, { status: "failed", error: message }, job.ownerScope);
+        addNotification({ title: "Falha na criação", message, href: "/cartaz", kind: "error" }, job.ownerScope);
+        toast.error(message);
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    if (!started) {
+      const active = getCreationJob(initialJob.id, initialJob.ownerScope);
+      setBusy(active?.status === "queued" || active?.status === "running");
+    }
+  }
+
   async function gerar() {
+    if (!accessKey) return;
     if (!form.title.trim()) {
       toast.error("Informe o nome do evento.");
       return;
     }
-    setBusy(true);
-    try {
-      const seed = crypto.randomUUID();
-      const extra = [
-        form.description,
-        form.address && `Endereço: ${form.address}`,
-        form.attractions && `Atrações: ${form.attractions}`,
-        form.price && `Preço: ${form.price}`,
-        form.contact && `Contato: ${form.contact}`,
-        form.cta && `CTA: ${form.cta}`,
-        form.palette && `Paleta: ${form.palette}`,
-      ].filter(Boolean).join("\n");
 
-      const generated = await generateText({ data: {
-        title: form.title,
-        kind: form.kind,
-        date: form.date,
-        time: form.time,
-        place: form.place,
-        style: form.style,
-        extra,
-        seed,
-      } });
-
-      const dimensions = form.format === "1080x1080" ? [1080, 1080] : form.format === "1080x1920" ? [1080, 1920] : [1080, 1350];
-      const [width, height] = dimensions;
-      const aspectRatio = form.format === "1080x1080" ? "1:1" : form.format === "1080x1920" ? "9:16" : "4:5";
-
-      let imageUrl = photo;
-      if (!imageUrl) {
-        imageUrl = (await generateImageFn({
-          data: {
-            prompt: generated.imagePrompt,
-            seed,
-            slideTitle: generated.title,
-            slideBody: generated.body,
-            slideKind: `cartaz profissional de ${form.kind}`,
-            brand: form.title,
-            palette: form.palette,
-            style: `${form.style}; cartaz de evento premium; arte final pronta para publicação`,
-            aspectRatio,
-          },
-        })).dataUrl;
-      }
-
-      if (!imageUrl) throw new Error("A IA não retornou a arte do cartaz.");
-
-      // A Nano Banana já entrega o cartaz completo e diagramado.
-      // Não aplicamos o antigo buildLayout, pois ele cobria a arte com blocos simples.
-      const elements = [
-        { kind: "image" as const, x: 0, y: 0, w: width, h: height, url: imageUrl },
-      ];
-      const project = newProject("cartaz", form.title, { style: form.style, ratio: form.format });
-      project.slides = [{
-        id: crypto.randomUUID(),
-        width,
-        height,
-        canvas: {
-          elements,
-          background: "#05050a",
-          fonts: { display: "Bebas Neue", body: "Inter" },
-        },
-      }];
-      upsertProject(project);
-      toast.success("Cartaz criado. Abrindo o editor...");
-      nav({ to: "/editor/$id", params: { id: project.id } });
-    } catch (error) {
-      toast.error((error as Error).message || "Erro ao gerar o cartaz.");
-    } finally {
-      setBusy(false);
+    const active = getActiveCreationJob("cartaz");
+    if (active) {
+      toast.info("Já existe um cartaz sendo criado. O progresso foi retomado.");
+      void executeCartazJob(active);
+      return;
     }
+
+    void requestNotificationPermission();
+    const persistedPhoto = photo && photo.length <= 2_000_000 ? photo : undefined;
+    const job = createCreationJob("cartaz", { form: { ...form }, photo: persistedPhoto, seed: crypto.randomUUID() });
+    setBusy(true);
+    setProgress(5);
+    await executeCartazJob(job, photo);
   }
 
   return (
@@ -163,6 +265,13 @@ function NovoCartaz() {
               <div className="grid gap-5 md:grid-cols-3"><Field label="Estilo visual"><select value={form.style} onChange={(e) => setForm({ ...form, style: e.target.value })} className="app-input">{STYLE_CARDS.map((style) => <option key={style.id} value={style.id}>{style.title}</option>)}</select></Field><Field label="Paleta de cores"><input value={form.palette} onChange={(e) => setForm({ ...form, palette: e.target.value })} className="app-input" /></Field><Field label="Formato da arte"><select value={form.format} onChange={(e) => setForm({ ...form, format: e.target.value })} className="app-input"><option value="1080x1350">1080 × 1350 — Feed</option><option value="1080x1080">1080 × 1080 — Quadrado</option><option value="1080x1920">1080 × 1920 — Story</option></select></Field></div>
               <Field label="Foto principal — opcional"><label className="flex min-h-28 cursor-pointer items-center gap-4 rounded-xl border border-dashed border-border bg-white/[0.018] p-4 hover:border-primary/50"><div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><Upload className="h-5 w-5" /></div><div className="min-w-0 flex-1"><div className="text-sm font-medium">{photo ? "Imagem carregada" : "Enviar imagem do evento"}</div><div className="mt-1 text-xs text-muted-foreground">PNG ou JPG, máximo de 8 MB.</div></div>{photo && <img src={photo} alt="Prévia" className="h-20 w-20 rounded-xl object-cover" />}<input type="file" accept="image/*" onChange={onFile} className="hidden" /></label></Field>
             </div>
+            {busy && (
+              <div className="mt-6 rounded-xl border border-primary/25 bg-primary/8 p-4">
+                <div className="mb-2 flex items-center justify-between text-xs"><span className="flex items-center gap-2 font-medium"><Loader2 className="h-4 w-4 animate-spin text-primary" /> Criando em segundo plano...</span><span>{progress}%</span></div>
+                <div className="h-2 overflow-hidden rounded-full bg-secondary"><div className="h-full gradient-brand transition-all duration-500" style={{ width: `${progress}%` }} /></div>
+                <p className="mt-2 text-[11px] text-muted-foreground">Você pode sair desta página. O sistema avisará quando terminar.</p>
+              </div>
+            )}
             <div className="mt-6 flex justify-end"><button type="button" disabled={busy} onClick={gerar} className="primary-button min-w-48 disabled:opacity-60">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}{busy ? "Gerando cartaz..." : "Gerar cartaz"}</button></div>
           </section>
 

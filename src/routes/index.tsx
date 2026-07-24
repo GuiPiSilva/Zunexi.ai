@@ -14,7 +14,7 @@ import {
   WandSparkles,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
-import { loadLibrary, loadProjects, type Project } from "@/lib/storage";
+import { loadLibrary, loadProjects, subscribeLibrary, subscribeProjects, type Project } from "@/lib/storage";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -31,8 +31,16 @@ function Dashboard() {
   const [imageCount, setImageCount] = useState(0);
 
   useEffect(() => {
-    setProjects(loadProjects());
-    setImageCount(loadLibrary().length);
+    const refreshProjects = () => setProjects(loadProjects());
+    const refreshLibrary = () => setImageCount(loadLibrary().length);
+    refreshProjects();
+    refreshLibrary();
+    const stopProjects = subscribeProjects(refreshProjects);
+    const stopLibrary = subscribeLibrary(refreshLibrary);
+    return () => {
+      stopProjects();
+      stopLibrary();
+    };
   }, []);
 
   const slides = useMemo(() => projects.reduce((sum, project) => sum + project.slides.length, 0), [projects]);

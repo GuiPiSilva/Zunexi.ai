@@ -26,6 +26,16 @@ import { generateImage, testNanoBananaConnection, uploadReferenceImage } from "@
 import { generateInstagramContent, testGroqConnection, updateSlide, type CarrosselOut } from "@/lib/groq.functions";
 import { getAccessKey } from "@/lib/session";
 import { newProject, upsertProject } from "@/lib/storage";
+import {
+  createCreationJob,
+  getActiveCreationJob,
+  getCreationJob,
+  subscribeCreationJobs,
+  updateCreationJob,
+  withCreationJobLock,
+  type CreationJob,
+} from "@/lib/generation-jobs";
+import { addNotification, requestNotificationPermission } from "@/lib/notifications";
 
 export const Route = createFileRoute("/carrossel")({
   head: () => ({ meta: [{ title: "Criar carrossel — InLabs.Ia Studios" }] }),
@@ -103,6 +113,150 @@ function NovoCarrossel() {
     }
   }, [nav]);
 
+  useEffect(() => {
+    if (!accessKey) return;
+
+    function syncFromJob() {
+      const latest = getActiveCreationJob("carrossel");
+      if (!latest) return;
+      setProgress(latest.progress);
+      setBusy(latest.status === "queued" || latest.status === "running");
+      if (latest.result) setResult(latest.result as CarrosselOut);
+      if (latest.projectId) setSavedProjectId(latest.projectId);
+      const images = Object.fromEntries(Object.entries(latest.assets).map(([number, asset]) => [Number(number), asset.url]));
+      setAutoImages(images);
+      const savedForm = latest.payload.form as typeof form | undefined;
+      if (savedForm) setForm(savedForm);
+    }
+
+    syncFromJob();
+    const unsubscribe = subscribeCreationJobs(syncFromJob);
+    const active = getActiveCreationJob("carrossel");
+    if (active) void executeCarouselJob(active);
+    return unsubscribe;
+    // executeCarouselJob intentionally reads the latest persisted job at every step.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessKey]);
+
+  async function executeCarouselJob(initialJob: CreationJob) {
+    const started = await withCreationJobLock(initialJob.id, async () => {
+      let job = getCreationJob(initialJob.id, initialJob.ownerScope) || initialJob;
+      const payload = job.payload as {
+        form: typeof form;
+        details: string;
+        referenceImageUrl?: string;
+        referenceName?: string;
+      };
+
+      setBusy(true);
+      setProgress(job.progress);
+      updateCreationJob(job.id, { status: "running", error: undefined }, job.ownerScope);
+
+      try {
+        let output = job.result as CarrosselOut | undefined;
+        if (!output) {
+          const generatedOutput = await generate({ data: {
+            jobId: job.id,
+            tema: payload.form.tema,
+            objetivo: payload.form.objetivo,
+            publicoAlvo: payload.form.publicoAlvo,
+            tom: payload.form.tom,
+            quantidadeSlides: payload.form.quantidadeSlides,
+            informacoesAdicionais: payload.details,
+            accessKey,
+          } });
+          output = generatedOutput;
+          job = updateCreationJob(job.id, { result: generatedOutput, progress: 25 }, job.ownerScope) || job;
+          setResult(generatedOutput);
+          setProgress(25);
+          window.dispatchEvent(new CustomEvent("inlabs:credits-changed"));
+          toast.success("Roteiro criado. Gerando imagens em segundo plano...");
+        } else {
+          setResult(output);
+        }
+
+        if (!output) throw new Error("O roteiro não pôde ser recuperado.");
+
+        const persistedAssets = { ...job.assets };
+        const projectAssets: Record<number, { dataUrl?: string; url?: string }> = {};
+        for (const [number, asset] of Object.entries(persistedAssets)) {
+          projectAssets[Number(number)] = { url: asset.url };
+        }
+
+        for (let index = 0; index < output.slides.length; index += 1) {
+          const slide = output.slides[index];
+          const existing = persistedAssets[String(slide.numero)];
+          if (!existing) {
+            try {
+              const image = await generateImageFn({ data: {
+                prompt: slide.promptImagem,
+                seed: `${output.id}-${slide.numero}`,
+                slideTitle: slide.titulo,
+                slideBody: slide.texto,
+                slideIndex: slide.numero,
+                slideTotal: output.slides.length,
+                slideKind: slide.tipo,
+                brand: payload.form.empresa,
+                palette: payload.form.paleta,
+                style: `${payload.form.estilo}; tom ${payload.form.tom}`,
+                referenceImageUrl: payload.referenceImageUrl,
+              } });
+              persistedAssets[String(slide.numero)] = { url: image.url };
+              projectAssets[slide.numero] = { dataUrl: image.dataUrl, url: image.url };
+              setAutoImages((current) => ({ ...current, [slide.numero]: image.dataUrl }));
+            } catch (error) {
+              console.error(`Falha ao gerar imagem do slide ${slide.numero}`, error);
+            }
+          } else {
+            projectAssets[slide.numero] = { url: existing.url };
+          }
+
+          const nextProgress = 25 + Math.round(((index + 1) / output.slides.length) * 70);
+          job = updateCreationJob(job.id, { assets: persistedAssets, progress: nextProgress }, job.ownerScope) || job;
+          setProgress(nextProgress);
+        }
+
+        let projectId = job.projectId;
+        if (!projectId) {
+          projectId = await saveCarouselProject({
+            output,
+            assets: projectAssets,
+            name: output.titulo || payload.form.tema,
+            caption: `${output.legenda}\n\n${output.hashtags.map((tag) => `#${tag}`).join(" ")}`.trim(),
+            style: payload.form.estilo,
+            reference: payload.referenceName,
+            ownerScope: job.ownerScope,
+          });
+        }
+
+        if (!projectId) throw new Error("Não foi possível salvar o projeto.");
+        updateCreationJob(job.id, { status: "completed", progress: 100, projectId, assets: persistedAssets }, job.ownerScope);
+        setSavedProjectId(projectId);
+        setProgress(100);
+        addNotification({
+          title: "Carrossel concluído",
+          message: `“${output.titulo || payload.form.tema}” foi salvo em Meus projetos.`,
+          href: "/projetos",
+          kind: "success",
+        }, job.ownerScope);
+        toast.success("Carrossel completo e salvo em Meus projetos.");
+      } catch (error) {
+        window.dispatchEvent(new CustomEvent("inlabs:credits-changed"));
+        const message = (error as Error).message || "Erro ao gerar o carrossel.";
+        updateCreationJob(job.id, { status: "failed", error: message }, job.ownerScope);
+        addNotification({ title: "Falha na criação", message, href: "/carrossel", kind: "error" }, job.ownerScope);
+        toast.error(message);
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    if (!started) {
+      const active = getCreationJob(initialJob.id, initialJob.ownerScope);
+      setBusy(active?.status === "queued" || active?.status === "running");
+    }
+  }
+
   function handleReferenceImage(file?: File) {
     if (!file) return;
     if (!file.type.match(/^image\/(png|jpeg|webp)$/)) {
@@ -128,6 +282,14 @@ function NovoCarrossel() {
       return;
     }
 
+    const active = getActiveCreationJob("carrossel");
+    if (active) {
+      toast.info("Já existe um carrossel sendo criado. O progresso foi retomado.");
+      void executeCarouselJob(active);
+      return;
+    }
+
+    void requestNotificationPermission();
     setBusy(true);
     setResult(null);
     setAutoImages({});
@@ -151,64 +313,17 @@ function NovoCarrossel() {
         referenceImageUrl = uploaded.url;
       }
 
-      const output = await generate({ data: {
-        tema: form.tema,
-        objetivo: form.objetivo,
-        publicoAlvo: form.publicoAlvo,
-        tom: form.tom,
-        quantidadeSlides: form.quantidadeSlides,
-        informacoesAdicionais: details,
-        accessKey,
-      } });
-      setResult(output);
-      setProgress(25);
-      toast.success("Roteiro criado. Gerando imagens...");
-
-      const generatedAssets: Record<number, { dataUrl: string; url?: string }> = {};
-      for (let index = 0; index < output.slides.length; index += 1) {
-        const slide = output.slides[index];
-        try {
-          const image = await generateImageFn({ data: {
-            prompt: slide.promptImagem,
-            seed: `${output.id}-${slide.numero}`,
-            slideTitle: slide.titulo,
-            slideBody: slide.texto,
-            slideIndex: slide.numero,
-            slideTotal: output.slides.length,
-            slideKind: slide.tipo,
-            brand: form.empresa,
-            palette: form.paleta,
-            style: `${form.estilo}; tom ${form.tom}`,
-            referenceImageUrl,
-          } });
-          generatedAssets[slide.numero] = { dataUrl: image.dataUrl, url: image.url };
-          setAutoImages((current) => ({ ...current, [slide.numero]: image.dataUrl }));
-        } catch (error) {
-          console.error(`Falha ao gerar imagem do slide ${slide.numero}`, error);
-          toast.error(`Não foi possível gerar a imagem do slide ${slide.numero}.`);
-        }
-        setProgress(25 + Math.round(((index + 1) / output.slides.length) * 75));
-      }
-
-      try {
-        const projectId = await saveCarouselProject({
-          output,
-          assets: generatedAssets,
-          name: output.titulo || form.tema,
-          caption: `${output.legenda}\n\n${output.hashtags.map((tag) => `#${tag}`).join(" ")}`.trim(),
-          style: form.estilo,
-          reference: referenceImage?.name,
-        });
-        setSavedProjectId(projectId);
-        toast.success("Carrossel completo e salvo automaticamente em Meus projetos.");
-      } catch (saveError) {
-        console.error("Falha ao salvar o carrossel em Meus projetos", saveError);
-        toast.error("O carrossel foi criado, mas não foi possível salvá-lo em Meus projetos.");
-      }
+      const job = createCreationJob("carrossel", {
+        form: { ...form },
+        details,
+        referenceImageUrl,
+        referenceName: referenceImage?.name,
+      });
+      await executeCarouselJob(job);
     } catch (error) {
-      toast.error((error as Error).message || "Erro ao gerar o carrossel.");
-    } finally {
+      const message = (error as Error).message || "Erro ao preparar o carrossel.";
       setBusy(false);
+      toast.error(message);
     }
   }
 
@@ -355,13 +470,15 @@ async function saveCarouselProject({
   caption,
   style,
   reference,
+  ownerScope,
 }: {
   output: CarrosselOut;
-  assets: Record<number, { dataUrl: string; url?: string }>;
+  assets: Record<number, { dataUrl?: string; url?: string }>;
   name: string;
   caption: string;
   style: string;
   reference?: string;
+  ownerScope?: string;
 }): Promise<string> {
   const project = newProject("carrossel", name.trim() || "Novo carrossel", {
     theme: caption,
@@ -396,7 +513,7 @@ async function saveCarouselProject({
     };
   }));
 
-  upsertProject(project);
+  upsertProject(project, ownerScope);
   return project.id;
 }
 

@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
-import { deleteProject, duplicateProject, loadProjects, type Project } from "@/lib/storage";
+import { deleteProject, duplicateProject, loadProjects, subscribeProjects, type Project } from "@/lib/storage";
 
 export const Route = createFileRoute("/projetos")({
   head: () => ({ meta: [{ title: "Meus projetos — InLabs.Ia Studios" }] }),
@@ -31,7 +31,10 @@ function MeusProjetos() {
   const nav = useNavigate();
 
   const refresh = () => setItems(loadProjects());
-  useEffect(refresh, []);
+  useEffect(() => {
+    refresh();
+    return subscribeProjects(refresh);
+  }, []);
 
   const visible = useMemo(() => {
     const value = query.trim().toLowerCase();
