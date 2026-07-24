@@ -1,3 +1,4 @@
+[README.md](https://github.com/user-attachments/files/30344003/README.md)
 # Welcome to your Lovable project
 
 This project was built with [Lovable](https://lovable.dev).
@@ -27,3 +28,16 @@ npm run dev
 - TypeScript
 - React
 - Tailwind CSS
+
+
+## Configuração da Kie.ai (imagens)
+
+Adicione estas variáveis no ambiente do servidor/deploy:
+
+```env
+KIE_API_KEY="sua-chave-da-kie"
+KIE_IMAGE_MODEL="google/nano-banana"
+KIE_IMAGE_TIMEOUT_MS="180000"
+```
+
+A chave nunca deve usar o prefixo `VITE_`, porque isso a exporia no navegador. O backend cria uma tarefa na Kie.ai, consulta o resultado e devolve a imagem ao editor do sistema.
