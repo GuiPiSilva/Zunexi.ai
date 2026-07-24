@@ -1,8 +1,13 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useCallback } from "react";
 import * as fabric from "fabric";
 import type { ElementDesc } from "@/lib/layouts";
 import { Type, Image as ImageIcon, Square, Circle as CircleIcon, Trash2, Copy, Undo2, Redo2, Download, Upload, Bold, Italic, AlignLeft, AlignCenter, AlignRight } from "lucide-react";
 import { loadLibrary } from "@/lib/storage";
+
+export interface EditorHandle {
+  exportPng: (filename?: string, multiplier?: number) => string | null;
+  getDataUrl: (multiplier?: number) => string | null;
+}
 
 interface EditorProps {
   width: number;
@@ -11,7 +16,7 @@ interface EditorProps {
   onChange?: (json: unknown, thumb: string) => void;
 }
 
-export function Editor({ width, height, initial, onChange }: EditorProps) {
+export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ width, height, initial, onChange }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fcRef = useRef<fabric.Canvas | null>(null);
   const [sel, setSel] = useState<fabric.FabricObject | null>(null);
@@ -19,6 +24,24 @@ export function Editor({ width, height, initial, onChange }: EditorProps) {
   const history = useRef<string[]>([]);
   const historyIdx = useRef(-1);
   const skipHistory = useRef(false);
+
+  useImperativeHandle(ref, () => ({
+    getDataUrl(multiplier = 1) {
+      const canvas = fcRef.current;
+      if (!canvas) return null;
+      return canvas.toDataURL({ format: "png", multiplier });
+    },
+    exportPng(filename = "post.png", multiplier = 1) {
+      const canvas = fcRef.current;
+      if (!canvas) return null;
+      const dataUrl = canvas.toDataURL({ format: "png", multiplier });
+      const anchor = document.createElement("a");
+      anchor.href = dataUrl;
+      anchor.download = filename;
+      anchor.click();
+      return dataUrl;
+    },
+  }), []);
 
   const emit = useCallback(() => {
     const c = fcRef.current; if (!c) return;
@@ -202,7 +225,7 @@ export function Editor({ width, height, initial, onChange }: EditorProps) {
       </div>
     </div>
   );
-}
+});
 
 function ToolBtn({ icon: Icon, label, onClick, disabled }: { icon: React.ComponentType<{className?:string}>; label: string; onClick: () => void; disabled?: boolean }) {
   return (
