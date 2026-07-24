@@ -43,8 +43,8 @@ function Dashboard() {
       <div className="page-wrap space-y-8">
         <section className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <div className="eyebrow mb-2 flex items-center gap-2"><Sparkles className="h-3.5 w-3.5 text-primary" /> Estúdio criativo com IA</div>
-            <h1 className="section-title text-3xl sm:text-4xl">Bem-vindo(a) de volta 👋</h1>
+           
+            <h1 className="section-title text-3xl sm:text-4xl">Bem-vindo(a) de volta </h1>
             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
               Crie carrosséis, cartazes e artes profissionais para Instagram em poucos minutos.
             </p>
