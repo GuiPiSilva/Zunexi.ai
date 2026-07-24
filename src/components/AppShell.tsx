@@ -15,6 +15,8 @@ import {
   X,
 } from "lucide-react";
 import { clearAccessKey, getAccessKey } from "@/lib/session";
+import logoFull from "@/assets/logo-full.png";
+import logoIcon from "@/assets/logo-icon.png";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -73,16 +75,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         }`}
       >
-        <div className="flex h-[88px] items-center border-b border-sidebar-border px-5">
-          <Link to="/" aria-label="Ir para o Dashboard" className="flex min-w-0 items-center gap-3">
-            <div className="relative grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/25 via-card to-cyan-400/15 shadow-[0_0_28px_rgba(168,85,247,0.22)]">
-              <span className="bg-gradient-to-br from-fuchsia-400 via-violet-400 to-cyan-300 bg-clip-text text-xl font-black tracking-[-0.12em] text-transparent">in</span>
-            </div>
-            <div className="min-w-0 leading-none">
-              <div className="truncate text-[17px] font-extrabold tracking-[-0.03em] text-white">InLabs<span className="text-primary">.IA</span></div>
-              <div className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">Studios</div>
-            </div>
-          </Link>
+        <div className="flex h-[76px] items-center border-b border-sidebar-border px-5">
+          <img src={logoFull} alt="InLabs.Ia Studios" className="h-10 w-auto max-w-[185px] object-contain" />
         </div>
 
         <div className="px-4 pt-5">
@@ -106,7 +100,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <div className="mt-auto p-4">
           <div className="flex items-center gap-3 rounded-xl border border-sidebar-border bg-white/[0.025] p-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full gradient-brand text-sm font-bold text-white">IN</div>
+            <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-primary/25 bg-[#0d1020] p-1.5 shadow-[0_0_20px_rgba(139,92,246,0.16)]">
+              <img src={logoIcon} alt="InLabs" className="h-full w-full object-contain" />
+            </div>
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold">Usuário InLabs</div>
               <div className="truncate text-[11px] text-muted-foreground">Acesso autorizado</div>
@@ -139,7 +135,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-primary" />
           </button>
           <button className="hidden items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 sm:flex">
-            <div className="grid h-8 w-8 place-items-center rounded-full gradient-brand text-xs font-bold text-white">IN</div>
+            <div className="grid h-8 w-8 place-items-center overflow-hidden rounded-lg border border-primary/25 bg-[#0d1020] p-1">
+              <img src={logoIcon} alt="InLabs" className="h-full w-full object-contain" />
+            </div>
             <div className="text-left">
               <div className="text-xs font-semibold">Usuário InLabs</div>
               <div className="text-[10px] text-muted-foreground">Conta autorizada</div>
