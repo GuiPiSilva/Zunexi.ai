@@ -67,81 +67,88 @@ export const generateInstagramContent = createServerFn({ method: "POST" })
       throw new Error(`Limite diário atingido (${MAX_PER_DAY} gerações) para esta chave.`);
     }
 
-    const TEXT_FORMATS = [
-      "palavra-bomba: 1 a 3 palavras GIGANTES dominando o slide, complemento curto",
-      "pergunta/quiz: provoca o leitor com uma pergunta direta ou de múltipla escolha",
-      "checklist numerada: 3 a 5 itens curtíssimos com marcador",
-      "afirmação de contraste: duas ideias opostas lado a lado (ex: 'X sai caro, Y sai grátis')",
-      "estatística/dado: um número grande como protagonista da frase",
-      "citação/mantra: frase curta e definitiva, tom de manifesto",
-      "antes/depois: contraste direto entre dois estados",
-      "mito vs verdade: desmonta uma crença comum em uma frase",
-    ];
+    const brandMatch = data.informacoesAdicionais.match(/Marca:\s*(.+)/i);
+    const productMatch = data.informacoesAdicionais.match(/Produto ou serviço:\s*(.+)/i);
+    const styleMatch = data.informacoesAdicionais.match(/Estilo visual:\s*(.+)/i);
+    const paletteMatch = data.informacoesAdicionais.match(/Paleta:\s*(.+)/i);
+    const ctaMatch = data.informacoesAdicionais.match(/CTA:\s*(.+)/i);
 
-    const VISUAL_METAPHORS = [
-      "a classical marble statue but its head is replaced by a glowing lightbulb, floating fragments, surreal studio lighting",
-      "a giant human hand made of liquid chrome reaching out of a tiny smartphone screen, impossible scale, dramatic shadows",
-      "a chessboard floating in a void, one piece dissolving into golden dust mid-air, dreamlike gravity-defying composition",
-      "a human silhouette made entirely of static TV noise / glitch particles, standing in an empty vast space",
-      "a birdcage made of light rays, wide open, a swarm of glowing particles escaping upward, dark surreal background",
-      "an astronaut helmet reflecting a tiny office desk inside the visor, floating in a starless void",
-      "a megaphone made of cracked stone, sound waves visualized as shattering glass shards frozen in air",
-      "a person's head opening like a drawer, gears and light spilling out, surreal double-exposure style",
-      "a giant magnifying glass hovering over a miniature city made of paper, dramatic top-down lighting",
-      "a staircase that folds into an impossible Escher-like loop, one figure walking upward into the sky",
-      "a hand made of tangled roots/vines holding a single glowing seed, hyper-detailed, dark moody background",
-      "an hourglass where the falling sand turns into a flock of birds mid-fall, cinematic dramatic light",
-      "a mirror reflecting a completely different scene than what's in front of it, surreal juxtaposition",
-      "a business suit made of storm clouds and lightning, faceless figure, dramatic low-angle shot",
-      "a single red thread connecting a tiny human figure to a massive floating brain, minimalist dark void",
-      "a door standing alone in an open field, opening into a galaxy instead of a room, surreal contrast",
-    ];
+    const brand = brandMatch?.[1]?.trim() || "marca do cliente";
+    const product = productMatch?.[1]?.trim() || data.tema;
+    const visualStyle = styleMatch?.[1]?.trim() || "publicidade premium, composição editorial forte";
+    const palette = paletteMatch?.[1]?.trim() || "paleta coerente com a marca, alto contraste";
+    const requestedCta = ctaMatch?.[1]?.trim() || "";
 
-    function shuffle<T>(arr: T[]): T[] {
-      const a = [...arr];
-      for (let i = a.length - 1; i > 0; i -= 1) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [a[i], a[j]] = [a[j], a[i]];
+    const slideRoles = Array.from({ length: data.quantidadeSlides }, (_, index) => {
+      if (index == 0) return `Slide 1: CAPA — interromper o scroll, apresentar a promessa principal e estabelecer a identidade visual.`;
+      if (index == data.quantidadeSlides - 1) return `Slide ${index + 1}: CTA — concluir a narrativa, reforçar a oferta e indicar uma ação clara.`;
+      if (data.objetivo.toLowerCase().includes("vender")) {
+        return `Slide ${index + 1}: VENDA — apresentar benefício, produto, prova, oferta, diferencial, preço ou condição de compra sem repetir o slide anterior.`;
       }
-      return a;
-    }
+      return `Slide ${index + 1}: CONTEÚDO — desenvolver uma ideia específica, útil e visualmente distinta, mantendo continuidade de campanha.`;
+    }).join("\n");
 
-    const shuffledFormats = shuffle(TEXT_FORMATS);
-    const shuffledMetaphors = shuffle(VISUAL_METAPHORS);
-    const slideBriefs = Array.from({ length: data.quantidadeSlides }, (_, i) =>
-      `Slide ${i + 1}: formato de texto = "${shuffledFormats[i % shuffledFormats.length]}" | direção visual obrigatória do promptImagem = "${shuffledMetaphors[i % shuffledMetaphors.length]}"`,
-    ).join("\n");
+    const systemPrompt = `Você é diretor de criação, designer de campanhas para Instagram e copywriter de resposta direta. Sua tarefa não é criar apenas um roteiro: você deve planejar um CARROSSEL VISUALMENTE PRONTO, com qualidade de agência, consistência de marca e composição semelhante a anúncios profissionais de alimentação, varejo, tecnologia e serviços.
 
-    const systemPrompt = `Você é um diretor de arte e redator publicitário especializado em conteúdo SURREAL e chamativo para Instagram — no estilo de campanhas premiadas que usam colagem digital, escala impossível, dupla exposição e metáforas visuais oníricas (não apenas fotografia bonita: algo estranho, inesperado, que trava o dedo do usuário no scroll). NUNCA gere fotos genéricas de "pessoa sorrindo no notebook", "equipe reunida numa mesa" ou still-life comum de escritório — isso é estritamente proibido.
 Retorne SEMPRE JSON válido, sem markdown, no formato EXATO:
 {
   "titulo": "Título principal do carrossel",
   "legenda": "Legenda completa para Instagram, com quebras de linha e CTA no final",
   "hashtags": ["hashtag1", "hashtag2"],
   "slides": [
-    { "numero": 1, "titulo": "Título do slide", "texto": "Texto do slide", "promptImagem": "Descrição detalhada da imagem em inglês", "tipo": "capa" }
+    {
+      "numero": 1,
+      "titulo": "Texto principal que aparecerá no layout",
+      "texto": "Texto secundário curto que aparecerá no layout",
+      "promptImagem": "Direção de arte completa em inglês para gerar o post final já diagramado",
+      "tipo": "capa"
+    }
   ]
 }
 
-Você DEVE seguir exatamente esta escalação, um formato de texto e uma direção visual diferentes e já definidos para cada slide (não invente outro formato nem outra direção visual, apenas adapte o conteúdo do tema abaixo para caber na combinação indicada):
-${slideBriefs}
+PLANEJAMENTO OBRIGATÓRIO:
+${slideRoles}
 
-Regras adicionais:
-- O primeiro slide tem tipo "capa", os intermediários "conteudo", o último "cta".
-- Títulos curtos e impactantes (máx 8 palavras), adaptados ao formato de texto indicado para aquele slide.
-- Textos com 1-3 linhas cada.
-- promptImagem sempre em inglês: pegue a direção visual obrigatória indicada para o slide e escreva-a como um still cinematográfico completo (iluminação, composição, cores), incorporando o tema/produto do usuário como elemento central da cena — sem perder o caráter surreal da direção indicada.
-- IMPORTANTE: o formato de texto indicado é uma sugestão de ESTRUTURA, não uma camisa de força — adapte-o ao tema de forma que a frase final faça sentido gramatical e semântico em português. Nunca produza frases quebradas ou sem nexo só para caber no formato (ex.: nunca escreva algo como "uma é cara, a outra é [nome da marca]" — isso não é um contraste real). Se o formato sugerido não couber bem no tema, ajuste o texto livremente mas mantenha a ideia central do formato (ex.: pergunta continua sendo uma pergunta, checklist continua sendo lista).
-- Hashtags relevantes ao nicho, entre 8 e 15.
-- Idioma dos textos: português brasileiro.`;
+PADRÃO DE QUALIDADE VISUAL:
+- Cada slide deve parecer uma peça publicitária finalizada, não uma foto solta com texto simples por cima.
+- Planeje hierarquia tipográfica forte, grid, margens, blocos, selos, linhas, ícones, chamadas, etiquetas, preços e elementos de apoio quando fizerem sentido.
+- Use fotografia de produto extremamente apetitosa ou premium quando o tema envolver alimentos/produtos; use mockups, interfaces, objetos e cenas coerentes quando for serviço ou tecnologia.
+- Preserve uma identidade visual única em todos os slides: mesma paleta, textura, linguagem tipográfica, tratamento fotográfico e assinatura da marca.
+- Varie a composição entre slides: capa hero, produto + benefício, comparação, lista, cardápio, oferta, prova e CTA. Não repita o mesmo enquadramento.
+- Não use metáforas surreais aleatórias quando elas não combinarem com o negócio. A direção visual deve nascer do produto, do nicho e do objetivo.
+- Não invente telefone, preço, endereço, desconto, data ou condição comercial. Use somente dados fornecidos; quando não houver, não inclua.
 
-    const userPrompt = `Tema: ${data.tema}
+REGRAS DE COPY:
+- Português brasileiro correto, natural e persuasivo.
+- Título entre 2 e 8 palavras, legível e forte.
+- Texto secundário curto: no máximo 22 palavras, salvo cardápios/listas solicitados pelo usuário.
+- O primeiro slide é "capa", os intermediários são "conteudo" e o último é "cta".
+- Hashtags entre 8 e 15, sem # dentro do JSON.
+
+REGRAS DO promptImagem:
+- Escreva em inglês, mas declare EXATAMENTE quais textos em português devem aparecer na arte.
+- Descreva o POST FINAL COMPLETO em formato quadrado 1:1: layout, posição dos textos, produto, fundo, iluminação, fontes, contraste, textura e elementos gráficos.
+- Inclua literalmente: Main headline text: "..." e Supporting text: "..." usando o título e texto do slide.
+- Quando a marca for conhecida, inclua Brand name: "..." em posição discreta e consistente.
+- Exija spelling perfeito em português e proíba qualquer texto extra inventado.
+- Priorize legibilidade em tela de celular e acabamento editorial premium.
+- O prompt não deve pedir fotografia sem texto; ele deve pedir a peça diagramada pronta para Instagram.`;
+
+    const userPrompt = `Crie o carrossel completo com estes dados:
+Tema: ${data.tema}
+Marca: ${brand}
+Produto ou serviço: ${product}
 Objetivo: ${data.objetivo || "engajamento"}
 Público-alvo: ${data.publicoAlvo || "geral"}
 Tom de comunicação: ${data.tom}
 Quantidade de slides: ${data.quantidadeSlides}
-Informações adicionais: ${data.informacoesAdicionais || "nenhuma"}
-Semente de variação (use para garantir que esta geração seja diferente de qualquer geração anterior do mesmo tema): ${Math.random().toString(36).slice(2)}-${Date.now()}`;
+Estilo visual: ${visualStyle}
+Paleta: ${palette}
+CTA fornecido: ${requestedCta || "nenhum CTA específico"}
+Informações adicionais completas: ${data.informacoesAdicionais || "nenhuma"}
+
+Faça os slides funcionarem como uma campanha contínua. O promptImagem de cada slide deve gerar a arte final diagramada, com textos visíveis, identidade da marca e qualidade comercial alta. Não invente dados ausentes.
+Semente de variação: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), TIMEOUT_MS);

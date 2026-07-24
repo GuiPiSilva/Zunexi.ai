@@ -198,7 +198,7 @@ async function createKieImageTask(apiKey: string, prompt: string, signal: AbortS
       input: {
         prompt,
         output_format: "png",
-        aspect_ratio: "4:5",
+        aspect_ratio: "1:1",
       },
     }),
   });
@@ -280,16 +280,32 @@ export const generateImage = createServerFn({ method: "POST" })
     const apiKey = process.env.KIE_API_KEY?.trim();
     if (!apiKey) throw new Error("KIE_API_KEY não configurada no servidor.");
 
-    const fullPrompt = `${data.prompt}.
-Professional advertising / editorial photograph, full-bleed, edge to edge, shot for a real campaign, high production value.
-Visual style: ${data.style || "cinematic, rich contrast, realistic textures"}.
-Color palette mood: ${data.palette || "cohesive and high-contrast"}.
-Aspect ratio: portrait, 4:5.
+    const title = data.slideTitle.trim();
+    const body = data.slideBody.trim();
+    const brand = data.brand.trim();
 
-STRICT RULES:
-- Pure photography/illustration only. Absolutely NO text, letters, words, numbers, logos or watermarks anywhere in the image.
-- NO card, frame, border, slide badge, pagination indicator, UI element, or mockup of any kind.
-- The image must fill the entire frame edge to edge.
+    const fullPrompt = `${data.prompt}
+
+CREATE THE FINAL, FULLY DESIGNED INSTAGRAM CAROUSEL SLIDE — not a background photo and not a blank template.
+Canvas: square 1:1, 1080x1080 composition, full bleed, premium advertising finish.
+Slide role: ${data.slideKind || "content"}. Slide ${data.slideIndex || 1} of ${data.slideTotal || 1}.
+Brand: ${brand || "use only the brand information explicitly present in the art direction"}.
+Visual style: ${data.style || "premium commercial art direction, bold editorial hierarchy"}.
+Color palette: ${data.palette || "cohesive, branded and high contrast"}.
+
+MANDATORY TEXT TO RENDER EXACTLY IN PORTUGUESE:
+Main headline: "${title}"
+Supporting text: "${body}"
+
+DESIGN REQUIREMENTS:
+- Render the exact supplied Portuguese text with correct spelling, accents and punctuation.
+- Strong professional typography hierarchy, intentional grid, safe margins and excellent mobile readability.
+- Build a complete campaign layout with product photography/illustration, graphic shapes, lines, badges, icons, dividers or labels only when relevant.
+- Make the product or core subject the visual hero. Use realistic textures, premium lighting and commercial retouching.
+- Keep the slide visually consistent with a real Instagram advertising campaign, not a generic AI image.
+- Do not add any invented words, prices, phone numbers, dates, handles, logos or claims.
+- Do not add slide counters, watermarks, mockup frames, UI chrome or meaningless decorative text.
+- Every element must look intentionally designed and production-ready.
 
 Unique variation seed: ${data.seed}.`;
 
@@ -306,6 +322,43 @@ Unique variation seed: ${data.seed}.`;
       if (err.name === "AbortError") throw new Error("Tempo esgotado ao gerar imagem na Kie.ai.");
       if (err.message?.includes("Kie.ai") || err.message?.includes("imagem")) throw err;
       throw new Error(`Falha ao gerar imagem pela Kie.ai: ${err.message}`);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+
+export const testNanoBananaConnection = createServerFn({ method: "POST" })
+  .handler(async (): Promise<{ ok: boolean; message: string; model: string; dataUrl?: string }> => {
+    const apiKey = process.env.KIE_API_KEY?.trim();
+    if (!apiKey) {
+      return {
+        ok: false,
+        model: KIE_IMAGE_MODEL,
+        message: "KIE_API_KEY não configurada no servidor.",
+      };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), KIE_IMAGE_TIMEOUT_MS);
+    const testPrompt = `Create a polished square Instagram advertising test card, 1:1, dark premium background with subtle orange and gold lighting, one realistic gourmet burger as the hero product, professional editorial composition, clean safe margins. Render exactly this short Portuguese text: "NANO BANANA OK". Do not add any other words, prices, logos, watermarks or contact details.`;
+
+    try {
+      const taskId = await createKieImageTask(apiKey, testPrompt, controller.signal);
+      const imageUrl = await waitForKieImage(apiKey, taskId, controller.signal);
+      const dataUrl = await imageUrlToDataUrl(imageUrl, controller.signal);
+      return {
+        ok: true,
+        model: KIE_IMAGE_MODEL,
+        message: `Nano Banana conectado e gerando imagens corretamente pelo modelo ${KIE_IMAGE_MODEL}.`,
+        dataUrl,
+      };
+    } catch (error) {
+      const err = error as Error;
+      const message = err.name === "AbortError"
+        ? "O teste excedeu o tempo limite da Kie.ai."
+        : err.message || "Falha desconhecida ao testar o Nano Banana.";
+      return { ok: false, model: KIE_IMAGE_MODEL, message };
     } finally {
       clearTimeout(timeout);
     }
