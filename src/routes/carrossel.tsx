@@ -219,7 +219,6 @@ function NovoCarrossel() {
             )}
 
             <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-muted-foreground">Textos gerados com Groq · imagens geradas com Cloudflare Workers AI.</p>
               <button disabled={busy} className="primary-button min-w-44 disabled:cursor-not-allowed disabled:opacity-60">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}{busy ? "Gerando..." : "Gerar roteiro"}</button>
             </div>
           </form>
