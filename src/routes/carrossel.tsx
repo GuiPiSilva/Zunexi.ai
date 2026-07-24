@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
-import { generateImage, testNanoBananaConnection } from "@/lib/ai.functions";
+import { generateImage, testNanoBananaConnection, uploadReferenceImage } from "@/lib/ai.functions";
 import { generateInstagramContent, testGroqConnection, updateSlide, type CarrosselOut } from "@/lib/groq.functions";
 import { getAccessKey } from "@/lib/session";
 
@@ -37,6 +37,7 @@ function NovoCarrossel() {
   const save = useServerFn(updateSlide);
   const test = useServerFn(testGroqConnection);
   const generateImageFn = useServerFn(generateImage);
+  const uploadReferenceImageFn = useServerFn(uploadReferenceImage);
   const testNanoBanana = useServerFn(testNanoBananaConnection);
 
   const [accessKey, setAccessKey] = useState<string | null>(null);
@@ -48,6 +49,7 @@ function NovoCarrossel() {
   const [result, setResult] = useState<CarrosselOut | null>(null);
   const [autoImages, setAutoImages] = useState<Record<number, string>>({});
   const [progress, setProgress] = useState(0);
+  const [referenceImage, setReferenceImage] = useState<{ dataUrl: string; name: string } | null>(null);
 
   const [form, setForm] = useState({
     tema: "",
@@ -71,13 +73,50 @@ function NovoCarrossel() {
     }
     setAccessKey(key);
 
-    const transferredPrompt = sessionStorage.getItem("inlabs_carousel_prompt");
-    if (transferredPrompt) {
-      setForm((current) => ({ ...current, tema: transferredPrompt }));
+    const transferredData = sessionStorage.getItem("inlabs_carousel_prompt_data");
+    const legacyPrompt = sessionStorage.getItem("inlabs_carousel_prompt");
+    if (transferredData || legacyPrompt) {
+      try {
+        const data = (transferredData ? JSON.parse(transferredData) : { tema: legacyPrompt || "" }) as Partial<typeof form> & { prompt?: string };
+        setForm((current) => ({
+          ...current,
+          tema: data.prompt || data.tema || current.tema,
+          empresa: data.empresa || current.empresa,
+          produto: data.produto || current.produto,
+          objetivo: data.objetivo || current.objetivo,
+          publicoAlvo: data.publicoAlvo || current.publicoAlvo,
+          tom: data.tom || current.tom,
+          quantidadeSlides: Number(data.quantidadeSlides) || current.quantidadeSlides,
+          estilo: data.estilo || current.estilo,
+          paleta: data.paleta || current.paleta,
+          cta: data.cta || current.cta,
+          informacoesAdicionais: data.informacoesAdicionais || current.informacoesAdicionais,
+        }));
+        toast.success("Prompt e campos enviados para o criador de carrossel.");
+      } catch {
+        setForm((current) => ({ ...current, tema: legacyPrompt || "" }));
+      }
+      sessionStorage.removeItem("inlabs_carousel_prompt_data");
       sessionStorage.removeItem("inlabs_carousel_prompt");
-      toast.success("Prompt enviado para o criador de carrossel.");
     }
   }, [nav]);
+
+  function handleReferenceImage(file?: File) {
+    if (!file) return;
+    if (!file.type.match(/^image\/(png|jpeg|webp)$/)) {
+      toast.error("Envie uma imagem PNG, JPG ou WebP.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("A imagem deve ter no máximo 10 MB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => setReferenceImage({ dataUrl: String(reader.result), name: file.name });
+    reader.onerror = () => toast.error("Não foi possível ler a imagem.");
+    reader.readAsDataURL(file);
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -102,6 +141,13 @@ function NovoCarrossel() {
     ].filter(Boolean).join("\n");
 
     try {
+      let referenceImageUrl: string | undefined;
+      if (referenceImage) {
+        setProgress(10);
+        const uploaded = await uploadReferenceImageFn({ data: { dataUrl: referenceImage.dataUrl, fileName: referenceImage.name } });
+        referenceImageUrl = uploaded.url;
+      }
+
       const output = await generate({ data: {
         tema: form.tema,
         objetivo: form.objetivo,
@@ -129,6 +175,7 @@ function NovoCarrossel() {
             brand: form.empresa,
             palette: form.paleta,
             style: `${form.estilo}; tom ${form.tom}`,
+            referenceImageUrl,
           } });
           setAutoImages((current) => ({ ...current, [slide.numero]: image.dataUrl }));
         } catch (error) {
@@ -215,7 +262,28 @@ function NovoCarrossel() {
               </div>
 
               <Field label="CTA — chamada para ação"><input value={form.cta} onChange={(e) => setForm({ ...form, cta: e.target.value })} placeholder="Ex.: Experimente grátis a InLabs.Ia Studios" className="app-input" /></Field>
-              <Field label="Informações adicionais"><textarea value={form.informacoesAdicionais} onChange={(e) => setForm({ ...form, informacoesAdicionais: e.target.value })} rows={4} maxLength={1000} placeholder="Inclua restrições, diferenciais e informações que não podem faltar." className="app-input resize-y" /></Field>
+              <Field label="Informações adicionais"><textarea value={form.informacoesAdicionais} onChange={(e) => setForm({ ...form, informacoesAdicionais: e.target.value })} rows={4} maxLength={3000} placeholder="Inclua restrições, diferenciais e informações que não podem faltar." className="app-input resize-y" /></Field>
+
+              <Field label="Imagem de referência">
+                <div className="rounded-xl border border-dashed border-border bg-white/[0.02] p-4">
+                  {referenceImage ? (
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                      <img src={referenceImage.dataUrl} alt="Imagem de referência" className="h-28 w-28 rounded-xl border border-border object-cover" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">{referenceImage.name}</div>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">A IA usará esta imagem como referência visual nos slides do carrossel.</p>
+                        <button type="button" onClick={() => setReferenceImage(null)} className="secondary-button mt-3"><X className="h-4 w-4" /> Remover imagem</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="flex cursor-pointer flex-col items-center justify-center gap-3 py-5 text-center">
+                      <div className="grid h-12 w-12 place-items-center rounded-xl bg-primary/12 text-primary"><Upload className="h-5 w-5" /></div>
+                      <div><div className="text-sm font-medium">Enviar imagem da marca ou produto</div><div className="mt-1 text-xs text-muted-foreground">PNG, JPG ou WebP, até 10 MB</div></div>
+                      <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => { handleReferenceImage(e.target.files?.[0]); e.currentTarget.value = ""; }} />
+                    </label>
+                  )}
+                </div>
+              </Field>
             </div>
 
             {busy && (
@@ -289,6 +357,7 @@ function ResultView({ data, save, accessKey, autoImages }: { data: CarrosselOut;
 
 function SlideCard({ generationId, slide, save, accessKey, autoImage }: { generationId: string; slide: CarrosselOut["slides"][number]; save: ReturnType<typeof useServerFn<typeof updateSlide>>; accessKey: string; autoImage?: string }) {
   const generateImageFn = useServerFn(generateImage);
+  const uploadReferenceImageFn = useServerFn(uploadReferenceImage);
   const [title, setTitle] = useState(slide.titulo);
   const [body, setBody] = useState(slide.texto);
   const [saving, setSaving] = useState(false);

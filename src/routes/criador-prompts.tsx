@@ -4,7 +4,7 @@ import { ArrowRight, Copy, Loader2, MessageSquareText, Sparkles, Wand2 } from "l
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
-import { generateCarouselPrompt } from "@/lib/groq.functions";
+import { generateCarouselPrompt, type CarouselPromptData } from "@/lib/groq.functions";
 import { getAccessKey } from "@/lib/session";
 
 export const Route = createFileRoute("/criador-prompts")({
@@ -18,6 +18,7 @@ function PromptCreatorPage() {
   const [accessKey, setAccessKey] = useState("");
   const [pedido, setPedido] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [generatedData, setGeneratedData] = useState<CarouselPromptData | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -41,6 +42,7 @@ function PromptCreatorPage() {
     try {
       const result = await generate({ data: { accessKey, pedido } });
       setPrompt(result.prompt);
+      setGeneratedData(result);
       toast.success("Prompt criado com sucesso.");
     } catch (error) {
       toast.error((error as Error).message || "Não foi possível criar o prompt.");
@@ -60,7 +62,8 @@ function PromptCreatorPage() {
       toast.error("Crie um prompt primeiro.");
       return;
     }
-    sessionStorage.setItem("inlabs_carousel_prompt", prompt);
+    const payload = generatedData ? { ...generatedData, prompt } : { prompt, tema: prompt };
+    sessionStorage.setItem("inlabs_carousel_prompt_data", JSON.stringify(payload));
     navigate({ to: "/carrossel" });
   }
 
@@ -69,7 +72,7 @@ function PromptCreatorPage() {
       <div className="page-wrap">
         <section className="mx-auto max-w-5xl">
           <div className="mb-7 text-center">
-            <div className="eyebrow mb-3">Assistente com de Criação de prompt</div>
+            <div className="eyebrow mb-3">Assistente com Groq</div>
             <h1 className="section-title text-3xl sm:text-4xl">Crie seu prompt em segundos</h1>
             <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
               Explique de forma simples o que deseja. A IA transforma sua ideia em um prompt completo para o criador de carrosséis.
@@ -85,11 +88,11 @@ function PromptCreatorPage() {
                 value={pedido}
                 onChange={(event) => setPedido(event.target.value)}
                 rows={6}
-                maxLength={1500}
+                maxLength={500}
                 placeholder="Ex.: Quero um carrossel de 5 imagens para uma loja de carros, com estilo premium, cores preto e laranja, mostrando ofertas e um CTA para o WhatsApp."
                 className="app-input resize-y"
               />
-              <div className="mt-2 text-right text-[11px] text-muted-foreground">{pedido.length}/1500</div>
+              <div className="mt-2 text-right text-[11px] text-muted-foreground">{pedido.length}/500</div>
             </label>
 
             <button type="submit" disabled={busy} className="primary-button mt-5 w-full sm:w-auto disabled:cursor-not-allowed disabled:opacity-60">
@@ -111,11 +114,13 @@ function PromptCreatorPage() {
 
             <textarea
               value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
+              onChange={(event) => setPrompt(event.target.value.slice(0, 500))}
               rows={12}
               placeholder="O prompt criado pela IA aparecerá aqui..."
+              maxLength={500}
               className="app-input resize-y"
             />
+            <div className="mt-2 text-right text-[11px] text-muted-foreground">{prompt.length}/500</div>
 
             <button type="button" onClick={sendToCarousel} disabled={!prompt} className="primary-button mt-5 w-full disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto">
               Ir para criar carrossel <ArrowRight className="h-4 w-4" />
