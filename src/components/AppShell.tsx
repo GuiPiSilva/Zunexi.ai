@@ -12,11 +12,9 @@ import {
   Menu,
   Search,
   Settings,
-  Sparkles,
   X,
 } from "lucide-react";
 import { clearAccessKey, getAccessKey } from "@/lib/session";
-import logoFull from "@/assets/logo-full.png";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -75,8 +73,16 @@ export function AppShell({ children }: { children: ReactNode }) {
           open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         }`}
       >
-        <div className="flex h-[76px] items-center border-b border-sidebar-border px-5">
-          <img src={logoFull} alt="InLabs.Ia Studios" className="h-10 w-auto max-w-[185px] object-contain" />
+        <div className="flex h-[88px] items-center border-b border-sidebar-border px-5">
+          <Link to="/" aria-label="Ir para o Dashboard" className="flex min-w-0 items-center gap-3">
+            <div className="relative grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/25 via-card to-cyan-400/15 shadow-[0_0_28px_rgba(168,85,247,0.22)]">
+              <span className="bg-gradient-to-br from-fuchsia-400 via-violet-400 to-cyan-300 bg-clip-text text-xl font-black tracking-[-0.12em] text-transparent">in</span>
+            </div>
+            <div className="min-w-0 leading-none">
+              <div className="truncate text-[17px] font-extrabold tracking-[-0.03em] text-white">InLabs<span className="text-primary">.IA</span></div>
+              <div className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">Studios</div>
+            </div>
+          </Link>
         </div>
 
         <div className="px-4 pt-5">
@@ -99,15 +105,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
 
         <div className="mt-auto p-4">
-          <div className="mb-3 rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/12 via-card to-accent/5 p-4">
-            <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-              <Sparkles className="h-4 w-4 text-primary" /> InLabs.Ia Studios Studios
-            </div>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Acesso liberado por chave criada exclusivamente pelo administrador.
-            </p>
-          </div>
-
           <div className="flex items-center gap-3 rounded-xl border border-sidebar-border bg-white/[0.025] p-3">
             <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full gradient-brand text-sm font-bold text-white">IN</div>
             <div className="min-w-0 flex-1">
