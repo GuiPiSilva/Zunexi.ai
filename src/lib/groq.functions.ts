@@ -294,3 +294,59 @@ export const testGroqConnection = createServerFn({ method: "POST" })
       return { ok: false, model, message: "Falha de rede ao contatar a Groq." };
     } finally { clearTimeout(t); }
   });
+
+const PromptCreatorInput = z.object({
+  accessKey: z.string().trim().min(4).max(64),
+  pedido: z.string().trim().min(3).max(1500),
+});
+
+export const generateCarouselPrompt = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => PromptCreatorInput.parse(d))
+  .handler(async ({ data }): Promise<{ prompt: string }> => {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) throw new Error("GROQ_API_KEY não configurada no servidor.");
+
+    const sb = admin();
+    await requireKey(sb, data.accessKey);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+    try {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile",
+          temperature: 0.75,
+          messages: [
+            {
+              role: "system",
+              content: `Você é especialista em criação de prompts para carrosséis profissionais de Instagram. Transforme o pedido do usuário em um único prompt completo, claro e pronto para colar em uma IA criadora de carrosséis. Escreva em português brasileiro. Inclua, quando fizer sentido: tema, negócio ou marca, objetivo, público, quantidade de 5 slides, estrutura de cada slide, estilo visual, paleta, imagens realistas, hierarquia dos textos, formato 1080x1080, consistência entre slides e CTA final. Não invente preços, telefones, endereços ou dados comerciais. Retorne somente o prompt final, sem introdução, aspas, markdown ou explicações.`,
+            },
+            { role: "user", content: data.pedido },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        if (response.status === 429) throw new Error("Limite da Groq atingido. Tente novamente em instantes.");
+        if (response.status === 401 || response.status === 403) throw new Error("Chave da Groq inválida ou sem permissão.");
+        throw new Error("A Groq não conseguiu criar o prompt.");
+      }
+
+      const json = await response.json() as { choices?: { message?: { content?: string } }[] };
+      const prompt = json.choices?.[0]?.message?.content?.trim();
+      if (!prompt) throw new Error("A Groq retornou um prompt vazio.");
+      return { prompt };
+    } catch (error) {
+      if ((error as Error).name === "AbortError") throw new Error("Tempo esgotado ao criar o prompt. Tente novamente.");
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
