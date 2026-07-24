@@ -23,6 +23,10 @@ export type Database = {
           label: string | null
           last_used_at: string | null
           uses: number
+          credits_per_day: number
+          unlimited_credits: boolean
+          credits_used_today: number
+          credits_reset_date: string
         }
         Insert: {
           active?: boolean
@@ -32,6 +36,10 @@ export type Database = {
           label?: string | null
           last_used_at?: string | null
           uses?: number
+          credits_per_day?: number
+          unlimited_credits?: boolean
+          credits_used_today?: number
+          credits_reset_date?: string
         }
         Update: {
           active?: boolean
@@ -41,12 +49,46 @@ export type Database = {
           label?: string | null
           last_used_at?: string | null
           uses?: number
+          credits_per_day?: number
+          unlimited_credits?: boolean
+          credits_used_today?: number
+          credits_reset_date?: string
         }
         Relationships: []
+      }
+      credit_transactions: {
+        Row: {
+          id: string
+          access_key_id: string
+          job_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          access_key_id: string
+          job_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          access_key_id?: string
+          job_id?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_transactions_access_key_id_fkey"
+            columns: ["access_key_id"]
+            isOneToOne: false
+            referencedRelation: "access_keys"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       generations: {
         Row: {
           access_key_id: string | null
+          client_job_id: string | null
           created_at: string
           hashtags: Json
           id: string
@@ -64,6 +106,7 @@ export type Database = {
         }
         Insert: {
           access_key_id?: string | null
+          client_job_id?: string | null
           created_at?: string
           hashtags?: Json
           id?: string
@@ -81,6 +124,7 @@ export type Database = {
         }
         Update: {
           access_key_id?: string | null
+          client_job_id?: string | null
           created_at?: string
           hashtags?: Json
           id?: string
@@ -111,7 +155,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      consume_access_credit: {
+        Args: { p_key: string; p_job_id: string }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never
