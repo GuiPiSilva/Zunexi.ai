@@ -95,11 +95,23 @@ export async function requireAccessKey(sb: ReturnType<typeof admin>, key: string
 }
 
 export async function consumeAccessCredit(sb: ReturnType<typeof admin>, key: string, jobId: string): Promise<CreditStatus & { keyId: string }> {
-  const { data, error } = await sb.rpc("consume_access_credit", { p_key: key.trim().toUpperCase(), p_job_id: jobId });
+  const normalized = key.trim().toUpperCase();
+  let response = await sb.rpc("consume_access_credit", { p_key: normalized, p_job_id: jobId });
+
+  // Compatibilidade temporária quando o cache de esquema do Supabase ainda enxerga
+  // a versão antiga da função, com somente o argumento p_key.
+  if (response.error && /function|schema cache|p_job_id|PGRST202/i.test(response.error.message)) {
+    const legacy = await (sb as any).rpc("consume_access_credit", { p_key: normalized });
+    if (!legacy.error) response = legacy;
+  }
+
+  const { data, error } = response;
   if (error) {
-    if (error.message.includes("CREDITS_EXHAUSTED")) throw new Error("Seus créditos de hoje acabaram. Eles serão renovados automaticamente amanhã.");
-    if (error.message.includes("INVALID_ACCESS_KEY")) throw new Error("Chave de acesso inválida ou desativada.");
-    throw new Error("Não foi possível verificar os créditos desta conta.");
+    const details = [error.message, error.details, error.hint].filter(Boolean).join(" — ");
+    if (details.includes("CREDITS_EXHAUSTED")) throw new Error("Seus créditos de hoje acabaram. Eles serão renovados automaticamente amanhã.");
+    if (details.includes("INVALID_ACCESS_KEY")) throw new Error("Chave de acesso inválida ou desativada.");
+    console.error("Erro ao consumir crédito", error);
+    throw new Error(`Não foi possível verificar os créditos desta conta. ${details}`.trim());
   }
   const result = data as Json as unknown as CreditStatus & { keyId: string };
   return result;
