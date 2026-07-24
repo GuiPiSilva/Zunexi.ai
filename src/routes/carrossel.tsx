@@ -70,6 +70,13 @@ function NovoCarrossel() {
       return;
     }
     setAccessKey(key);
+
+    const transferredPrompt = sessionStorage.getItem("inlabs_carousel_prompt");
+    if (transferredPrompt) {
+      setForm((current) => ({ ...current, tema: transferredPrompt }));
+      sessionStorage.removeItem("inlabs_carousel_prompt");
+      toast.success("Prompt enviado para o criador de carrossel.");
+    }
   }, [nav]);
 
   async function submit(e: React.FormEvent) {
