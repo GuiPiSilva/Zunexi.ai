@@ -11,6 +11,8 @@ function admin() {
   );
 }
 
+
+
 const Input = z.object({
   accessKey: z.string().trim().min(4).max(64),
   tema: z.string().trim().min(3).max(500),
