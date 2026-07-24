@@ -103,7 +103,7 @@ function NovoCartaz() {
 
     const started = await withCreationJobLock(initialJob.id, async () => {
       let job = getCreationJob(initialJob.id, initialJob.ownerScope) || initialJob;
-      const payload = job.payload as { form: typeof form; photo?: string };
+      const payload = job.payload as { form: typeof form; photo?: string; accessKey: string };
       const currentForm = payload.form;
       setBusy(true);
       setProgress(job.progress);
@@ -125,7 +125,7 @@ function NovoCartaz() {
         if (!generated) {
           const generatedOutput = await generateText({ data: {
             jobId: job.id,
-            accessKey,
+            accessKey: payload.accessKey,
             title: currentForm.title,
             kind: currentForm.kind,
             date: currentForm.date,
@@ -230,7 +230,7 @@ function NovoCartaz() {
 
     void requestNotificationPermission();
     const persistedPhoto = photo && photo.length <= 2_000_000 ? photo : undefined;
-    const job = createCreationJob("cartaz", { form: { ...form }, photo: persistedPhoto, seed: crypto.randomUUID() });
+    const job = createCreationJob("cartaz", { form: { ...form }, photo: persistedPhoto, seed: crypto.randomUUID(), accessKey });
     setBusy(true);
     setProgress(5);
     await executeCartazJob(job, photo);

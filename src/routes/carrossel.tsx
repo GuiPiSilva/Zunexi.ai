@@ -146,6 +146,7 @@ function NovoCarrossel() {
         details: string;
         referenceImageUrl?: string;
         referenceName?: string;
+        accessKey: string;
       };
 
       setBusy(true);
@@ -163,7 +164,7 @@ function NovoCarrossel() {
             tom: payload.form.tom,
             quantidadeSlides: payload.form.quantidadeSlides,
             informacoesAdicionais: payload.details,
-            accessKey,
+            accessKey: payload.accessKey,
           } });
           output = generatedOutput;
           job = updateCreationJob(job.id, { result: generatedOutput, progress: 25 }, job.ownerScope) || job;
@@ -188,7 +189,11 @@ function NovoCarrossel() {
           const existing = persistedAssets[String(slide.numero)];
           if (!existing) {
             try {
-              const image = await generateImageFn({ data: {
+              let image: Awaited<ReturnType<typeof generateImageFn>> | undefined;
+              let lastImageError: unknown;
+              for (let attempt = 1; attempt <= 2; attempt += 1) {
+                try {
+                  image = await generateImageFn({ data: {
                 prompt: slide.promptImagem,
                 seed: `${output.id}-${slide.numero}`,
                 slideTitle: slide.titulo,
@@ -200,12 +205,24 @@ function NovoCarrossel() {
                 palette: payload.form.paleta,
                 style: `${payload.form.estilo}; tom ${payload.form.tom}`,
                 referenceImageUrl: payload.referenceImageUrl,
-              } });
+                  } });
+                  break;
+                } catch (error) {
+                  lastImageError = error;
+                  console.error(`Tentativa ${attempt} falhou no slide ${slide.numero}`, error);
+                  if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 1500));
+                }
+              }
+              if (!image) {
+                const reason = lastImageError instanceof Error ? lastImageError.message : "erro desconhecido";
+                throw new Error(`Não foi possível gerar a imagem do slide ${slide.numero}: ${reason}`);
+              }
               persistedAssets[String(slide.numero)] = { url: image.url };
               projectAssets[slide.numero] = { dataUrl: image.dataUrl, url: image.url };
               setAutoImages((current) => ({ ...current, [slide.numero]: image.dataUrl }));
             } catch (error) {
               console.error(`Falha ao gerar imagem do slide ${slide.numero}`, error);
+              throw error;
             }
           } else {
             projectAssets[slide.numero] = { url: existing.url };
@@ -318,6 +335,7 @@ function NovoCarrossel() {
         details,
         referenceImageUrl,
         referenceName: referenceImage?.name,
+        accessKey,
       });
       await executeCarouselJob(job);
     } catch (error) {
