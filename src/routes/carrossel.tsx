@@ -22,8 +22,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
-import { generateImage } from "@/lib/ai.functions";
-import { composePost } from "@/lib/composePost";
+import { generateImage, testNanoBananaConnection } from "@/lib/ai.functions";
 import { generateInstagramContent, testGroqConnection, updateSlide, type CarrosselOut } from "@/lib/groq.functions";
 import { getAccessKey } from "@/lib/session";
 
@@ -38,11 +37,14 @@ function NovoCarrossel() {
   const save = useServerFn(updateSlide);
   const test = useServerFn(testGroqConnection);
   const generateImageFn = useServerFn(generateImage);
+  const testNanoBanana = useServerFn(testNanoBananaConnection);
 
   const [accessKey, setAccessKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [nanoTesting, setNanoTesting] = useState(false);
+  const [nanoTestResult, setNanoTestResult] = useState<{ ok: boolean; message: string; model?: string; dataUrl?: string } | null>(null);
   const [result, setResult] = useState<CarrosselOut | null>(null);
   const [autoImages, setAutoImages] = useState<Record<number, string>>({});
   const [progress, setProgress] = useState(0);
@@ -112,10 +114,16 @@ function NovoCarrossel() {
           const image = await generateImageFn({ data: {
             prompt: slide.promptImagem,
             seed: `${output.id}-${slide.numero}`,
-            style: `${form.estilo}; ${form.paleta}; ${form.tom}`,
+            slideTitle: slide.titulo,
+            slideBody: slide.texto,
+            slideIndex: slide.numero,
+            slideTotal: output.slides.length,
+            slideKind: slide.tipo,
+            brand: form.empresa,
+            palette: form.paleta,
+            style: `${form.estilo}; tom ${form.tom}`,
           } });
-          const composed = await composePost({ background: image.dataUrl, title: slide.titulo, body: slide.texto });
-          setAutoImages((current) => ({ ...current, [slide.numero]: composed }));
+          setAutoImages((current) => ({ ...current, [slide.numero]: image.dataUrl }));
         } catch (error) {
           console.error(`Falha ao gerar imagem do slide ${slide.numero}`, error);
           toast.error(`Não foi possível gerar a imagem do slide ${slide.numero}.`);
@@ -148,13 +156,30 @@ function NovoCarrossel() {
     }
   }
 
+  async function runNanoBananaTest() {
+    if (nanoTesting) return;
+    setNanoTesting(true);
+    setNanoTestResult(null);
+    try {
+      const response = await testNanoBanana();
+      setNanoTestResult(response);
+      response.ok ? toast.success("Nano Banana conectado e funcionando.") : toast.error(response.message);
+    } catch (error) {
+      const message = (error as Error).message || "Falha ao testar o Nano Banana.";
+      setNanoTestResult({ ok: false, message });
+      toast.error(message);
+    } finally {
+      setNanoTesting(false);
+    }
+  }
+
   return (
     <AppShell>
       <div className="page-wrap space-y-7">
         <section>
           <div className="eyebrow mb-2 flex items-center gap-2"><Sparkles className="h-3.5 w-3.5 text-primary" /> Criação guiada por IA</div>
           <h1 className="section-title text-3xl sm:text-4xl">Criar carrossel</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Crie roteiro, textos e imagens em poucos passos com a IA da Groq (textos) e Cloudflare (imagens).</p>
+          <p className="mt-2 text-sm text-muted-foreground">Crie roteiro, textos e imagens em poucos passos com a IA da Groq (roteiro) e Kie.ai/Nano Banana (artes finais).</p>
         </section>
 
         <Stepper />
@@ -212,6 +237,14 @@ function NovoCarrossel() {
               <button type="button" onClick={runTest} disabled={testing} className="secondary-button w-full disabled:opacity-60">{testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />} Testar conexão</button>
               {testResult && <div className={`mt-3 rounded-xl border p-3 text-xs ${testResult.ok ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-200" : "border-red-500/25 bg-red-500/8 text-red-200"}`}><div className="flex items-start gap-2">{testResult.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{testResult.message}</span></div></div>}
             </div>
+
+            <div className="panel p-5">
+              <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Teste Nano Banana</h2><p className="mt-1 text-xs text-muted-foreground">Faz uma geração real pela Kie.ai para validar chave, créditos e modelo.</p></div><ImageIcon className="h-5 w-5 text-primary" /></div>
+              <button type="button" onClick={runNanoBananaTest} disabled={nanoTesting} className="secondary-button w-full disabled:opacity-60">{nanoTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />} {nanoTesting ? "Testando..." : "Testar Nano Banana"}</button>
+              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">Este teste consome uma geração/créditos da sua conta Kie.ai.</p>
+              {nanoTestResult && <div className={`mt-3 rounded-xl border p-3 text-xs ${nanoTestResult.ok ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-200" : "border-red-500/25 bg-red-500/8 text-red-200"}`}><div className="flex items-start gap-2">{nanoTestResult.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{nanoTestResult.message}</span></div>{nanoTestResult.model && <div className="mt-2 opacity-80">Modelo: {nanoTestResult.model}</div>}</div>}
+              {nanoTestResult?.dataUrl && <img src={nanoTestResult.dataUrl} alt="Imagem do teste Nano Banana" className="mt-3 aspect-square w-full rounded-xl border border-border object-cover" />}
+            </div>
           </aside>
         </div>
 
@@ -268,9 +301,15 @@ function SlideCard({ generationId, slide, save, accessKey, autoImage }: { genera
   async function regenerateImage() {
     setImageBusy(true);
     try {
-      const response = await generateImageFn({ data: { prompt: slide.promptImagem, seed: `${generationId}-${slide.numero}-${Date.now()}` } });
-      const composed = await composePost({ background: response.dataUrl, title, body });
-      setImageUrl(composed);
+      const response = await generateImageFn({ data: {
+        prompt: slide.promptImagem,
+        seed: `${generationId}-${slide.numero}-${Date.now()}`,
+        slideTitle: title,
+        slideBody: body,
+        slideIndex: slide.numero,
+        slideKind: slide.tipo,
+      } });
+      setImageUrl(response.dataUrl);
       toast.success(`Imagem do slide ${slide.numero} atualizada.`);
     } catch (error) { toast.error((error as Error).message || "Falha ao gerar imagem."); }
     finally { setImageBusy(false); }
