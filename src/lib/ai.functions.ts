@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { admin, consumeAccessCredit, requireAccessKey } from "@/lib/access.functions";
 
 // ---------------------------------------------------------------------------
 // TEXTO — Groq, exclusivamente via API REST oficial (chat completions,
@@ -92,6 +93,8 @@ Aleatoriedade (seed ${data.seed}): varie tom, exemplos e enquadramentos.`;
   });
 
 const CartazInput = z.object({
+  jobId: z.string().uuid(),
+  accessKey: z.string().trim().min(4).max(64),
   title: z.string(),
   date: z.string().optional().default(""),
   time: z.string().optional().default(""),
@@ -105,6 +108,9 @@ const CartazInput = z.object({
 export const generateCartaz = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => CartazInput.parse(d))
   .handler(async ({ data }): Promise<SlideOut> => {
+    const sb = admin();
+    await requireAccessKey(sb, data.accessKey);
+    await consumeAccessCredit(sb, data.accessKey, data.jobId);
     const sys = `Você é diretor de arte especializado em cartazes profissionais para Instagram. Retorne apenas JSON válido: { "title": "...", "body": "...", "imagePrompt": "..." }.
 
 REGRAS:
@@ -122,7 +128,8 @@ Estilo: ${data.style}
 Extras: ${data.extra}
 Seed única: ${data.seed}-${Math.random().toString(36).slice(2)}`;
     const raw = await callChat([{ role: "system", content: sys }, { role: "user", content: user }]);
-    return JSON.parse(raw) as SlideOut;
+    const output = JSON.parse(raw) as SlideOut;
+    return output;
   });
 
 

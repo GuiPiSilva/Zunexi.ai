@@ -2,9 +2,19 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "@/integrations/supabase/types";
+import type { Database, Json } from "@/integrations/supabase/types";
 
-function admin() {
+export type CreditStatus = {
+  unlimited: boolean;
+  creditsPerDay: number;
+  usedToday: number;
+  remaining: number | null;
+  resetDate: string;
+};
+
+type AccessKeyRow = Database["public"]["Tables"]["access_keys"]["Row"];
+
+export function admin() {
   return createClient<Database>(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -43,7 +53,6 @@ function checkAdmin(token: string) {
   if (!payload || !signature) throw new Error("Sessão administrativa inválida.");
   const expected = createHmac("sha256", sessionSecret()).update(payload).digest("base64url");
   if (!safeEqual(signature, expected)) throw new Error("Sessão administrativa inválida.");
-
   try {
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { role?: string; exp?: number };
     if (parsed.role !== "admin" || !parsed.exp || parsed.exp < Date.now()) throw new Error();
@@ -52,24 +61,76 @@ function checkAdmin(token: string) {
   }
 }
 
-/** Public: validates a key created by the administrator. */
+function brazilDate() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
+
+function statusFromRow(row: Pick<AccessKeyRow, "unlimited_credits" | "credits_per_day" | "credits_used_today" | "credits_reset_date">): CreditStatus {
+  const usedToday = row.credits_reset_date === brazilDate() ? row.credits_used_today : 0;
+  return {
+    unlimited: row.unlimited_credits,
+    creditsPerDay: row.credits_per_day,
+    usedToday,
+    remaining: row.unlimited_credits ? null : Math.max(row.credits_per_day - usedToday, 0),
+    resetDate: row.credits_reset_date,
+  };
+}
+
+export async function requireAccessKey(sb: ReturnType<typeof admin>, key: string) {
+  const normalized = key.trim().toUpperCase();
+  const { data: row } = await sb
+    .from("access_keys")
+    .select("id, active, label, unlimited_credits, credits_per_day, credits_used_today, credits_reset_date")
+    .eq("key", normalized)
+    .maybeSingle();
+  if (!row || !row.active) throw new Error("Chave de acesso inválida ou desativada. Peça uma nova ao admin.");
+  return row;
+}
+
+export async function consumeAccessCredit(sb: ReturnType<typeof admin>, key: string, jobId: string): Promise<CreditStatus & { keyId: string }> {
+  const { data, error } = await sb.rpc("consume_access_credit", { p_key: key.trim().toUpperCase(), p_job_id: jobId });
+  if (error) {
+    if (error.message.includes("CREDITS_EXHAUSTED")) throw new Error("Seus créditos de hoje acabaram. Eles serão renovados automaticamente amanhã.");
+    if (error.message.includes("INVALID_ACCESS_KEY")) throw new Error("Chave de acesso inválida ou desativada.");
+    throw new Error("Não foi possível verificar os créditos desta conta.");
+  }
+  const result = data as Json as unknown as CreditStatus & { keyId: string };
+  return result;
+}
+
+export const getAccessCreditStatus = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => z.object({ key: z.string().trim().min(4).max(64) }).parse(d))
+  .handler(async ({ data }): Promise<CreditStatus> => {
+    const row = await requireAccessKey(admin(), data.key);
+    return statusFromRow(row);
+  });
+
 export const verifyAccessKey = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ key: z.string().trim().min(4).max(64) }).parse(d))
-  .handler(async ({ data }): Promise<{ ok: true; keyId: string; name: string } | { ok: false }> => {
+  .handler(async ({ data }) => {
     const sb = admin();
     const normalized = data.key.trim().toUpperCase();
-    const { data: row } = await sb.from("access_keys").select("id, active, uses, label").eq("key", normalized).maybeSingle();
-    if (!row || !row.active) return { ok: false };
-
-    await sb
+    const { data: row } = await sb
       .from("access_keys")
-      .update({ uses: (row.uses ?? 0) + 1, last_used_at: new Date().toISOString() })
-      .eq("id", row.id);
+      .select("id, active, uses, label, unlimited_credits, credits_per_day, credits_used_today, credits_reset_date")
+      .eq("key", normalized)
+      .maybeSingle();
+    if (!row || !row.active) return { ok: false as const };
+
+    await sb.from("access_keys").update({ uses: (row.uses ?? 0) + 1, last_used_at: new Date().toISOString() }).eq("id", row.id);
 
     return {
-      ok: true,
+      ok: true as const,
       keyId: row.id,
       name: row.label?.trim() || "Usuário InLabs",
+      credits: statusFromRow(row),
     };
   });
 
@@ -88,7 +149,7 @@ export const adminListKeys = createServerFn({ method: "POST" })
     checkAdmin(data.token);
     const { data: rows, error } = await admin()
       .from("access_keys")
-      .select("id, key, label, active, uses, last_used_at, created_at")
+      .select("id, key, label, active, uses, last_used_at, created_at, credits_per_day, unlimited_credits, credits_used_today, credits_reset_date")
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
     return rows ?? [];
@@ -98,14 +159,42 @@ export const adminCreateKey = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({
     token: z.string().min(20),
     label: z.string().trim().min(2, "Informe para quem a chave será criada.").max(120),
+    creditsPerDay: z.number().int().min(0).max(1_000_000),
+    unlimited: z.boolean(),
   }).parse(d))
   .handler(async ({ data }) => {
     checkAdmin(data.token);
     const key = randomKey();
     const { data: row, error } = await admin()
       .from("access_keys")
-      .insert({ key, label: data.label })
-      .select("id, key, label, active, uses, last_used_at, created_at")
+      .insert({
+        key,
+        label: data.label,
+        credits_per_day: data.creditsPerDay,
+        unlimited_credits: data.unlimited,
+        credits_used_today: 0,
+        credits_reset_date: brazilDate(),
+      })
+      .select("id, key, label, active, uses, last_used_at, created_at, credits_per_day, unlimited_credits, credits_used_today, credits_reset_date")
+      .single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+export const adminUpdateCredits = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => z.object({
+    token: z.string().min(20),
+    id: z.string().uuid(),
+    creditsPerDay: z.number().int().min(0).max(1_000_000),
+    unlimited: z.boolean(),
+  }).parse(d))
+  .handler(async ({ data }) => {
+    checkAdmin(data.token);
+    const { data: row, error } = await admin()
+      .from("access_keys")
+      .update({ credits_per_day: data.creditsPerDay, unlimited_credits: data.unlimited })
+      .eq("id", data.id)
+      .select("id, key, label, active, uses, last_used_at, created_at, credits_per_day, unlimited_credits, credits_used_today, credits_reset_date")
       .single();
     if (error) throw new Error(error.message);
     return row;

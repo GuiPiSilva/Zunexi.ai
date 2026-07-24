@@ -1,11 +1,10 @@
-// Local project persistence (localStorage).
+import { getUserStorageKey, migrateLegacyStorage } from "@/lib/user-scope";
+
 export type ProjectType = "carrossel" | "cartaz";
 
 export interface Slide {
   id: string;
-  // fabric.js JSON of the canvas
   canvas: unknown;
-  // preview data-url (small)
   thumb?: string;
   width: number;
   height: number;
@@ -27,40 +26,62 @@ export interface Project {
 }
 
 const K = "inlabs.projects";
+const LK = "inlabs.library";
+const FK = "inlabs.fonts";
+const PROJECTS_EVENT = "inlabs:projects-changed";
+const LIBRARY_EVENT = "inlabs:library-changed";
 
-export function loadProjects(): Project[] {
+function scoped(base: string, ownerScope?: string) {
+  return migrateLegacyStorage(base, ownerScope);
+}
+
+export function loadProjects(ownerScope?: string): Project[] {
   if (typeof window === "undefined") return [];
   try {
-    return JSON.parse(localStorage.getItem(K) || "[]") as Project[];
+    return JSON.parse(localStorage.getItem(scoped(K, ownerScope)) || "[]") as Project[];
   } catch { return []; }
 }
 
-export function saveProjects(list: Project[]) {
-  localStorage.setItem(K, JSON.stringify(list));
+export function saveProjects(list: Project[], ownerScope?: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(getUserStorageKey(K, ownerScope), JSON.stringify(list));
+  window.dispatchEvent(new CustomEvent(PROJECTS_EVENT));
+}
+
+export function subscribeProjects(listener: () => void) {
+  if (typeof window === "undefined") return () => undefined;
+  window.addEventListener(PROJECTS_EVENT, listener);
+  window.addEventListener("storage", listener);
+  return () => {
+    window.removeEventListener(PROJECTS_EVENT, listener);
+    window.removeEventListener("storage", listener);
+  };
 }
 
 export function getProject(id: string): Project | undefined {
-  return loadProjects().find(p => p.id === id);
+  return loadProjects().find((project) => project.id === id);
 }
 
-export function upsertProject(p: Project) {
-  const all = loadProjects();
-  const i = all.findIndex(x => x.id === p.id);
-  p.updatedAt = Date.now();
-  if (i >= 0) all[i] = p; else all.unshift(p);
-  saveProjects(all);
+export function upsertProject(project: Project, ownerScope?: string) {
+  const all = loadProjects(ownerScope);
+  const index = all.findIndex((item) => item.id === project.id);
+  project.updatedAt = Date.now();
+  if (index >= 0) all[index] = project;
+  else all.unshift(project);
+  saveProjects(all, ownerScope);
 }
 
 export function deleteProject(id: string) {
-  saveProjects(loadProjects().filter(p => p.id !== id));
+  saveProjects(loadProjects().filter((project) => project.id !== id));
 }
 
 export function duplicateProject(id: string): Project | undefined {
-  const p = getProject(id); if (!p) return;
+  const project = getProject(id);
+  if (!project) return;
   const copy: Project = {
-    ...p,
+    ...project,
     id: crypto.randomUUID(),
-    name: p.name + " (cópia)",
+    name: `${project.name} (cópia)`,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -71,35 +92,47 @@ export function duplicateProject(id: string): Project | undefined {
 export function newProject(type: ProjectType, name: string, meta: Project["meta"] = {}): Project {
   return {
     id: crypto.randomUUID(),
-    name, type,
-    createdAt: Date.now(), updatedAt: Date.now(),
-    slides: [], meta,
+    name,
+    type,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    slides: [],
+    meta,
   };
 }
 
-// --- Library uploads ---
 export interface LibItem { id: string; url: string; name: string; addedAt: number }
-const LK = "inlabs.library";
 export function loadLibrary(): LibItem[] {
   if (typeof window === "undefined") return [];
-  try { return JSON.parse(localStorage.getItem(LK) || "[]"); } catch { return []; }
+  try { return JSON.parse(localStorage.getItem(scoped(LK)) || "[]"); } catch { return []; }
 }
 export function addLibrary(item: LibItem) {
-  const all = loadLibrary(); all.unshift(item);
-  localStorage.setItem(LK, JSON.stringify(all.slice(0, 200)));
+  const all = loadLibrary();
+  all.unshift(item);
+  localStorage.setItem(getUserStorageKey(LK), JSON.stringify(all.slice(0, 200)));
+  window.dispatchEvent(new CustomEvent(LIBRARY_EVENT));
 }
 export function removeLibrary(id: string) {
-  localStorage.setItem(LK, JSON.stringify(loadLibrary().filter(i => i.id !== id)));
+  localStorage.setItem(getUserStorageKey(LK), JSON.stringify(loadLibrary().filter((item) => item.id !== id)));
+  window.dispatchEvent(new CustomEvent(LIBRARY_EVENT));
 }
 
-// Favorite fonts
-const FK = "inlabs.fonts";
+export function subscribeLibrary(listener: () => void) {
+  if (typeof window === "undefined") return () => undefined;
+  window.addEventListener(LIBRARY_EVENT, listener);
+  window.addEventListener("storage", listener);
+  return () => {
+    window.removeEventListener(LIBRARY_EVENT, listener);
+    window.removeEventListener("storage", listener);
+  };
+}
+
 export function loadFavFonts(): string[] {
   if (typeof window === "undefined") return [];
-  try { return JSON.parse(localStorage.getItem(FK) || "[]"); } catch { return []; }
+  try { return JSON.parse(localStorage.getItem(scoped(FK)) || "[]"); } catch { return []; }
 }
 export function toggleFavFont(name: string) {
-  const cur = loadFavFonts();
-  const next = cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name];
-  localStorage.setItem(FK, JSON.stringify(next));
+  const current = loadFavFonts();
+  const next = current.includes(name) ? current.filter((item) => item !== name) : [...current, name];
+  localStorage.setItem(getUserStorageKey(FK), JSON.stringify(next));
 }

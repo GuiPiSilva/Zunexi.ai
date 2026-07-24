@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { consumeAccessCredit, requireAccessKey } from "@/lib/access.functions";
 
 function admin() {
   return createClient<Database>(
@@ -12,6 +13,7 @@ function admin() {
 }
 
 const Input = z.object({
+  jobId: z.string().uuid(),
   accessKey: z.string().trim().min(4).max(64),
   tema: z.string().trim().min(3).max(3000),
   objetivo: z.string().trim().max(300).optional().default(""),
@@ -36,15 +38,7 @@ export interface CarrosselOut {
   slides: SlideOut[];
 }
 
-const MAX_PER_DAY = 30;
 const TIMEOUT_MS = 45_000;
-
-async function requireKey(sb: ReturnType<typeof admin>, key: string) {
-  const { data: row } = await sb.from("access_keys")
-    .select("id, active").eq("key", key).maybeSingle();
-  if (!row || !row.active) throw new Error("Chave de acesso inválida ou desativada. Peça uma nova ao admin.");
-  return row.id as string;
-}
 
 export const generateInstagramContent = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => Input.parse(d))
@@ -53,19 +47,26 @@ export const generateInstagramContent = createServerFn({ method: "POST" })
     if (!apiKey) throw new Error("GROQ_API_KEY não configurada no servidor.");
 
     const sb = admin();
-    const keyId = await requireKey(sb, data.accessKey);
+    const keyRow = await requireAccessKey(sb, data.accessKey);
+    const keyId = keyRow.id;
 
-    // Rate limit por chave
-    const sinceIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { count, error: countErr } = await sb
+    const { data: existing } = await sb
       .from("generations")
-      .select("id", { count: "exact", head: true })
+      .select("id, titulo, legenda, hashtags, slides")
       .eq("access_key_id", keyId)
-      .gte("created_at", sinceIso);
-    if (countErr) throw new Error("Falha ao verificar limite de uso.");
-    if ((count ?? 0) >= MAX_PER_DAY) {
-      throw new Error(`Limite diário atingido (${MAX_PER_DAY} gerações) para esta chave.`);
+      .eq("client_job_id", data.jobId)
+      .maybeSingle();
+    if (existing) {
+      return {
+        id: existing.id,
+        titulo: existing.titulo,
+        legenda: existing.legenda,
+        hashtags: existing.hashtags as unknown as string[],
+        slides: existing.slides as unknown as SlideOut[],
+      };
     }
+
+    await consumeAccessCredit(sb, data.accessKey, data.jobId);
 
     const brandMatch = data.informacoesAdicionais.match(/Marca:\s*(.+)/i);
     const productMatch = data.informacoesAdicionais.match(/Produto ou serviço:\s*(.+)/i);
@@ -210,6 +211,7 @@ Semente de variação: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
       .from("generations")
       .insert({
         access_key_id: keyId,
+        client_job_id: data.jobId,
         tema: data.tema,
         objetivo: data.objetivo,
         publico_alvo: data.publicoAlvo,
@@ -225,9 +227,6 @@ Semente de variação: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
       .single();
     if (insErr || !inserted) throw new Error("Falha ao salvar geração no banco.");
 
-    await sb.from("access_keys")
-      .update({ uses: (count ?? 0) + 1, last_used_at: new Date().toISOString() })
-      .eq("id", keyId);
 
     return { id: inserted.id, titulo: parsed.titulo, legenda: parsed.legenda, hashtags, slides };
   });
@@ -244,15 +243,22 @@ export const updateSlide = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => UpdateSlideInput.parse(d))
   .handler(async ({ data }): Promise<{ ok: true }> => {
     const sb = admin();
-    await requireKey(sb, data.accessKey);
+    const keyRow = await requireAccessKey(sb, data.accessKey);
     const { data: row, error } = await sb
-      .from("generations").select("slides").eq("id", data.generationId).single();
+      .from("generations")
+      .select("slides")
+      .eq("id", data.generationId)
+      .eq("access_key_id", keyRow.id)
+      .single();
     if (error || !row) throw new Error("Geração não encontrada.");
     const slides = (row.slides as unknown as SlideOut[]).map(s =>
       s.numero === data.slideNumero ? { ...s, titulo: data.titulo, texto: data.texto } : s,
     );
     const { error: upErr } = await sb
-      .from("generations").update({ slides: slides as unknown as never }).eq("id", data.generationId);
+      .from("generations")
+      .update({ slides: slides as unknown as never })
+      .eq("id", data.generationId)
+      .eq("access_key_id", keyRow.id);
     if (upErr) throw new Error("Falha ao salvar edições.");
     return { ok: true };
   });
@@ -344,7 +350,7 @@ export const generateCarouselPrompt = createServerFn({ method: "POST" })
     if (!apiKey) throw new Error("GROQ_API_KEY não configurada no servidor.");
 
     const sb = admin();
-    await requireKey(sb, data.accessKey);
+    await requireAccessKey(sb, data.accessKey);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
