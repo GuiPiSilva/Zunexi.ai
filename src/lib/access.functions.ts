@@ -55,10 +55,10 @@ function checkAdmin(token: string) {
 /** Public: validates a key created by the administrator. */
 export const verifyAccessKey = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ key: z.string().trim().min(4).max(64) }).parse(d))
-  .handler(async ({ data }): Promise<{ ok: true; keyId: string } | { ok: false }> => {
+  .handler(async ({ data }): Promise<{ ok: true; keyId: string; name: string } | { ok: false }> => {
     const sb = admin();
     const normalized = data.key.trim().toUpperCase();
-    const { data: row } = await sb.from("access_keys").select("id, active, uses").eq("key", normalized).maybeSingle();
+    const { data: row } = await sb.from("access_keys").select("id, active, uses, label").eq("key", normalized).maybeSingle();
     if (!row || !row.active) return { ok: false };
 
     await sb
@@ -66,7 +66,11 @@ export const verifyAccessKey = createServerFn({ method: "POST" })
       .update({ uses: (row.uses ?? 0) + 1, last_used_at: new Date().toISOString() })
       .eq("id", row.id);
 
-    return { ok: true, keyId: row.id };
+    return {
+      ok: true,
+      keyId: row.id,
+      name: row.label?.trim() || "Usuário InLabs",
+    };
   });
 
 export const adminLogin = createServerFn({ method: "POST" })
