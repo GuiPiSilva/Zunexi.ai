@@ -132,15 +132,17 @@ Seed única: ${data.seed}-${Math.random().toString(36).slice(2)}`;
 
 
 // ---------------------------------------------------------------------------
-// IMAGEM — Google Gemini 2.5 Flash Image ("Nano Banana"), exclusivamente.
-// Escolhido por ter tier gratuito real (sem cartão de crédito), com boa
-// qualidade de composição/texto — muito acima do Cloudflare flux-1-schnell,
-// sem o custo por imagem da OpenAI. Reaproveita a mesma GEMINI_API_KEY.
-// Chamado via fetch() puro, sem SDK.
+// IMAGEM — Kie.ai + Nano Banana.
+// A chave fica exclusivamente no servidor. A API da Kie cria tarefas de forma
+// assíncrona; por isso o servidor cria a tarefa, consulta o status e converte
+// a imagem final em data URL para manter compatibilidade com o front-end.
 // ---------------------------------------------------------------------------
 
-const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
-const GEMINI_IMAGE_TIMEOUT_MS = 60_000;
+const KIE_API_BASE_URL = "https://api.kie.ai";
+const KIE_IMAGE_MODEL = process.env.KIE_IMAGE_MODEL || "google/nano-banana";
+const KIE_IMAGE_TIMEOUT_MS = Number(process.env.KIE_IMAGE_TIMEOUT_MS || 180_000);
+const KIE_POLL_INITIAL_MS = 2_500;
+const KIE_POLL_MAX_MS = 8_000;
 
 const ImageInput = z.object({
   prompt: z.string().min(1),
@@ -155,19 +157,129 @@ const ImageInput = z.object({
   style: z.string().optional().default(""),
 });
 
+type KieCreateResponse = {
+  code?: number;
+  msg?: string;
+  data?: { taskId?: string };
+};
+
+type KieTaskResponse = {
+  code?: number;
+  msg?: string;
+  data?: {
+    state?: "waiting" | "queuing" | "generating" | "success" | "fail" | string;
+    resultJson?: string;
+    failCode?: string;
+    failMsg?: string;
+  };
+};
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function kieErrorMessage(status: number, body: string): string {
+  if (status === 401 || status === 403) return "Chave da Kie.ai inválida ou sem permissão.";
+  if (status === 402) return "Sua conta Kie.ai está sem créditos suficientes.";
+  if (status === 429) return "Limite de requisições da Kie.ai atingido. Tente novamente em instantes.";
+  return `A Kie.ai retornou um erro (${status}): ${body.slice(0, 180)}`;
+}
+
+async function createKieImageTask(apiKey: string, prompt: string, signal: AbortSignal): Promise<string> {
+  const response = await fetch(`${KIE_API_BASE_URL}/api/v1/jobs/createTask`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    signal,
+    body: JSON.stringify({
+      model: KIE_IMAGE_MODEL,
+      input: {
+        prompt,
+        output_format: "png",
+        aspect_ratio: "4:5",
+      },
+    }),
+  });
+
+  const body = await response.text();
+  if (!response.ok) throw new Error(kieErrorMessage(response.status, body));
+
+  let json: KieCreateResponse;
+  try {
+    json = JSON.parse(body) as KieCreateResponse;
+  } catch {
+    throw new Error("Resposta inválida ao criar tarefa na Kie.ai.");
+  }
+
+  const taskId = json.data?.taskId;
+  if (!taskId || (json.code && json.code !== 200)) {
+    throw new Error(json.msg || "A Kie.ai não retornou o identificador da tarefa.");
+  }
+  return taskId;
+}
+
+async function waitForKieImage(apiKey: string, taskId: string, signal: AbortSignal): Promise<string> {
+  let delay = KIE_POLL_INITIAL_MS;
+
+  while (!signal.aborted) {
+    await sleep(delay);
+    const response = await fetch(
+      `${KIE_API_BASE_URL}/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`,
+      {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal,
+      },
+    );
+
+    const body = await response.text();
+    if (!response.ok) throw new Error(kieErrorMessage(response.status, body));
+
+    let json: KieTaskResponse;
+    try {
+      json = JSON.parse(body) as KieTaskResponse;
+    } catch {
+      throw new Error("Resposta inválida ao consultar tarefa na Kie.ai.");
+    }
+
+    const state = json.data?.state;
+    if (state === "fail") {
+      throw new Error(json.data?.failMsg || json.msg || "A geração de imagem falhou na Kie.ai.");
+    }
+
+    if (state === "success") {
+      let result: { resultUrls?: string[] } = {};
+      try {
+        result = JSON.parse(json.data?.resultJson || "{}") as { resultUrls?: string[] };
+      } catch {
+        throw new Error("A Kie.ai concluiu a tarefa, mas retornou um resultado inválido.");
+      }
+      const imageUrl = result.resultUrls?.[0];
+      if (!imageUrl) throw new Error("A Kie.ai não retornou a URL da imagem gerada.");
+      return imageUrl;
+    }
+
+    delay = Math.min(Math.round(delay * 1.4), KIE_POLL_MAX_MS);
+  }
+
+  throw new DOMException("Aborted", "AbortError");
+}
+
+async function imageUrlToDataUrl(imageUrl: string, signal: AbortSignal): Promise<string> {
+  const response = await fetch(imageUrl, { signal });
+  if (!response.ok) throw new Error(`Não foi possível baixar a imagem gerada (${response.status}).`);
+  const contentType = response.headers.get("content-type") || "image/png";
+  const bytes = Buffer.from(await response.arrayBuffer());
+  return `data:${contentType};base64,${bytes.toString("base64")}`;
+}
+
 export const generateImage = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => ImageInput.parse(d))
   .handler(async ({ data }): Promise<{ dataUrl: string }> => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error("GEMINI_API_KEY não configurada no servidor.");
-    }
+    const apiKey = process.env.KIE_API_KEY?.trim();
+    if (!apiKey) throw new Error("KIE_API_KEY não configurada no servidor.");
 
-    // IMPORTANTE: nunca pedimos ao modelo de imagem para renderizar texto.
-    // Mesmo modelos fortes erram acento/ortografia em português às vezes.
-    // O texto é sempre composto depois, no cliente, via Canvas
-    // (ver src/lib/composePost.ts) — 100% fiel ao português e sem nenhuma
-    // borda/moldura indesejada.
     const fullPrompt = `${data.prompt}.
 Professional advertising / editorial photograph, full-bleed, edge to edge, shot for a real campaign, high production value.
 Visual style: ${data.style || "cinematic, rich contrast, realistic textures"}.
@@ -182,44 +294,18 @@ STRICT RULES:
 Unique variation seed: ${data.seed}.`;
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), GEMINI_IMAGE_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), KIE_IMAGE_TIMEOUT_MS);
 
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
-          }),
-        },
-      );
-
-      if (!response.ok) {
-        const body = await response.text();
-        console.error("Gemini Image error", response.status, body.slice(0, 500));
-        if (response.status === 429) throw new Error("Limite gratuito da Gemini Image atingido no momento. Tente novamente em instantes.");
-        if (response.status === 401 || response.status === 403) throw new Error("Chave da Gemini inválida ou sem permissão para gerar imagens.");
-        throw new Error(`Gemini Image retornou um erro (${response.status}). Tente novamente.`);
-      }
-
-      const json = (await response.json()) as {
-        candidates?: { content?: { parts?: { inlineData?: { data?: string; mimeType?: string } }[] } }[];
-      };
-      const parts = json.candidates?.[0]?.content?.parts ?? [];
-      const imagePart = parts.find((p) => p.inlineData?.data);
-      if (!imagePart?.inlineData?.data) {
-        throw new Error("Imagem não retornada pela Gemini.");
-      }
-      const mimeType = imagePart.inlineData.mimeType || "image/png";
-      return { dataUrl: `data:${mimeType};base64,${imagePart.inlineData.data}` };
+      const taskId = await createKieImageTask(apiKey, fullPrompt, controller.signal);
+      const imageUrl = await waitForKieImage(apiKey, taskId, controller.signal);
+      const dataUrl = await imageUrlToDataUrl(imageUrl, controller.signal);
+      return { dataUrl };
     } catch (error) {
       const err = error as Error;
-      if (err.name === "AbortError") throw new Error("Tempo esgotado ao gerar imagem na Gemini.");
-      if (err.message?.includes("Gemini")) throw err;
-      throw new Error(`Falha ao gerar imagem: ${err.message}`);
+      if (err.name === "AbortError") throw new Error("Tempo esgotado ao gerar imagem na Kie.ai.");
+      if (err.message?.includes("Kie.ai") || err.message?.includes("imagem")) throw err;
+      throw new Error(`Falha ao gerar imagem pela Kie.ai: ${err.message}`);
     } finally {
       clearTimeout(timeout);
     }
