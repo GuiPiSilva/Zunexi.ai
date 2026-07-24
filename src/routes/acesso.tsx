@@ -121,18 +121,7 @@ function Access() {
                 <span className="h-px flex-1 bg-border" /> acesso controlado <span className="h-px flex-1 bg-border" />
               </div>
 
-              <div className="rounded-xl border border-border bg-white/[0.025] p-4">
-                <div className="flex items-start gap-3">
-                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><ShieldCheck className="h-5 w-5" /></div>
-                  <div>
-                    <h3 className="text-sm font-semibold">Cadastro fechado</h3>
-                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                      Usuários não podem criar conta nem gerar novas chaves. O acesso é liberado exclusivamente pelo administrador.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
+          
               <div className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
                 <LifeBuoy className="h-4 w-4" /> Problemas para acessar? Entre em contato com o suporte responsável.
               </div>
