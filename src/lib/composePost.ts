@@ -9,6 +9,8 @@
 // texto no mesmo lugar — mesmo problema de "engessamento" que já resolvemos
 // para o conteúdo e a imagem, mas aqui na etapa de composição visual.
 
+
+
 export type ComposeLayout =
   | "bottom-left"
   | "bottom-center"
