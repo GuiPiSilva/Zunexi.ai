@@ -5,7 +5,6 @@ import { CalendarDays, Clock3, ImagePlus, Loader2, MapPin, Palette, Sparkles, Up
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { generateCartaz, generateImage } from "@/lib/ai.functions";
-import { buildLayout, randomStyle } from "@/lib/layouts";
 import { newProject, upsertProject } from "@/lib/storage";
 
 export const Route = createFileRoute("/cartaz")({
@@ -86,21 +85,45 @@ function NovoCartaz() {
         seed,
       } });
 
-      let imageUrl = photo;
-      if (!imageUrl) {
-        try {
-          imageUrl = (await generateImageFn({ data: { prompt: generated.imagePrompt, seed, style: `${form.style}; ${form.palette}` } })).dataUrl;
-        } catch (error) {
-          console.error("Falha ao gerar imagem do cartaz", error);
-        }
-      }
-
       const dimensions = form.format === "1080x1080" ? [1080, 1080] : form.format === "1080x1920" ? [1080, 1920] : [1080, 1350];
       const [width, height] = dimensions;
-      const style = randomStyle();
-      const elements = buildLayout(style.layout, { title: generated.title, body: generated.body, imageUrl, palette: style.palette, width, height, fonts: style.fonts });
+      const aspectRatio = form.format === "1080x1080" ? "1:1" : form.format === "1080x1920" ? "9:16" : "4:5";
+
+      let imageUrl = photo;
+      if (!imageUrl) {
+        imageUrl = (await generateImageFn({
+          data: {
+            prompt: generated.imagePrompt,
+            seed,
+            slideTitle: generated.title,
+            slideBody: generated.body,
+            slideKind: `cartaz profissional de ${form.kind}`,
+            brand: form.title,
+            palette: form.palette,
+            style: `${form.style}; cartaz de evento premium; arte final pronta para publicação`,
+            aspectRatio,
+          },
+        })).dataUrl;
+      }
+
+      if (!imageUrl) throw new Error("A IA não retornou a arte do cartaz.");
+
+      // A Nano Banana já entrega o cartaz completo e diagramado.
+      // Não aplicamos o antigo buildLayout, pois ele cobria a arte com blocos simples.
+      const elements = [
+        { kind: "image" as const, x: 0, y: 0, w: width, h: height, url: imageUrl },
+      ];
       const project = newProject("cartaz", form.title, { style: form.style, ratio: form.format });
-      project.slides = [{ id: crypto.randomUUID(), width, height, canvas: { elements, background: style.palette[0], fonts: style.fonts } }];
+      project.slides = [{
+        id: crypto.randomUUID(),
+        width,
+        height,
+        canvas: {
+          elements,
+          background: "#05050a",
+          fonts: { display: "Bebas Neue", body: "Inter" },
+        },
+      }];
       upsertProject(project);
       toast.success("Cartaz criado. Abrindo o editor...");
       nav({ to: "/editor/$id", params: { id: project.id } });
