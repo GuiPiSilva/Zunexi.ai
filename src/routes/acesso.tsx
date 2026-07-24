@@ -60,8 +60,13 @@ function Access() {
             <div className="absolute inset-[20%] rounded-full border border-accent/15" />
             <div className="absolute inset-[31%] rounded-full border border-white/10" />
             <div className="absolute h-72 w-72 rounded-full bg-primary/20 blur-[90px]" />
-            <div className="relative grid h-56 w-56 place-items-center rounded-[42px] border border-primary/30 bg-gradient-to-br from-primary/20 via-[#11172a] to-accent/15 shadow-[0_35px_100px_rgba(72,33,186,.35)]">
-              <img src={logoIcon} alt="Símbolo InLabs.Ia Studios" className="h-40 w-40 object-contain drop-shadow-[0_25px_50px_rgba(101,80,255,.35)]" />
+            <div className="relative grid h-64 w-64 place-items-center overflow-hidden rounded-[48px] border border-primary/35 bg-gradient-to-br from-primary/20 via-[#11172a] to-accent/15 p-5 shadow-[0_35px_100px_rgba(72,33,186,.35)]">
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(139,92,246,.18),transparent_60%)]" />
+              <img
+                src={logoIcon}
+                alt="Símbolo InLabs.Ia Studios"
+                className="relative h-full w-full scale-[1.08] object-contain drop-shadow-[0_22px_45px_rgba(101,80,255,.42)]"
+              />
             </div>
             <span className="absolute left-[14%] top-[18%] h-2 w-2 rounded-full bg-primary shadow-[0_0_20px_6px_rgba(168,85,247,.5)]" />
             <span className="absolute bottom-[22%] right-[10%] h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_20px_6px_rgba(59,130,246,.5)]" />
