@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import {
@@ -25,6 +25,7 @@ import { AppShell } from "@/components/AppShell";
 import { generateImage, testNanoBananaConnection, uploadReferenceImage } from "@/lib/ai.functions";
 import { generateInstagramContent, testGroqConnection, updateSlide, type CarrosselOut } from "@/lib/groq.functions";
 import { getAccessKey } from "@/lib/session";
+import { newProject, upsertProject } from "@/lib/storage";
 
 export const Route = createFileRoute("/carrossel")({
   head: () => ({ meta: [{ title: "Criar carrossel — InLabs.Ia Studios" }] }),
@@ -49,6 +50,7 @@ function NovoCarrossel() {
   const [result, setResult] = useState<CarrosselOut | null>(null);
   const [autoImages, setAutoImages] = useState<Record<number, string>>({});
   const [progress, setProgress] = useState(0);
+  const [savedProjectId, setSavedProjectId] = useState<string | null>(null);
   const [referenceImage, setReferenceImage] = useState<{ dataUrl: string; name: string } | null>(null);
 
   const [form, setForm] = useState({
@@ -129,6 +131,7 @@ function NovoCarrossel() {
     setBusy(true);
     setResult(null);
     setAutoImages({});
+    setSavedProjectId(null);
     setProgress(5);
 
     const details = [
@@ -161,6 +164,7 @@ function NovoCarrossel() {
       setProgress(25);
       toast.success("Roteiro criado. Gerando imagens...");
 
+      const generatedAssets: Record<number, { dataUrl: string; url?: string }> = {};
       for (let index = 0; index < output.slides.length; index += 1) {
         const slide = output.slides[index];
         try {
@@ -177,6 +181,7 @@ function NovoCarrossel() {
             style: `${form.estilo}; tom ${form.tom}`,
             referenceImageUrl,
           } });
+          generatedAssets[slide.numero] = { dataUrl: image.dataUrl, url: image.url };
           setAutoImages((current) => ({ ...current, [slide.numero]: image.dataUrl }));
         } catch (error) {
           console.error(`Falha ao gerar imagem do slide ${slide.numero}`, error);
@@ -185,7 +190,21 @@ function NovoCarrossel() {
         setProgress(25 + Math.round(((index + 1) / output.slides.length) * 75));
       }
 
-      toast.success("Carrossel completo.");
+      try {
+        const projectId = await saveCarouselProject({
+          output,
+          assets: generatedAssets,
+          name: output.titulo || form.tema,
+          caption: `${output.legenda}\n\n${output.hashtags.map((tag) => `#${tag}`).join(" ")}`.trim(),
+          style: form.estilo,
+          reference: referenceImage?.name,
+        });
+        setSavedProjectId(projectId);
+        toast.success("Carrossel completo e salvo automaticamente em Meus projetos.");
+      } catch (saveError) {
+        console.error("Falha ao salvar o carrossel em Meus projetos", saveError);
+        toast.error("O carrossel foi criado, mas não foi possível salvá-lo em Meus projetos.");
+      }
     } catch (error) {
       toast.error((error as Error).message || "Erro ao gerar o carrossel.");
     } finally {
@@ -322,10 +341,94 @@ function NovoCarrossel() {
           </aside>
         </div>
 
-        {result && accessKey && <ResultView data={result} save={save} accessKey={accessKey} autoImages={autoImages} />}
+        {result && accessKey && <ResultView data={result} save={save} accessKey={accessKey} autoImages={autoImages} projectId={savedProjectId} />}
       </div>
     </AppShell>
   );
+}
+
+
+async function saveCarouselProject({
+  output,
+  assets,
+  name,
+  caption,
+  style,
+  reference,
+}: {
+  output: CarrosselOut;
+  assets: Record<number, { dataUrl: string; url?: string }>;
+  name: string;
+  caption: string;
+  style: string;
+  reference?: string;
+}): Promise<string> {
+  const project = newProject("carrossel", name.trim() || "Novo carrossel", {
+    theme: caption,
+    style,
+    ratio: "1080x1080",
+    reference,
+  });
+
+  project.slides = await Promise.all(output.slides.map(async (slide) => {
+    const asset = assets[slide.numero];
+    const thumb = asset?.dataUrl ? await resizeImageDataUrl(asset.dataUrl, 360, 0.72) : undefined;
+    const storedImage = asset?.url || (asset?.dataUrl ? await resizeImageDataUrl(asset.dataUrl, 1080, 0.88) : undefined);
+
+    const elements = storedImage
+      ? [{ kind: "image" as const, x: 0, y: 0, w: 1080, h: 1080, url: storedImage }]
+      : [
+          { kind: "rect" as const, x: 0, y: 0, w: 1080, h: 1080, fill: "#090b14" },
+          { kind: "text" as const, x: 90, y: 310, w: 900, text: slide.titulo, size: 78, color: "#ffffff", align: "center" as const, weight: 700 },
+          { kind: "text" as const, x: 120, y: 520, w: 840, text: slide.texto, size: 38, color: "#d4d4df", align: "center" as const },
+        ];
+
+    return {
+      id: crypto.randomUUID(),
+      width: 1080,
+      height: 1080,
+      thumb,
+      canvas: {
+        elements,
+        background: "#090b14",
+        fonts: { display: "Space Grotesk", body: "Inter" },
+      },
+    };
+  }));
+
+  upsertProject(project);
+  return project.id;
+}
+
+function resizeImageDataUrl(dataUrl: string, maxDimension: number, quality: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const sourceWidth = image.naturalWidth || image.width;
+      const sourceHeight = image.naturalHeight || image.height;
+      if (!sourceWidth || !sourceHeight) {
+        reject(new Error("Imagem gerada sem dimensões válidas."));
+        return;
+      }
+
+      const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
+      const width = Math.max(1, Math.round(sourceWidth * scale));
+      const height = Math.max(1, Math.round(sourceHeight * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        reject(new Error("O navegador não suporta redimensionamento de imagem."));
+        return;
+      }
+
+      context.drawImage(image, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    image.onerror = () => reject(new Error("Não foi possível preparar a imagem para o projeto."));
+    image.src = dataUrl;
+  });
 }
 
 function Stepper() {
@@ -341,13 +444,13 @@ function Tip({ icon: Icon, title, text }: { icon: React.ComponentType<{ classNam
   return <div className="flex gap-3 border-t border-border py-4 first:border-t-0"><div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><Icon className="h-4 w-4" /></div><div><div className="text-sm font-medium">{title}</div><div className="mt-1 text-xs leading-relaxed text-muted-foreground">{text}</div></div></div>;
 }
 
-function ResultView({ data, save, accessKey, autoImages }: { data: CarrosselOut; save: ReturnType<typeof useServerFn<typeof updateSlide>>; accessKey: string; autoImages: Record<number, string> }) {
+function ResultView({ data, save, accessKey, autoImages, projectId }: { data: CarrosselOut; save: ReturnType<typeof useServerFn<typeof updateSlide>>; accessKey: string; autoImages: Record<number, string>; projectId: string | null }) {
   return (
     <section className="space-y-5">
       <div className="panel p-5 sm:p-6">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-3xl"><div className="eyebrow mb-2">Conteúdo gerado</div><h2 className="section-title text-2xl">{data.titulo}</h2><p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">{data.legenda}</p><p className="mt-3 text-sm text-primary">{data.hashtags.map((tag) => `#${tag}`).join(" ")}</p></div>
-          <div className="flex flex-wrap gap-2"><CopyButton text={data.legenda} label="Copiar legenda" /><CopyButton text={data.hashtags.map((tag) => `#${tag}`).join(" ")} label="Copiar hashtags" /></div>
+          <div className="flex flex-wrap gap-2"><CopyButton text={data.legenda} label="Copiar legenda" /><CopyButton text={data.hashtags.map((tag) => `#${tag}`).join(" ")} label="Copiar hashtags" />{projectId && <Link to="/editor/$id" params={{ id: projectId }} className="primary-button text-xs"><Save className="h-3.5 w-3.5" /> Abrir projeto salvo</Link>}</div>
         </div>
       </div>
       <div className="grid gap-5 lg:grid-cols-2">{data.slides.map((slide) => <SlideCard key={slide.numero} generationId={data.id} slide={slide} save={save} accessKey={accessKey} autoImage={autoImages[slide.numero]} />)}</div>
