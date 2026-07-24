@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ProjetosRouteImport } from './routes/projetos'
 import { Route as ConfiguracoesRouteImport } from './routes/configuracoes'
+import { Route as CriadorPromptsRouteImport } from './routes/criador-prompts'
 import { Route as CartazRouteImport } from './routes/cartaz'
 import { Route as CarrosselRouteImport } from './routes/carrossel'
 import { Route as BibliotecaRouteImport } from './routes/biblioteca'
@@ -22,6 +23,11 @@ import { Route as EditorIdRouteImport } from './routes/editor.$id'
 const ProjetosRoute = ProjetosRouteImport.update({
   id: '/projetos',
   path: '/projetos',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CriadorPromptsRoute = CriadorPromptsRouteImport.update({
+  id: '/criador-prompts',
+  path: '/criador-prompts',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConfiguracoesRoute = ConfiguracoesRouteImport.update({
@@ -73,6 +79,7 @@ export interface FileRoutesByFullPath {
   '/carrossel': typeof CarrosselRoute
   '/cartaz': typeof CartazRoute
   '/configuracoes': typeof ConfiguracoesRoute
+  '/criador-prompts': typeof CriadorPromptsRoute
   '/projetos': typeof ProjetosRoute
   '/editor/$id': typeof EditorIdRoute
 }
@@ -84,6 +91,7 @@ export interface FileRoutesByTo {
   '/carrossel': typeof CarrosselRoute
   '/cartaz': typeof CartazRoute
   '/configuracoes': typeof ConfiguracoesRoute
+  '/criador-prompts': typeof CriadorPromptsRoute
   '/projetos': typeof ProjetosRoute
   '/editor/$id': typeof EditorIdRoute
 }
@@ -96,6 +104,7 @@ export interface FileRoutesById {
   '/carrossel': typeof CarrosselRoute
   '/cartaz': typeof CartazRoute
   '/configuracoes': typeof ConfiguracoesRoute
+  '/criador-prompts': typeof CriadorPromptsRoute
   '/projetos': typeof ProjetosRoute
   '/editor/$id': typeof EditorIdRoute
 }
@@ -109,6 +118,7 @@ export interface FileRouteTypes {
     | '/carrossel'
     | '/cartaz'
     | '/configuracoes'
+    | '/criador-prompts'
     | '/projetos'
     | '/editor/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -120,6 +130,7 @@ export interface FileRouteTypes {
     | '/carrossel'
     | '/cartaz'
     | '/configuracoes'
+    | '/criador-prompts'
     | '/projetos'
     | '/editor/$id'
   id:
@@ -131,6 +142,7 @@ export interface FileRouteTypes {
     | '/carrossel'
     | '/cartaz'
     | '/configuracoes'
+    | '/criador-prompts'
     | '/projetos'
     | '/editor/$id'
   fileRoutesById: FileRoutesById
@@ -143,6 +155,7 @@ export interface RootRouteChildren {
   CarrosselRoute: typeof CarrosselRoute
   CartazRoute: typeof CartazRoute
   ConfiguracoesRoute: typeof ConfiguracoesRoute
+  CriadorPromptsRoute: typeof CriadorPromptsRoute
   ProjetosRoute: typeof ProjetosRoute
   EditorIdRoute: typeof EditorIdRoute
 }
@@ -154,6 +167,13 @@ declare module '@tanstack/react-router' {
       path: '/projetos'
       fullPath: '/projetos'
       preLoaderRoute: typeof ProjetosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/criador-prompts': {
+      id: '/criador-prompts'
+      path: '/criador-prompts'
+      fullPath: '/criador-prompts'
+      preLoaderRoute: typeof CriadorPromptsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/configuracoes': {
@@ -223,6 +243,7 @@ const rootRouteChildren: RootRouteChildren = {
   CarrosselRoute: CarrosselRoute,
   CartazRoute: CartazRoute,
   ConfiguracoesRoute: ConfiguracoesRoute,
+  CriadorPromptsRoute: CriadorPromptsRoute,
   ProjetosRoute: ProjetosRoute,
   EditorIdRoute: EditorIdRoute,
 }
