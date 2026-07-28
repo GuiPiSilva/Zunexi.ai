@@ -156,7 +156,7 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
     setCloudflareLoading(true);
     try {
       setCloudflareUsage(await getCloudflareUsage({ data: { token } }));
-      if (showToast) toast.success("Uso da Cloudflare atualizado.");
+      if (showToast) toast.success("Uso da geração de imagens atualizado.");
     } catch (error) {
       toast.error((error as Error).message);
       if (/sessão|expirada|inválida/i.test((error as Error).message)) onLogout();
@@ -354,10 +354,10 @@ function CloudflareUsagePanel({ usage, loading, onRefresh }: { usage: Cloudflare
         <div>
           <div className="flex items-center gap-2">
             <Cloud className="h-5 w-5 text-primary" />
-            <h2 className="section-title text-lg">Uso da Cloudflare AI</h2>
+            <h2 className="section-title text-lg">Uso da geração de imagens</h2>
             {usage && !usage.setupRequired && <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${status.className}`}>{status.label}</span>}
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">Estimativa de Neurons consumidos pelas gerações feitas dentro da Zunexi.ai. A franquia gratuita reinicia às 00:00 UTC.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Estimativa de consumo das gerações feitas dentro da Zunexi.ai. A franquia diária reinicia às 00:00 UTC.</p>
         </div>
         <button type="button" onClick={onRefresh} disabled={loading} className="secondary-button shrink-0 disabled:opacity-50">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Atualizar
@@ -365,17 +365,17 @@ function CloudflareUsagePanel({ usage, loading, onRefresh }: { usage: Cloudflare
       </div>
 
       {loading && !usage ? (
-        <div className="grid min-h-48 place-items-center text-sm text-muted-foreground"><span><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Carregando uso da Cloudflare...</span></div>
+        <div className="grid min-h-48 place-items-center text-sm text-muted-foreground"><span><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Carregando uso da geração de imagens...</span></div>
       ) : usage?.setupRequired ? (
         <div className="p-5 sm:p-6">
           <div className="rounded-2xl border border-amber-500/20 bg-amber-500/8 p-4 text-sm text-amber-100">
-            Execute o arquivo SQL de uso da Cloudflare no Supabase para começar a registrar as gerações. Depois disso, este painel será preenchido automaticamente.
+            Execute o arquivo SQL de registro de uso no Supabase para começar a registrar as gerações. Depois disso, este painel será preenchido automaticamente.
           </div>
         </div>
       ) : usage ? (
         <div className="space-y-5 p-5 sm:p-6">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <CloudflareMetric icon={Activity} value={formatNeurons(usage.usedToday)} label="Neurons usados hoje" />
+            <CloudflareMetric icon={Activity} value={formatNeurons(usage.usedToday)} label="Consumo usado hoje" />
             <CloudflareMetric icon={Coins} value={formatNeurons(usage.remainingToday)} label="Estimativa restante" />
             <CloudflareMetric icon={ImageIcon} value={usage.imagesToday.toLocaleString("pt-BR")} label="Imagens geradas hoje" />
             <CloudflareMetric icon={ShieldCheck} value={`${usage.percentage.toFixed(1)}%`} label="Da franquia diária" />
@@ -383,14 +383,14 @@ function CloudflareUsagePanel({ usage, loading, onRefresh }: { usage: Cloudflare
 
           <div className="rounded-2xl border border-border bg-[#080b15] p-4">
             <div className="mb-2 flex items-center justify-between gap-3 text-xs">
-              <span className="font-medium">{formatNeurons(usage.usedToday)} / {formatNeurons(usage.dailyLimit)} Neurons</span>
+              <span className="font-medium">{formatNeurons(usage.usedToday)} / {formatNeurons(usage.dailyLimit)} unidades</span>
               <span className="text-muted-foreground">{usage.estimatedImagesRemaining === null ? "Estimativa de imagens após o primeiro uso" : `≈ ${usage.estimatedImagesRemaining.toLocaleString("pt-BR")} imagens restantes no ritmo de hoje`}</span>
             </div>
             <div className="h-3 overflow-hidden rounded-full bg-white/[0.055]">
               <div className={`h-full rounded-full transition-all ${usage.percentage >= 95 ? "bg-red-400" : usage.percentage >= 80 ? "bg-amber-400" : "bg-primary"}`} style={{ width: `${Math.min(100, usage.percentage)}%` }} />
             </div>
             <div className="mt-2 flex flex-wrap justify-between gap-2 text-[10px] text-muted-foreground">
-              <span>Média: {formatNeurons(usage.averageNeuronsPerImage)} Neurons/imagem</span>
+              <span>Média: {formatNeurons(usage.averageNeuronsPerImage)} unidades/imagem</span>
               <span>Reinicia em {new Date(usage.resetsAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} (horário de Brasília)</span>
             </div>
           </div>
@@ -412,14 +412,14 @@ function CloudflareUsagePanel({ usage, loading, onRefresh }: { usage: Cloudflare
                       <div className="w-full rounded-full bg-primary" style={{ height: `${Math.max(day.neurons > 0 ? 4 : 0, dayPercent)}%` }} />
                     </div>
                     <div className="mt-2 text-[10px] font-semibold">{new Date(`${day.date}T12:00:00Z`).toLocaleDateString("pt-BR", { weekday: "short", timeZone: "UTC" }).replace(".", "")}</div>
-                    <div className="mt-0.5 text-[9px] text-muted-foreground">{Math.round(day.neurons)} N · {day.images} img</div>
+                    <div className="mt-0.5 text-[9px] text-muted-foreground">{Math.round(day.neurons)} u · {day.images} img</div>
                   </div>
                 );
               })}
             </div>
           </div>
 
-          <p className="text-[10px] leading-relaxed text-muted-foreground">Observação: este número é uma estimativa calculada pela Zunexi.ai com base no modelo, dimensões e imagens de referência. Gerações feitas diretamente fora deste sistema não aparecem aqui; o valor oficial continua sendo o painel da Cloudflare.</p>
+          <p className="text-[10px] leading-relaxed text-muted-foreground">Observação: este número é uma estimativa calculada pela Zunexi.ai com base no modelo, dimensões e imagens de referência. Gerações feitas diretamente fora deste sistema não aparecem aqui; o valor oficial continua sendo o painel do provedor configurado.</p>
         </div>
       ) : null}
     </section>

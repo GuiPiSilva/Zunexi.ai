@@ -563,7 +563,7 @@ function NovoCarrossel() {
     try {
       const response = await test();
       setTestResult({ ok: response.ok, message: response.message });
-      response.ok ? toast.success("Groq conectado.") : toast.error(response.message);
+      response.ok ? toast.success("Serviço de texto conectado.") : toast.error(response.message);
     } catch (error) {
       const message = (error as Error).message || "Falha ao testar a conexão.";
       setTestResult({ ok: false, message });
@@ -580,9 +580,9 @@ function NovoCarrossel() {
     try {
       const response = await testCloudflare({ data: { imageQuality: form.imageQuality } });
       setCloudflareTestResult(response);
-      response.ok ? toast.success("Cloudflare Workers AI conectado e funcionando.") : toast.error(response.message);
+      response.ok ? toast.success("Serviço de imagem conectado e funcionando.") : toast.error(response.message);
     } catch (error) {
-      const message = (error as Error).message || "Falha ao testar o Cloudflare Workers AI.";
+      const message = (error as Error).message || "Falha ao testar o serviço de imagem.";
       setCloudflareTestResult({ ok: false, message });
       toast.error(message);
     } finally {
@@ -624,7 +624,7 @@ function NovoCarrossel() {
                   <Field label="Quantidade de slides"><select value={form.quantidadeSlides} onChange={(e) => setForm({ ...form, quantidadeSlides: Number(e.target.value) })} className="app-input">{Array.from({ length: 20 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value} slides</option>)}</select></Field>
                   <Field label="Estilo visual"><select value={form.estilo} onChange={(e) => setForm({ ...form, estilo: e.target.value })} className="app-input"><option>publicidade premium</option><option>food commercial</option><option>cinematográfico</option><option>luxury campaign</option><option>editorial</option><option>minimalista e premium</option><option>tech campaign</option><option>3D publicitário</option><option>corporativo</option><option>vibrante</option></select></Field>
                   <Field label="Paleta de cores"><input value={form.paleta} onChange={(e) => setForm({ ...form, paleta: e.target.value })} className="app-input" /></Field>
-                  <Field label="Qualidade da imagem"><select value={form.imageQuality} onChange={(e) => setForm({ ...form, imageQuality: e.target.value as "fast" | "premium" })} className="app-input"><option value="premium">Premium — FLUX Klein 9B</option><option value="fast">Rápida — FLUX Klein 4B</option></select></Field>
+                  <Field label="Qualidade da imagem"><select value={form.imageQuality} onChange={(e) => setForm({ ...form, imageQuality: e.target.value as "fast" | "premium" })} className="app-input"><option value="premium">Premium — maior qualidade</option><option value="fast">Rápida — maior velocidade</option></select></Field>
                 </div>
 
                 <Field label="CTA — chamada para ação"><input value={form.cta} onChange={(e) => setForm({ ...form, cta: e.target.value })} placeholder="Ex.: Experimente grátis a Zunexi.ai" className="app-input" /></Field>
@@ -666,17 +666,17 @@ function NovoCarrossel() {
               </div>
 
               <div className="panel p-5">
-                <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Conexão Groq</h2><p className="mt-1 text-xs text-muted-foreground">Teste a integração do servidor.</p></div><Plug className="h-5 w-5 text-primary" /></div>
+                <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Conexão do serviço de texto</h2><p className="mt-1 text-xs text-muted-foreground">Teste a integração do servidor.</p></div><Plug className="h-5 w-5 text-primary" /></div>
                 <button type="button" onClick={runTest} disabled={testing} className="secondary-button w-full disabled:opacity-60">{testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />} Testar conexão</button>
                 {testResult && <div className={`mt-3 rounded-xl border p-3 text-xs ${testResult.ok ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-200" : "border-red-500/25 bg-red-500/8 text-red-200"}`}><div className="flex items-start gap-2">{testResult.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{testResult.message}</span></div></div>}
               </div>
 
               <div className="panel p-5">
-                <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Teste Cloudflare Workers AI</h2><p className="mt-1 text-xs text-muted-foreground">Valida o token, a conta e o modelo de imagem.</p></div><ImageIcon className="h-5 w-5 text-primary" /></div>
-                <button type="button" onClick={runCloudflareTest} disabled={cloudflareTesting} className="secondary-button w-full disabled:opacity-60">{cloudflareTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />} {cloudflareTesting ? "Testando..." : "Testar Cloudflare"}</button>
-                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">O teste usa o modo selecionado acima. Premium prioriza qualidade e consome mais da cota do Workers AI.</p>
+                <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Teste do serviço de imagem</h2><p className="mt-1 text-xs text-muted-foreground">Valida o token, a conta e o modelo de imagem.</p></div><ImageIcon className="h-5 w-5 text-primary" /></div>
+                <button type="button" onClick={runCloudflareTest} disabled={cloudflareTesting} className="secondary-button w-full disabled:opacity-60">{cloudflareTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />} {cloudflareTesting ? "Testando..." : "Testar geração de imagem"}</button>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">O teste usa o modo selecionado acima. Premium prioriza qualidade e consome mais da cota de geração.</p>
                 {cloudflareTestResult && <div className={`mt-3 rounded-xl border p-3 text-xs ${cloudflareTestResult.ok ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-200" : "border-red-500/25 bg-red-500/8 text-red-200"}`}><div className="flex items-start gap-2">{cloudflareTestResult.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{cloudflareTestResult.message}</span></div>{cloudflareTestResult.model && <div className="mt-2 opacity-80">Modelo: {cloudflareTestResult.model}</div>}</div>}
-                {cloudflareTestResult?.dataUrl && <img src={cloudflareTestResult.dataUrl} alt="Imagem do teste Cloudflare Workers AI" className="mt-3 aspect-square w-full rounded-xl border border-border object-cover" />}
+                {cloudflareTestResult?.dataUrl && <img src={cloudflareTestResult.dataUrl} alt="Imagem do teste de geração" className="mt-3 aspect-square w-full rounded-xl border border-border object-cover" />}
               </div>
             </aside>
           </div>
@@ -913,7 +913,7 @@ function ScriptStage({
           <div className="min-w-0 flex-1">
             <div className="eyebrow mb-2">Etapa 2 de 4</div>
             <h2 className="section-title text-2xl">Criando o roteiro</h2>
-            <p className="mt-2 text-sm text-muted-foreground">A Groq está estruturando os títulos, textos, legenda e direção visual de cada slide.</p>
+            <p className="mt-2 text-sm text-muted-foreground">O sistema está estruturando os títulos, textos, legenda e direção visual de cada slide.</p>
             <div className="mt-5 flex items-center justify-between text-xs text-muted-foreground"><span>Gerando estrutura...</span><span>{Math.max(10, progress)}%</span></div>
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-secondary"><div className="h-full gradient-brand transition-all duration-500" style={{ width: `${Math.max(10, progress)}%` }} /></div>
           </div>
@@ -1000,7 +1000,7 @@ function ImagesStage({
           <div>
             <div className="eyebrow mb-2">Etapa 3 de 4 · imagens</div>
             <h2 className="section-title text-2xl">{busy ? "Gerando as artes do carrossel" : generated ? "Continue a geração das imagens" : "Pronto para criar as imagens"}</h2>
-            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Cada slide será criado individualmente pela Cloudflare Workers AI. Você pode sair desta página; a criação é retomada ao voltar.</p>
+            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Cada slide será criado individualmente pelo sistema de geração de imagens. Você pode sair desta página; a criação é retomada ao voltar.</p>
           </div>
           {!busy && (
             <button type="button" onClick={onGenerate} className="primary-button shrink-0"><Sparkles className="h-4 w-4" /> {generated ? "Continuar geração" : `Gerar ${total} imagens`}</button>

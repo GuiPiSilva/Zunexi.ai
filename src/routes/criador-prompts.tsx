@@ -72,7 +72,7 @@ function PromptCreatorPage() {
       <div className="page-wrap">
         <section className="mx-auto max-w-5xl">
           <div className="mb-7 text-center">
-            <div className="eyebrow mb-3">Assistente com Groq</div>
+            <div className="eyebrow mb-3">Assistente inteligente</div>
             <h1 className="section-title text-3xl sm:text-4xl">Crie seu prompt em segundos</h1>
             <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
               Explique de forma simples o que deseja. A IA transforma sua ideia em um prompt completo para o criador de carrosséis.
