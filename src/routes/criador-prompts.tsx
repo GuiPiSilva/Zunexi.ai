@@ -8,7 +8,7 @@ import { generateCarouselPrompt, type CarouselPromptData } from "@/lib/groq.func
 import { getAccessKey } from "@/lib/session";
 
 export const Route = createFileRoute("/criador-prompts")({
-  head: () => ({ meta: [{ title: "Criador de prompts | InLabs.Ia Studios" }] }),
+  head: () => ({ meta: [{ title: "Criador de prompts | Zunexi.ai" }] }),
   component: PromptCreatorPage,
 });
 
