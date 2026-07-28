@@ -149,14 +149,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-background text-foreground lg:flex">
       <aside className={`fixed inset-y-0 left-0 z-50 flex w-[264px] flex-col border-r border-sidebar-border bg-sidebar/95 shadow-2xl backdrop-blur-xl transition-transform lg:sticky lg:top-0 lg:h-screen ${open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
         <div className="flex h-[76px] items-center border-b border-sidebar-border px-4">
-          <img src={logoFull} alt="Zunexi.ai" className="h-14 w-auto max-w-[225px] object-contain drop-shadow-[0_0_18px_rgba(99,102,241,.22)]" />
+          <img src={logoFull} alt="Zunexi.ai" className="brand-logo-full h-14 w-auto max-w-[225px] object-contain drop-shadow-[0_0_18px_rgba(99,102,241,.22)]" />
         </div>
 
         <div className="px-4 pt-5">
           <div className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">Estúdio</div>
           <nav className="space-y-1.5">
             {NAV.map(({ to, label, icon: Icon }) => (
-              <Link key={to} to={to} activeOptions={{ exact: to === "/" }} className="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition hover:bg-white/[0.055] hover:text-white data-[status=active]:bg-gradient-to-r data-[status=active]:from-primary/25 data-[status=active]:to-accent/10 data-[status=active]:text-white data-[status=active]:shadow-[inset_3px_0_0_0_var(--color-primary)]">
+              <Link key={to} to={to} activeOptions={{ exact: to === "/" }} className="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition hover:bg-secondary/70 hover:text-foreground data-[status=active]:bg-gradient-to-r data-[status=active]:from-primary/25 data-[status=active]:to-accent/10 data-[status=active]:text-foreground data-[status=active]:shadow-[inset_3px_0_0_0_var(--color-primary)]">
                 <Icon className="h-[18px] w-[18px] text-muted-foreground transition group-hover:text-primary group-data-[status=active]:text-primary" />
                 <span>{label}</span>
               </Link>
@@ -169,10 +169,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Coins className="h-4 w-4 text-primary" />
             <span className="font-semibold">{credits?.unlimited ? "Créditos infinitos" : `${credits?.remaining ?? "—"} créditos hoje`}</span>
           </div>
-          <div className="flex items-center gap-3 rounded-xl border border-sidebar-border bg-white/[0.025] p-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-primary/25 bg-[#0d1020] p-1.5 shadow-[0_0_20px_rgba(139,92,246,0.16)]"><img src={logoIcon} alt="InLabs" className="h-full w-full object-contain" /></div>
+          <div className="flex items-center gap-3 rounded-xl border border-sidebar-border bg-card/55 p-3">
+            <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-primary/25 bg-[#0d1020] p-1.5 shadow-[0_0_20px_rgba(139,92,246,0.16)]"><img src={logoIcon} alt="Zunexi.ai" className="h-full w-full object-contain" /></div>
             <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold" title={userName}>{userName}</div><div className="truncate text-[11px] text-muted-foreground">Acesso autorizado</div></div>
-            <button onClick={logout} title="Sair" className="rounded-lg p-2 text-muted-foreground transition hover:bg-white/5 hover:text-white"><LogOut className="h-4 w-4" /></button>
+            <button onClick={logout} title="Sair" className="rounded-lg p-2 text-muted-foreground transition hover:bg-secondary/70 hover:text-foreground"><LogOut className="h-4 w-4" /></button>
           </div>
         </div>
       </aside>
@@ -186,26 +186,26 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="ml-auto hidden w-full max-w-sm items-center gap-2 rounded-xl border border-border bg-card/70 px-3 py-2.5 md:flex"><Search className="h-4 w-4 text-muted-foreground" /><input aria-label="Buscar" placeholder="Buscar projetos e conteúdos..." className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground" /><kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">⌘K</kbd></div>
 
           <div ref={notificationBox} className="relative">
-            <button onClick={() => { setNotificationOpen((value) => !value); if (!notificationOpen) { markAllNotificationsRead(); setNotifications(loadNotifications()); } }} className="relative rounded-xl border border-border bg-card p-2.5 text-muted-foreground transition hover:text-white" aria-label="Notificações">
+            <button onClick={() => { setNotificationOpen((value) => !value); if (!notificationOpen) { markAllNotificationsRead(); setNotifications(loadNotifications()); } }} className="relative rounded-xl border border-border bg-card p-2.5 text-muted-foreground transition hover:text-foreground" aria-label="Notificações">
               <Bell className="h-4 w-4" />
               {unread > 0 && <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[9px] font-bold text-white">{unread > 9 ? "9+" : unread}</span>}
             </button>
 
             {notificationOpen && (
-              <div className="absolute right-0 top-12 z-50 w-[min(92vw,380px)] overflow-hidden rounded-2xl border border-border bg-[#090c16] shadow-2xl">
+              <div className="absolute right-0 top-12 z-50 w-[min(92vw,380px)] overflow-hidden rounded-2xl border border-border bg-popover shadow-2xl">
                 <div className="flex items-center justify-between border-b border-border px-4 py-3">
                   <div><div className="font-semibold">Notificações</div><div className="text-[11px] text-muted-foreground">Avisos de geração e projetos</div></div>
                   <div className="flex gap-1">
-                    <button onClick={async () => { const permission = await requestNotificationPermission(); if (permission === "granted") setNotificationOpen(false); }} className="rounded-lg p-2 text-muted-foreground hover:bg-white/5 hover:text-white" title="Ativar notificações do navegador"><BellRing className="h-4 w-4" /></button>
-                    <button onClick={() => { markAllNotificationsRead(); setNotifications(loadNotifications()); }} className="rounded-lg p-2 text-muted-foreground hover:bg-white/5 hover:text-white" title="Marcar como lidas"><CheckCheck className="h-4 w-4" /></button>
-                    <button onClick={() => { clearNotifications(); setNotifications([]); }} className="rounded-lg p-2 text-muted-foreground hover:bg-white/5 hover:text-white" title="Limpar"><Trash2 className="h-4 w-4" /></button>
+                    <button onClick={async () => { const permission = await requestNotificationPermission(); if (permission === "granted") setNotificationOpen(false); }} className="rounded-lg p-2 text-muted-foreground hover:bg-secondary/70 hover:text-foreground" title="Ativar notificações do navegador"><BellRing className="h-4 w-4" /></button>
+                    <button onClick={() => { markAllNotificationsRead(); setNotifications(loadNotifications()); }} className="rounded-lg p-2 text-muted-foreground hover:bg-secondary/70 hover:text-foreground" title="Marcar como lidas"><CheckCheck className="h-4 w-4" /></button>
+                    <button onClick={() => { clearNotifications(); setNotifications([]); }} className="rounded-lg p-2 text-muted-foreground hover:bg-secondary/70 hover:text-foreground" title="Limpar"><Trash2 className="h-4 w-4" /></button>
                   </div>
                 </div>
                 <div className="max-h-[420px] overflow-y-auto">
                   {notifications.length === 0 ? (
                     <div className="grid min-h-36 place-items-center px-6 text-center text-sm text-muted-foreground">As conclusões das suas criações aparecerão aqui.</div>
                   ) : notifications.map((item) => (
-                    <button key={item.id} onClick={() => openNotification(item)} className="block w-full border-b border-border/70 px-4 py-3 text-left transition hover:bg-white/[0.035]">
+                    <button key={item.id} onClick={() => openNotification(item)} className="block w-full border-b border-border/70 px-4 py-3 text-left transition hover:bg-secondary/60">
                       <div className="flex items-start gap-3">
                         <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${item.kind === "error" ? "bg-red-400" : item.kind === "success" ? "bg-emerald-400" : "bg-primary"}`} />
                         <div className="min-w-0"><div className="text-sm font-semibold">{item.title}</div><div className="mt-1 text-xs leading-relaxed text-muted-foreground">{item.message}</div><div className="mt-1.5 text-[10px] text-muted-foreground">{formatNotificationDate(item.createdAt)}</div></div>
@@ -226,7 +226,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               }}
               aria-expanded={profileOpen}
               aria-haspopup="menu"
-              className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 hover:border-primary/35 hover:bg-white/[0.035]"
+              className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 hover:border-primary/35 hover:bg-secondary/60"
             >
               <div className="grid h-8 w-8 place-items-center overflow-hidden rounded-lg border border-primary/25 bg-black p-1"><img src={logoIcon} alt="Zunexi.ai" className="h-full w-full object-contain" /></div>
               <div className="text-left"><div className="max-w-[130px] truncate text-xs font-semibold" title={userName}>{userName}</div><div className="text-[10px] text-muted-foreground">{credits?.unlimited ? "Créditos infinitos" : `${credits?.remaining ?? "—"} créditos`}</div></div>
@@ -234,7 +234,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </button>
 
             {profileOpen && (
-              <div role="menu" className="absolute right-0 top-12 z-50 w-60 overflow-hidden rounded-2xl border border-border bg-[#090c16] p-2 shadow-2xl">
+              <div role="menu" className="absolute right-0 top-12 z-50 w-60 overflow-hidden rounded-2xl border border-border bg-popover p-2 shadow-2xl">
                 <div className="border-b border-border px-3 py-2.5">
                   <div className="truncate text-sm font-semibold" title={userName}>{userName}</div>
                   <div className="mt-0.5 text-[11px] text-muted-foreground">{credits?.unlimited ? "Créditos infinitos" : `${credits?.remaining ?? "—"} créditos disponíveis`}</div>
@@ -243,7 +243,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   type="button"
                   role="menuitem"
                   onClick={() => { setProfileOpen(false); navigate({ to: "/configuracoes" }); }}
-                  className="mt-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm text-muted-foreground hover:bg-white/5 hover:text-white"
+                  className="mt-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm text-muted-foreground hover:bg-secondary/70 hover:text-foreground"
                 >
                   <Settings className="h-4 w-4 text-primary" />
                   Configurações
@@ -252,7 +252,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   type="button"
                   role="menuitem"
                   onClick={logout}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm text-red-300/90 hover:bg-red-500/10 hover:text-red-200"
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm text-red-600 hover:bg-red-500/10 hover:text-red-700 dark:text-red-300/90 dark:hover:text-red-200"
                 >
                   <LogOut className="h-4 w-4" />
                   Sair da conta
