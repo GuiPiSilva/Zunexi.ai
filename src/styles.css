@@ -190,10 +190,28 @@
   .secondary-button:hover { border-color: oklch(0.5 0.15 285); background: var(--secondary-button-hover); }
   .eyebrow { font-size: .68rem; font-weight: 700; letter-spacing: .19em; text-transform: uppercase; color: var(--color-muted-foreground); }
   .section-title { font-family: var(--font-display); font-weight: 700; letter-spacing: -.025em; }
-  .brand-logo-full, .brand-logo-icon { transition: filter .18s ease, opacity .18s ease; }
+  .brand-logo-full, .brand-logo-icon {
+    transition: filter .18s ease, opacity .18s ease;
+    filter: drop-shadow(0 0 18px rgba(99, 102, 241, .22));
+  }
   .brand-logo-tile { background: #050505; transition: background-color .18s ease, border-color .18s ease; }
-  .light .brand-logo-full, .light .brand-logo-icon { filter: brightness(0) saturate(100%); }
-  .light .brand-logo-tile { background: #ffffff; }
+
+  /* A logo original é branca. No tema claro, convertemos os pixels visíveis para preto.
+     Os seletores por classe e data-theme garantem a troca mesmo no modo Sistema. */
+  html.light .brand-logo-full,
+  html.light .brand-logo-icon,
+  html[data-theme="claro"] .brand-logo-full,
+  html[data-theme="claro"] .brand-logo-icon {
+    filter: brightness(0) saturate(100%) !important;
+  }
+
+  html.dark .brand-logo-full,
+  html[data-theme="escuro"] .brand-logo-full {
+    filter: drop-shadow(0 0 18px rgba(99, 102, 241, .22));
+  }
+
+  html.light .brand-logo-tile,
+  html[data-theme="claro"] .brand-logo-tile { background: #ffffff; }
 }
 
 @media (min-width: 1024px) {
