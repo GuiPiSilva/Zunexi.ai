@@ -19,8 +19,8 @@ import { loadLibrary, loadProjects, subscribeLibrary, subscribeProjects, type Pr
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Dashboard — InLabs.Ia Studios" },
-      { name: "description", content: "Painel do estúdio criativo InLabs.Ia Studios." },
+      { title: "Dashboard — Zunexi.ai" },
+      { name: "description", content: "Painel do estúdio criativo Zunexi.ai." },
     ],
   }),
   component: Dashboard,
