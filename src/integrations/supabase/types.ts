@@ -56,6 +56,45 @@ export type Database = {
         }
         Relationships: []
       }
+      cloudflare_ai_usage: {
+        Row: {
+          created_at: string
+          estimated_neurons: number
+          has_reference: boolean
+          height: number
+          id: string
+          input_tiles: number
+          model: string
+          output_tiles: number
+          source: string
+          width: number
+        }
+        Insert: {
+          created_at?: string
+          estimated_neurons: number
+          has_reference?: boolean
+          height: number
+          id?: string
+          input_tiles?: number
+          model: string
+          output_tiles: number
+          source?: string
+          width: number
+        }
+        Update: {
+          created_at?: string
+          estimated_neurons?: number
+          has_reference?: boolean
+          height?: number
+          id?: string
+          input_tiles?: number
+          model?: string
+          output_tiles?: number
+          source?: string
+          width?: number
+        }
+        Relationships: []
+      }
       credit_transactions: {
         Row: {
           id: string
