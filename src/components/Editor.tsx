@@ -1,10 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useCallback } from "react";
 import * as fabric from "fabric";
 import type { ElementDesc } from "@/lib/layouts";
-import { Type, Image as ImageIcon, Square, Circle as CircleIcon, Trash2, Copy, Undo2, Redo2, Download, Bold, Italic, AlignLeft, AlignCenter, AlignRight } from "lucide-react";
+import { Type, Image as ImageIcon, Square, Circle as CircleIcon, Trash2, Copy, Undo2, Redo2, Download, Bold, Italic, AlignLeft, AlignCenter, AlignRight, Layers3 } from "lucide-react";
+import { exportFabricCanvasToPsd } from "@/lib/psd-export";
 
 export interface EditorHandle {
   exportPng: (filename?: string, multiplier?: number) => string | null;
+  exportPsd: (filename?: string) => Promise<boolean>;
   getDataUrl: (multiplier?: number) => string | null;
 }
 
@@ -39,6 +41,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
       anchor.download = filename;
       anchor.click();
       return dataUrl;
+    },
+    async exportPsd(filename = "zunexi-design.psd") {
+      const canvas = fcRef.current;
+      if (!canvas) return false;
+      return exportFabricCanvasToPsd(canvas, filename);
     },
   }), []);
 
@@ -191,6 +198,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
     const url = c.toDataURL({ format: "png", multiplier: 1 });
     const a = document.createElement("a"); a.href = url; a.download = "post.png"; a.click();
   }
+  async function exportPsd() {
+    const c = fcRef.current; if (!c) return;
+    await exportFabricCanvasToPsd(c, "zunexi-design.psd");
+  }
 
   const isText = sel instanceof fabric.Textbox;
 
@@ -218,6 +229,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
         </label>
         <span className="w-px h-6 bg-border mx-1"/>
         <ToolBtn onClick={exportPng} icon={Download} label="Exportar PNG"/>
+        <ToolBtn onClick={() => void exportPsd()} icon={Layers3} label="Exportar PSD"/>
 
         {isText && sel && (
           <div className="flex items-center gap-1 ml-auto flex-wrap">
