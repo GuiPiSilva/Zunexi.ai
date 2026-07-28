@@ -123,9 +123,15 @@ PADRÃO DE QUALIDADE VISUAL:
 - Não invente telefone, preço, endereço, desconto, data ou condição comercial. Use somente dados fornecidos; quando não houver, não inclua.
 
 REGRAS DE COPY:
-- Português brasileiro correto, natural e persuasivo.
-- Título entre 2 e 8 palavras, legível e forte.
-- Texto secundário curto: no máximo 22 palavras, salvo cardápios/listas solicitados pelo usuário.
+- Português brasileiro correto, natural, persuasivo e específico. Evite frases vazias como “descubra o melhor”, “qualidade que você merece” ou variações genéricas sem informação concreta.
+- Título: normalmente entre 3 e 10 palavras, forte, claro e ligado ao conteúdo real do slide.
+- O campo texto NÃO deve ser apenas uma legenda curta. Ele deve entregar conteúdo suficiente para o usuário sentir que o slide está pronto para publicação.
+- Em slides comuns, escreva aproximadamente 45 a 110 palavras, usando quebras de linha quando melhorarem a leitura.
+- Em cardápios, catálogos, listas de serviços, tabelas de preço, programação, benefícios ou comparativos, use 70 a 180 palavras por slide quando necessário e organize em linhas/seções legíveis.
+- Para listas, prefira estrutura visual em texto simples, por exemplo: “🍕 PIZZAS TRADICIONAIS\nMussarela — R$ 29,90\nMolho de tomate, mussarela e orégano.\n\nCalabresa — R$ 31,90\n...”. Não use markdown com ** ou # porque o editor exibirá esses caracteres.
+- Se houver muito conteúdo, DISTRIBUA entre os slides. Não resuma um cardápio completo em uma frase e não tente colocar tudo em um único slide.
+- Preserve literalmente preços, nomes, datas, sabores, ingredientes, condições e outras informações fornecidas pelo usuário. Nunca invente valores ou dados comerciais ausentes.
+- A capa deve apresentar a proposta e um gancho. Slides intermediários devem desenvolver informações reais. O último slide deve concluir e trazer CTA claro.
 - O primeiro slide é "capa", os intermediários são "conteudo" e o último é "cta".
 - Hashtags entre 8 e 15, sem # dentro do JSON.
 
@@ -153,7 +159,9 @@ Paleta: ${palette}
 CTA fornecido: ${requestedCta || "nenhum CTA específico"}
 Informações adicionais completas: ${data.informacoesAdicionais || "nenhuma"}
 
-Faça os slides funcionarem como uma campanha contínua. O promptImagem de cada slide deve gerar apenas o visual fotográfico/ilustrado principal, sem texto, deixando a composição preparada para a Zunexi aplicar o layout editável depois. Não invente dados ausentes.
+Faça os slides funcionarem como uma campanha contínua. O promptImagem de cada slide deve gerar apenas o visual fotográfico/ilustrado principal, sem texto, deixando a composição preparada para a Zunexi aplicar o layout editável depois.
+
+IMPORTANTE SOBRE CONTEÚDO: se o pedido trouxer um cardápio, catálogo, preços, lista de produtos, serviços ou muitas informações, use os slides para mostrar o conteúdo de forma COMPLETA. Separe por categorias e preserve cada dado recebido. Não transforme informações detalhadas em slogans curtos. Se o usuário fornecer um exemplo longo de conteúdo, trate o nível de detalhe desse exemplo como referência de profundidade. Não invente dados ausentes.
 Semente de variação: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
     const controller = new AbortController();
