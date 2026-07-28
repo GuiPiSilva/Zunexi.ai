@@ -25,7 +25,7 @@ import {
 } from "@/lib/storage";
 
 export const Route = createFileRoute("/editor/$id")({
-  head: () => ({ meta: [{ title: "Editor visual — InLabs.Ia Studios" }] }),
+  head: () => ({ meta: [{ title: "Editor visual — Zunexi.ai" }] }),
   component: EditorPage,
 });
 
