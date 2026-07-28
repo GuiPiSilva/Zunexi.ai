@@ -30,20 +30,38 @@ function NotFoundComponent() {
   );
 }
 
+function isDynamicImportError(error: Error) {
+  return /Failed to fetch dynamically imported module|Importing a module script failed|ChunkLoadError|Loading chunk .* failed/i.test(
+    error.message,
+  );
+}
+
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   const router = useRouter();
+  const chunkLoadError = isDynamicImportError(error);
   useEffect(() => {
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold">Algo quebrou</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{error.message}</p>
+        <h1 className="text-xl font-semibold">{chunkLoadError ? "Atualizando a Zunexi.ai" : "Algo quebrou"}</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {chunkLoadError
+            ? "Uma versão mais nova do sistema foi publicada. Recarregue para usar os arquivos do deploy atual."
+            : error.message}
+        </p>
         <button
-          onClick={() => { router.invalidate(); reset(); }}
+          onClick={() => {
+            if (chunkLoadError) {
+              window.location.reload();
+              return;
+            }
+            router.invalidate();
+            reset();
+          }}
           className="mt-6 rounded-md gradient-brand px-4 py-2 text-sm font-medium text-primary-foreground"
-        >Tentar novamente</button>
+        >{chunkLoadError ? "Recarregar agora" : "Tentar novamente"}</button>
       </div>
     </div>
   );
