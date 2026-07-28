@@ -1,7 +1,7 @@
 import { getCurrentUserScope, getUserStorageKey } from "@/lib/user-scope";
 
 export type CreationJobType = "carrossel" | "cartaz";
-export type CreationJobStatus = "queued" | "running" | "completed" | "failed";
+export type CreationJobStatus = "queued" | "running" | "review" | "completed" | "failed";
 
 export type CreationJob = {
   id: string;
@@ -79,6 +79,12 @@ export function getLatestCreationJob(type: CreationJobType) {
 
 export function getActiveCreationJob(type: CreationJobType) {
   return loadCreationJobs().find((job) => job.type === type && (job.status === "queued" || job.status === "running"));
+}
+
+export function getPendingCreationJob(type: CreationJobType) {
+  return loadCreationJobs().find((job) =>
+    job.type === type && (job.status === "queued" || job.status === "running" || job.status === "review"),
+  );
 }
 
 export async function withCreationJobLock(id: string, task: () => Promise<void>): Promise<boolean> {
