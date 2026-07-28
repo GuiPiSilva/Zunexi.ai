@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
-import { generateImage, testNanoBananaConnection, uploadReferenceImage } from "@/lib/ai.functions";
+import { generateImage, testCloudflareConnection, uploadReferenceImage } from "@/lib/ai.functions";
 import { generateInstagramContent, testGroqConnection, updateSlide, type CarrosselOut } from "@/lib/groq.functions";
 import { getAccessKey } from "@/lib/session";
 import { newProject, upsertProject } from "@/lib/storage";
@@ -49,14 +49,14 @@ function NovoCarrossel() {
   const test = useServerFn(testGroqConnection);
   const generateImageFn = useServerFn(generateImage);
   const uploadReferenceImageFn = useServerFn(uploadReferenceImage);
-  const testNanoBanana = useServerFn(testNanoBananaConnection);
+  const testCloudflare = useServerFn(testCloudflareConnection);
 
   const [accessKey, setAccessKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [nanoTesting, setNanoTesting] = useState(false);
-  const [nanoTestResult, setNanoTestResult] = useState<{ ok: boolean; message: string; model?: string; dataUrl?: string } | null>(null);
+  const [cloudflareTesting, setCloudflareTesting] = useState(false);
+  const [cloudflareTestResult, setCloudflareTestResult] = useState<{ ok: boolean; message: string; model?: string; dataUrl?: string } | null>(null);
   const [result, setResult] = useState<CarrosselOut | null>(null);
   const [autoImages, setAutoImages] = useState<Record<number, string>>({});
   const [progress, setProgress] = useState(0);
@@ -286,8 +286,34 @@ function NovoCarrossel() {
     }
 
     const reader = new FileReader();
-    reader.onload = () => setReferenceImage({ dataUrl: String(reader.result), name: file.name });
     reader.onerror = () => toast.error("Não foi possível ler a imagem.");
+    reader.onload = () => {
+      const originalDataUrl = String(reader.result);
+      const image = new Image();
+      image.onerror = () => toast.error("Não foi possível preparar a imagem de referência.");
+      image.onload = () => {
+        const maxSide = 512;
+        const scale = Math.min(1, maxSide / image.naturalWidth, maxSide / image.naturalHeight);
+        if (scale >= 1) {
+          setReferenceImage({ dataUrl: originalDataUrl, name: file.name });
+          return;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          toast.error("Não foi possível preparar a imagem de referência.");
+          return;
+        }
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const outputType = file.type === "image/png" ? "image/png" : "image/jpeg";
+        const dataUrl = canvas.toDataURL(outputType, 0.92);
+        setReferenceImage({ dataUrl, name: file.name });
+      };
+      image.src = originalDataUrl;
+    };
     reader.readAsDataURL(file);
   }
 
@@ -362,20 +388,20 @@ function NovoCarrossel() {
     }
   }
 
-  async function runNanoBananaTest() {
-    if (nanoTesting) return;
-    setNanoTesting(true);
-    setNanoTestResult(null);
+  async function runCloudflareTest() {
+    if (cloudflareTesting) return;
+    setCloudflareTesting(true);
+    setCloudflareTestResult(null);
     try {
-      const response = await testNanoBanana();
-      setNanoTestResult(response);
-      response.ok ? toast.success("Nano Banana conectado e funcionando.") : toast.error(response.message);
+      const response = await testCloudflare();
+      setCloudflareTestResult(response);
+      response.ok ? toast.success("Cloudflare Workers AI conectado e funcionando.") : toast.error(response.message);
     } catch (error) {
-      const message = (error as Error).message || "Falha ao testar o Nano Banana.";
-      setNanoTestResult({ ok: false, message });
+      const message = (error as Error).message || "Falha ao testar o Cloudflare Workers AI.";
+      setCloudflareTestResult({ ok: false, message });
       toast.error(message);
     } finally {
-      setNanoTesting(false);
+      setCloudflareTesting(false);
     }
   }
 
@@ -385,7 +411,7 @@ function NovoCarrossel() {
         <section>
          
           <h1 className="section-title text-3xl sm:text-4xl">Criar carrossel</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Crie roteiro, textos e imagens em poucos passos com a IA da Groq (roteiro) e Google Gemini/Nano Banana (artes finais, grátis).</p>
+          <p className="mt-2 text-sm text-muted-foreground">Crie roteiro, textos e imagens em poucos passos com Groq (roteiro) e Cloudflare Workers AI / FLUX.2 (artes finais).</p>
         </section>
 
         <Stepper />
@@ -465,11 +491,11 @@ function NovoCarrossel() {
             </div>
 
             <div className="panel p-5">
-              <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Teste Nano Banana</h2><p className="mt-1 text-xs text-muted-foreground">Faz uma geração real na API da Google para validar a chave e o modelo.</p></div><ImageIcon className="h-5 w-5 text-primary" /></div>
-              <button type="button" onClick={runNanoBananaTest} disabled={nanoTesting} className="secondary-button w-full disabled:opacity-60">{nanoTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />} {nanoTesting ? "Testando..." : "Testar Nano Banana"}</button>
-              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">Este teste consome uma geração dentro da sua cota gratuita diária da Gemini.</p>
-              {nanoTestResult && <div className={`mt-3 rounded-xl border p-3 text-xs ${nanoTestResult.ok ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-200" : "border-red-500/25 bg-red-500/8 text-red-200"}`}><div className="flex items-start gap-2">{nanoTestResult.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{nanoTestResult.message}</span></div>{nanoTestResult.model && <div className="mt-2 opacity-80">Modelo: {nanoTestResult.model}</div>}</div>}
-              {nanoTestResult?.dataUrl && <img src={nanoTestResult.dataUrl} alt="Imagem do teste Nano Banana" className="mt-3 aspect-square w-full rounded-xl border border-border object-cover" />}
+              <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Teste Cloudflare Workers AI</h2><p className="mt-1 text-xs text-muted-foreground">Faz uma geração real no FLUX.2 para validar o token, a conta e o modelo.</p></div><ImageIcon className="h-5 w-5 text-primary" /></div>
+              <button type="button" onClick={runCloudflareTest} disabled={cloudflareTesting} className="secondary-button w-full disabled:opacity-60">{cloudflareTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />} {cloudflareTesting ? "Testando..." : "Testar Cloudflare"}</button>
+              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">Este teste consome uma geração da cota diária do Cloudflare Workers AI.</p>
+              {cloudflareTestResult && <div className={`mt-3 rounded-xl border p-3 text-xs ${cloudflareTestResult.ok ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-200" : "border-red-500/25 bg-red-500/8 text-red-200"}`}><div className="flex items-start gap-2">{cloudflareTestResult.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{cloudflareTestResult.message}</span></div>{cloudflareTestResult.model && <div className="mt-2 opacity-80">Modelo: {cloudflareTestResult.model}</div>}</div>}
+              {cloudflareTestResult?.dataUrl && <img src={cloudflareTestResult.dataUrl} alt="Imagem do teste Cloudflare Workers AI" className="mt-3 aspect-square w-full rounded-xl border border-border object-cover" />}
             </div>
           </aside>
         </div>
