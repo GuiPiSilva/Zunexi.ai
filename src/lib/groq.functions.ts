@@ -101,7 +101,7 @@ Retorne SEMPRE JSON válido, sem markdown, no formato EXATO:
       "numero": 1,
       "titulo": "Texto principal que aparecerá no layout",
       "texto": "Texto secundário curto que aparecerá no layout",
-      "promptImagem": "Direção de arte completa em inglês para gerar o post final já diagramado",
+      "promptImagem": "Direção de arte em inglês para gerar somente o visual/fundo fotográfico do slide, sem texto",
       "tipo": "capa"
     }
   ]
@@ -111,8 +111,8 @@ PLANEJAMENTO OBRIGATÓRIO:
 ${slideRoles}
 
 PADRÃO DE QUALIDADE VISUAL:
-- Cada slide deve parecer uma peça publicitária finalizada, não uma foto solta com texto simples por cima.
-- Planeje hierarquia tipográfica forte, grid, margens, blocos, selos, linhas, ícones, chamadas, etiquetas, preços e elementos de apoio quando fizerem sentido.
+- Cada slide deve ter uma direção de arte forte, coerente e com qualidade publicitária.
+- O layout, a tipografia, textos, formas, selos e elementos gráficos serão montados depois pela Zunexi como camadas editáveis; o promptImagem deve focar somente no visual principal.
 - Use fotografia de produto extremamente apetitosa ou premium quando o tema envolver alimentos/produtos; use mockups, interfaces, objetos e cenas coerentes quando for serviço ou tecnologia.
 - Preserve uma identidade visual única em todos os slides: mesma paleta, textura, linguagem tipográfica, tratamento fotográfico e assinatura da marca.
 - Varie a composição entre slides: capa hero, produto + benefício, comparação, lista, cardápio, oferta, prova e CTA. Não repita o mesmo enquadramento.
@@ -127,13 +127,13 @@ REGRAS DE COPY:
 - Hashtags entre 8 e 15, sem # dentro do JSON.
 
 REGRAS DO promptImagem:
-- Escreva em inglês, mas declare EXATAMENTE quais textos em português devem aparecer na arte.
-- Descreva o POST FINAL COMPLETO em formato quadrado 1:1: layout, posição dos textos, produto, fundo, iluminação, fontes, contraste, textura e elementos gráficos.
-- Inclua literalmente: Main headline text: "..." e Supporting text: "..." usando o título e texto do slide.
-- Quando a marca for conhecida, inclua Brand name: "..." em posição discreta e consistente.
-- Exija spelling perfeito em português e proíba qualquer texto extra inventado.
-- Priorize legibilidade em tela de celular e acabamento editorial premium.
-- O prompt não deve pedir fotografia sem texto; ele deve pedir a peça diagramada pronta para Instagram.`;
+- Escreva em inglês.
+- Gere SOMENTE o visual principal do slide: fotografia, produto, personagem, ambiente, textura, iluminação e composição.
+- NÃO peça texto, tipografia, letras, números, logotipo, preço, telefone, watermark, UI, moldura ou palavras na imagem.
+- Considere que título e texto serão adicionados depois como camadas editáveis. Deixe áreas de respiro/negative space adequadas para o papel do slide, sem criar uma caixa vazia artificial.
+- Descreva com precisão o assunto, câmera/lente quando útil, iluminação, materiais, profundidade, enquadramento, tratamento comercial e direção de arte.
+- Preserve a mesma linguagem visual da campanha, mas varie enquadramento, distância, perspectiva e distribuição do assunto entre slides.
+- Evite aparência genérica de banco de imagens, arte surreal aleatória, mãos deformadas, objetos duplicados e fundos poluídos.`;
 
     const userPrompt = `Crie o carrossel completo com estes dados:
 Tema: ${data.tema}
@@ -148,7 +148,7 @@ Paleta: ${palette}
 CTA fornecido: ${requestedCta || "nenhum CTA específico"}
 Informações adicionais completas: ${data.informacoesAdicionais || "nenhuma"}
 
-Faça os slides funcionarem como uma campanha contínua. O promptImagem de cada slide deve gerar a arte final diagramada, com textos visíveis, identidade da marca e qualidade comercial alta. Não invente dados ausentes.
+Faça os slides funcionarem como uma campanha contínua. O promptImagem de cada slide deve gerar apenas o visual fotográfico/ilustrado principal, sem texto, deixando a composição preparada para a Zunexi aplicar o layout editável depois. Não invente dados ausentes.
 Semente de variação: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
     const controller = new AbortController();

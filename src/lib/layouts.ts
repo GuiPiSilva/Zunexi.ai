@@ -69,7 +69,7 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
       break;
     }
     case "side-text": {
-      const leftText = Math.random() > 0.5;
+      const leftText = true;
       const halfW = W*0.5;
       if (imageUrl) els.push({ kind: "image", x: leftText ? halfW : 0, y: 0, w: halfW, h: H, url: imageUrl });
       els.push({ kind: "text", x: (leftText?0:halfW)+P, y: H*0.3, w: halfW-2*P, text: title, size: medTitle, color: text, align: "left", weight: 700, font: fonts.display });
@@ -79,7 +79,9 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
     case "text-over-image": {
       if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl });
       els.push({ kind: "rect", x: 0, y: 0, w: W, h: H, fill: "#000000", opacity: 0.45 });
-      els.push({ kind: "text", x: P, y: H*between(0.2, 0.6), w: W-2*P, text: title, size: bigTitle, color: "#ffffff", align: titleAlign, weight: 700, shadow: "rgba(0,0,0,0.6) 0 4 20", font: fonts.display });
+      const titleY = H * between(0.18, 0.42);
+      els.push({ kind: "text", x: P, y: titleY, w: W-2*P, text: title, size: bigTitle, color: "#ffffff", align: titleAlign, weight: 700, shadow: "rgba(0,0,0,0.6) 0 4 20", font: fonts.display });
+      if (body) els.push({ kind: "text", x: P, y: Math.min(H*0.78, titleY + bigTitle*1.5), w: W-2*P, text: body, size: bodySize, color: "#ffffff", align: titleAlign, font: fonts.body });
       break;
     }
     case "hero-image": {
@@ -157,4 +159,94 @@ export const FONT_PAIRS = [
 
 export function randomStyle() {
   return { palette: rnd(PALETTES), fonts: rnd(FONT_PAIRS), layout: pickLayout() };
+}
+
+const COLOR_KEYWORDS: Array<[RegExp, string]> = [
+  [/preto|black|grafite|graphite|dark/i, "#09090b"],
+  [/branco|white|gelo|ice/i, "#ffffff"],
+  [/azul|blue/i, "#4d6bff"],
+  [/ciano|cyan|turquesa|turquoise/i, "#22d3ee"],
+  [/roxo|violeta|purple|violet/i, "#8b5cf6"],
+  [/rosa|pink/i, "#ec4899"],
+  [/vermelho|red/i, "#ef4444"],
+  [/laranja|orange/i, "#f97316"],
+  [/amarelo|yellow|dourado|gold/i, "#f2c14e"],
+  [/verde|green|esmeralda|emerald/i, "#10b981"],
+  [/cinza|gray|grey/i, "#71717a"],
+  [/bege|beige|creme|cream/i, "#f5f0e6"],
+];
+
+function luminance(hex: string) {
+  const value = hex.replace("#", "");
+  if (value.length !== 6) return 0;
+  const channels = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16) / 255);
+  const linear = channels.map((channel) => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+}
+
+export function paletteFromDescription(description: string): string[] {
+  const explicitHex = description.match(/#[0-9a-f]{6}\b/gi) || [];
+  const named = COLOR_KEYWORDS.filter(([pattern]) => pattern.test(description)).map(([, color]) => color);
+  const colors = [...explicitHex.map((color) => color.toLowerCase()), ...named]
+    .filter((color, index, all) => all.indexOf(color) === index);
+
+  const bg = colors[0] || "#09090b";
+  const primary = colors[1] || (luminance(bg) > 0.55 ? "#4d6bff" : "#8b5cf6");
+  const accent = colors[2] || (primary.toLowerCase() === "#8b5cf6" ? "#22d3ee" : "#8b5cf6");
+  const text = luminance(bg) > 0.55 ? "#111827" : "#ffffff";
+  return [bg, primary, accent, text];
+}
+
+export function fontPairFromStyle(style: string) {
+  const value = style.toLowerCase();
+  if (/luxo|luxury|elegant|elegante|sofistic|editorial|vintage/.test(value)) {
+    return { display: "Playfair Display", body: "Inter" };
+  }
+  if (/impact|bold|street|festival|esport|sport|vibrante/.test(value)) {
+    return { display: "Archivo Black", body: "Inter" };
+  }
+  if (/minimal|clean|corporat|profissional/.test(value)) {
+    return { display: "Space Grotesk", body: "Inter" };
+  }
+  if (/futur|tech|tecnolog|digital|ia|cyber/.test(value)) {
+    return { display: "Syne", body: "Inter" };
+  }
+  return { display: "Space Grotesk", body: "Inter" };
+}
+
+export function layoutForSlide(index: number, kind: string): LayoutId {
+  const role = kind.toLowerCase();
+  if (role.includes("capa")) return "text-over-image";
+  if (role.includes("cta")) return "center-text";
+  const sequence: LayoutId[] = ["side-text", "hero-image", "bottom-text", "split", "top-text", "diagonal", "framed"];
+  return sequence[Math.max(0, index) % sequence.length];
+}
+
+export function compositionForLayout(layout: LayoutId): string {
+  switch (layout) {
+    case "top-text":
+      return "Keep the strongest visual interest in the lower half and preserve a calmer upper area for editorial copy.";
+    case "bottom-text":
+      return "Keep the hero subject in the upper half and preserve a calmer lower area for editorial copy.";
+    case "side-text":
+      return "Place the hero subject primarily on the right side and preserve clean negative space on the left for copy.";
+    case "split":
+      return "Compose the hero subject to work inside the left half of the frame, leaving the right half cleaner for copy.";
+    case "hero-image":
+      return "Create a strong centered hero composition with clean edges and enough breathing room around the subject.";
+    case "center-text":
+      return "Use a simple cinematic background with visual interest around the edges and a calm center for the final CTA.";
+    case "text-over-image":
+      return "Use a full-bleed cinematic hero, preferably biased slightly to the right, with readable tonal separation for copy overlay.";
+    case "framed":
+      return "Keep the key subject centered with balanced margins so it works inside an editorial framed composition.";
+    case "diagonal":
+      return "Use dynamic depth and diagonal movement while keeping the left-center area relatively clean for copy.";
+    case "big-text-small-image":
+      return "Use a compact secondary hero subject in the lower-right quadrant and keep the upper-left area clean.";
+    case "geometric-bg":
+      return "Use a clean centered subject with simple background separation that can combine with geometric graphic layers.";
+    case "quote-card":
+      return "Use subtle atmospheric imagery with low visual noise so a large quote card can remain dominant.";
+  }
 }

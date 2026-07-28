@@ -116,8 +116,9 @@ export const generateCartaz = createServerFn({ method: "POST" })
 REGRAS:
 - title: chamada principal curta e impactante em português.
 - body: somente as informações reais fornecidas pelo usuário, organizadas de forma clara; inclua data, horário e local apenas quando existirem.
-- imagePrompt: em inglês, descreva UMA ARTE FINAL COMPLETA de cartaz, já diagramada, com fotografia ou ilustração coerente com o evento, tipografia profissional, hierarquia, contraste, iluminação, textura e elementos gráficos.
-- A arte deve parecer criada por uma agência, pronta para publicação, sem blocos vazios, sem mockup, sem moldura de editor e sem aparência de template simples.
+- imagePrompt: em inglês, descreva SOMENTE o visual principal do cartaz: fotografia ou ilustração coerente com o evento, cenário, assunto, iluminação, textura, profundidade, enquadramento e direção de arte.
+- NÃO peça texto, tipografia, letras, números, logotipo, preço, telefone, watermark, moldura ou UI dentro da imagem. A Zunexi adicionará todas as informações como camadas editáveis depois.
+- O visual deve parecer produzido para uma campanha de agência, com composição forte e áreas de respiro naturais para receber o layout.
 - Não invente preço, telefone, endereço, atrações, datas, logotipo ou qualquer informação que não foi enviada.
 - Adapte a direção visual ao tipo do evento: igreja deve ser elegante e inspiradora; música deve ser energética; palestra deve ser sofisticada; promoção deve ser comercial e clara.`;
     const user = `Evento: ${data.title}
@@ -388,37 +389,28 @@ export const generateImage = createServerFn({ method: "POST" })
     if (!apiToken) throw new Error("CLOUDFLARE_API_TOKEN não configurado no servidor.");
     if (!accountId) throw new Error("CLOUDFLARE_ACCOUNT_ID não configurado no servidor.");
 
-    const title = data.slideTitle.trim();
-    const body = data.slideBody.trim();
-    const brand = data.brand.trim();
-
     const fullPrompt = `${data.prompt}
 
-CREATE THE FINAL, FULLY DESIGNED INSTAGRAM ARTWORK — not a background photo, not a blank template and not a mockup.
-Canvas aspect ratio: ${data.aspectRatio}. Full bleed, premium advertising finish.
+CREATE ONLY THE PREMIUM VISUAL LAYER FOR AN INSTAGRAM DESIGN — the Zunexi editor will add all typography and graphic layout as separate editable layers.
+Canvas aspect ratio: ${data.aspectRatio}. Full bleed, high-end commercial image.
 Slide role: ${data.slideKind || "content"}. Slide ${data.slideIndex || 1} of ${data.slideTotal || 1}.
-Brand: ${brand || "use only the brand information explicitly present in the art direction"}.
-Visual style: ${data.style || "premium commercial art direction, bold editorial hierarchy"}.
-Color palette: ${data.palette || "cohesive, branded and high contrast"}.
+Brand identity must be expressed only through palette, art direction and any supplied visual reference; never spell or render the brand name.
+Visual style: ${data.style || "premium commercial art direction, polished editorial photography"}.
+Color palette direction: ${data.palette || "cohesive, branded and high contrast"}.
 
-MANDATORY TEXT TO RENDER EXACTLY IN PORTUGUESE:
-Main headline: "${title}"
-Supporting text: "${body}"
 
-DESIGN REQUIREMENTS:
-- Render the exact supplied Portuguese text with correct spelling, accents and punctuation.
-- Strong professional typography hierarchy, intentional grid, safe margins and excellent mobile readability.
-- Build a complete campaign layout with product photography/illustration, graphic shapes, lines, badges, icons, dividers or labels only when relevant.
-- Make the product or core subject the visual hero. Use realistic textures, premium lighting and commercial retouching.
-- Make it look like a finished professional poster or campaign artwork, not a generic AI image and not an editable template preview.
-- Do not add any invented words, prices, phone numbers, dates, handles, logos or claims.
-- Do not add slide counters, watermarks, mockup frames, UI chrome or meaningless decorative text.
-- Every element must look intentionally designed and production-ready.
+IMAGE QUALITY REQUIREMENTS:
+- No text, no letters, no numbers, no typography, no captions, no logo text, no prices, no phone numbers, no watermark, no UI and no poster mockup.
+- Focus on a strong hero subject/product/event scene with believable anatomy, materials, reflections, shadows and proportions.
+- Premium advertising photography or illustration, intentional lighting, controlled contrast, rich texture, realistic detail and clean color grading.
+- Compose with natural negative space suitable for later typography, but never create an obvious blank card or empty template panel.
+- Keep the frame visually clean: avoid clutter, duplicate objects, distorted hands/faces, random symbols and meaningless pseudo-writing.
+- Make each slide visually distinct through camera angle, focal length, crop, subject placement, depth and lighting while preserving campaign consistency.
 
 ${data.referenceImageUrl ? `REFERENCE IMAGE INSTRUCTIONS:
-- Use input image 0 as the main visual reference for subject, product, logo, colors or composition.
-- Preserve recognizable brand/product characteristics when present.
-- Integrate it naturally into the final campaign artwork instead of merely placing it unchanged on the canvas.` : ""}
+- Use input image 0 as the main visual reference for subject, product, colors, style or identity.
+- Preserve recognizable product/brand characteristics when present.
+- Integrate the reference naturally while keeping the result polished and realistic.` : ""}
 
 Unique variation seed: ${data.seed}.`;
 
@@ -445,7 +437,7 @@ export const testCloudflareConnection = createServerFn({ method: "POST" })
       return { ok: false, model: CLOUDFLARE_IMAGE_MODEL, message: "CLOUDFLARE_ACCOUNT_ID não configurado no servidor." };
     }
 
-    const testPrompt = `Create a polished square Instagram advertising test card, 1:1, dark premium background with subtle electric blue and violet lighting, one futuristic abstract AI object as the visual hero, professional editorial composition, clean safe margins. Render exactly this short Portuguese text: "CLOUDFLARE OK". Do not add any other words, prices, logos, watermarks or contact details.`;
+    const testPrompt = `Create a polished square Instagram advertising visual, 1:1, dark premium background with subtle electric blue and violet lighting, one futuristic abstract AI object as the visual hero, professional editorial composition, realistic depth and clean negative space for later layout. No text, letters, numbers, logos, watermarks or UI.`;
     try {
       const { mimeType, base64 } = await callCloudflareImage(apiToken, accountId, testPrompt, "1:1", `test-${Date.now()}`, undefined, "test");
       return {
