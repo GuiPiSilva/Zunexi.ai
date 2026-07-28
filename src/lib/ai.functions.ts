@@ -135,19 +135,32 @@ Seed única: ${data.seed}-${Math.random().toString(36).slice(2)}`;
 
 
 // ---------------------------------------------------------------------------
-// IMAGEM — Cloudflare Workers AI (FLUX.2 Klein 4B) via REST API oficial.
-// O modelo aceita geração de imagem e também imagem de referência por
-// multipart/form-data. O resultado vem em base64 e continua sendo salvo no
-// Supabase Storage para o restante do app trabalhar com URL pública.
+// IMAGEM — Cloudflare Workers AI via REST API oficial.
+// O modo rápido usa FLUX.2 Klein 4B e o modo premium usa FLUX.2 Klein 9B.
+// Ambos aceitam multipart/form-data e imagem de referência. O visual gerado
+// não contém tipografia: a composição final é montada pelo editor em camadas.
 // ---------------------------------------------------------------------------
 
-const CLOUDFLARE_IMAGE_MODEL = process.env.CLOUDFLARE_IMAGE_MODEL || "@cf/black-forest-labs/flux-2-klein-4b";
-const CLOUDFLARE_IMAGE_TIMEOUT_MS = 90_000;
+const CLOUDFLARE_IMAGE_MODELS = {
+  fast: process.env.CLOUDFLARE_IMAGE_MODEL_FAST || process.env.CLOUDFLARE_IMAGE_MODEL || "@cf/black-forest-labs/flux-2-klein-4b",
+  premium: process.env.CLOUDFLARE_IMAGE_MODEL_PREMIUM || "@cf/black-forest-labs/flux-2-klein-9b",
+} as const;
+
+type ImageQuality = keyof typeof CLOUDFLARE_IMAGE_MODELS;
+
+function imageModelFor(quality: ImageQuality) {
+  return CLOUDFLARE_IMAGE_MODELS[quality] || CLOUDFLARE_IMAGE_MODELS.premium;
+}
+
+const CLOUDFLARE_IMAGE_TIMEOUT_MS = 120_000;
 const IMAGE_STORAGE_BUCKET = process.env.IMAGE_STORAGE_BUCKET || process.env.GEMINI_STORAGE_BUCKET || "generated-images";
 const CLOUDFLARE_MAX_ATTEMPTS = 3;
 const CLOUDFLARE_BASE_DELAY_MS = 2_500;
-const CLOUDFLARE_OUTPUT_NEURONS_PER_TILE = 26.05;
-const CLOUDFLARE_INPUT_NEURONS_PER_TILE = 5.37;
+const CLOUDFLARE_4B_OUTPUT_NEURONS_PER_TILE = 26.05;
+const CLOUDFLARE_4B_INPUT_NEURONS_PER_TILE = 5.37;
+const CLOUDFLARE_9B_FIRST_MP_NEURONS = 1363.64;
+const CLOUDFLARE_9B_SUBSEQUENT_MP_NEURONS = 181.82;
+const CLOUDFLARE_9B_INPUT_MP_NEURONS = 181.82;
 
 type CloudflareUsageSource = "generation" | "test";
 
@@ -164,6 +177,7 @@ const ImageInput = z.object({
   style: z.string().optional().default(""),
   aspectRatio: z.enum(["1:1", "4:5", "9:16"]).optional().default("1:1"),
   referenceImageUrl: z.string().url().optional(),
+  imageQuality: z.enum(["fast", "premium"]).optional().default("premium"),
 });
 
 const ReferenceImageInput = z.object({
@@ -226,14 +240,25 @@ function tileCount(width: number, height: number) {
   return Math.max(1, Math.ceil(width / 512) * Math.ceil(height / 512));
 }
 
-function estimateCloudflareNeurons(width: number, height: number, hasReference: boolean) {
+function estimateCloudflareNeurons(width: number, height: number, hasReference: boolean, quality: ImageQuality) {
+  const model = imageModelFor(quality);
+  const megapixels = (width * height) / (1024 * 1024);
+
+  if (model.includes("flux-2-klein-9b")) {
+    const outputNeurons = CLOUDFLARE_9B_FIRST_MP_NEURONS + Math.max(0, megapixels - 1) * CLOUDFLARE_9B_SUBSEQUENT_MP_NEURONS;
+    const inputNeurons = hasReference ? 0.25 * CLOUDFLARE_9B_INPUT_MP_NEURONS : 0;
+    return {
+      outputTiles: tileCount(width, height),
+      inputTiles: hasReference ? 1 : 0,
+      estimatedNeurons: Math.round((outputNeurons + inputNeurons) * 100) / 100,
+    };
+  }
+
   const outputTiles = tileCount(width, height);
-  // As referências enviadas pela interface são reduzidas para no máximo 512x512,
-  // portanto cada referência ocupa no máximo um tile de entrada.
   const inputTiles = hasReference ? 1 : 0;
   const estimatedNeurons =
-    outputTiles * CLOUDFLARE_OUTPUT_NEURONS_PER_TILE +
-    inputTiles * CLOUDFLARE_INPUT_NEURONS_PER_TILE;
+    outputTiles * CLOUDFLARE_4B_OUTPUT_NEURONS_PER_TILE +
+    inputTiles * CLOUDFLARE_4B_INPUT_NEURONS_PER_TILE;
   return {
     outputTiles,
     inputTiles,
@@ -246,11 +271,13 @@ async function recordCloudflareUsage(args: {
   height: number;
   hasReference: boolean;
   source: CloudflareUsageSource;
+  quality: ImageQuality;
 }) {
-  const estimate = estimateCloudflareNeurons(args.width, args.height, args.hasReference);
+  const model = imageModelFor(args.quality);
+  const estimate = estimateCloudflareNeurons(args.width, args.height, args.hasReference, args.quality);
   try {
     const { error } = await admin().from("cloudflare_ai_usage").insert({
-      model: CLOUDFLARE_IMAGE_MODEL,
+      model,
       source: args.source,
       width: args.width,
       height: args.height,
@@ -281,10 +308,12 @@ async function callCloudflareImage(
   seed: string,
   referenceImage?: { mimeType: string; base64: string },
   source: CloudflareUsageSource = "generation",
+  quality: ImageQuality = "premium",
 ): Promise<{ mimeType: string; base64: string }> {
   let lastError: Error | null = null;
   const { width, height } = dimensionsForAspectRatio(aspectRatio);
-  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${CLOUDFLARE_IMAGE_MODEL}`;
+  const model = imageModelFor(quality);
+  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`;
 
   for (let attempt = 1; attempt <= CLOUDFLARE_MAX_ATTEMPTS; attempt += 1) {
     const controller = new AbortController();
@@ -336,7 +365,7 @@ async function callCloudflareImage(
       const responseType = response.headers.get("content-type") || "";
       if (responseType.startsWith("image/")) {
         const buffer = Buffer.from(await response.arrayBuffer());
-        await recordCloudflareUsage({ width, height, hasReference: Boolean(referenceImage), source });
+        await recordCloudflareUsage({ width, height, hasReference: Boolean(referenceImage), source, quality });
         return { mimeType: responseType.split(";")[0], base64: buffer.toString("base64") };
       }
 
@@ -352,7 +381,7 @@ async function callCloudflareImage(
         throw new Error(apiMessage || "O Cloudflare Workers AI não retornou uma imagem.");
       }
 
-      await recordCloudflareUsage({ width, height, hasReference: Boolean(referenceImage), source });
+      await recordCloudflareUsage({ width, height, hasReference: Boolean(referenceImage), source, quality });
       return { mimeType: detectImageMimeType(base64), base64 };
     } catch (error) {
       const err = error as Error;
@@ -381,6 +410,45 @@ export const uploadReferenceImage = createServerFn({ method: "POST" })
     return { url };
   });
 
+function creativeProfile(data: z.infer<typeof ImageInput>) {
+  const haystack = `${data.prompt} ${data.slideTitle} ${data.slideBody} ${data.slideKind} ${data.style} ${data.brand}`.toLowerCase();
+
+  if (/hamb|burger|food|comida|restaurante|lanche|pizza|sorvet|bebida|drink|café|cafe|gastron/.test(haystack)) {
+    return `FOOD COMMERCIAL DIRECTION:
+- Treat the food/product as a premium hero object, never as a generic lifestyle prop.
+- Use tactile macro detail: crisp edges, natural gloss, believable steam/condensation, accurate ingredients and appetizing texture.
+- Prefer controlled restaurant/studio lighting, directional highlights, deep but clean shadows and shallow depth of field.
+- Avoid beige/orange wash over the whole frame. Keep food colors natural; use brand colors only as small accents in practical lights, props or background details.
+- The result should resemble a commissioned restaurant campaign or high-end delivery ad, not stock photography.`;
+  }
+
+  if (/carro|automot|vehicle|car |suv|sedan|concession/.test(haystack)) {
+    return `AUTOMOTIVE COMMERCIAL DIRECTION:
+- Preserve accurate body geometry, wheels, reflections, paint and proportions.
+- Use premium automotive campaign lighting, deliberate environment reflections and a strong low/three-quarter camera angle.
+- Keep the scene uncluttered and cinematic; avoid generic dealership stock-photo staging.`;
+  }
+
+  if (/tech|tecnolog|software|app|ia|ai |digital|saas|plataforma/.test(haystack)) {
+    return `TECH CAMPAIGN DIRECTION:
+- Create a bold product-launch key visual with sculptural lighting, precise materials, controlled glow and editorial negative space.
+- Avoid random holograms, meaningless UI, fake text and cliché blue circuit-board imagery unless explicitly requested.
+- Use the palette as lighting accents instead of tinting the entire image.`;
+  }
+
+  if (/igreja|culto|evangel|worship|church|fé|fe |jesus|crist/.test(haystack)) {
+    return `INSPIRATIONAL EVENT DIRECTION:
+- Use cinematic documentary-style light, authentic atmosphere, natural people and emotionally grounded composition.
+- Avoid kitschy religious clip-art, artificial halos and generic stock-photo poses.
+- Preserve realistic skin tones and use the palette as subtle environmental lighting accents.`;
+  }
+
+  return `COMMERCIAL CAMPAIGN DIRECTION:
+- Build one strong visual idea with an intentional hero subject and editorial composition.
+- Avoid generic stock-photo staging, random props and bland centered compositions.
+- Preserve natural material/skin/product colors; use the brand palette as controlled accents rather than a global color filter.`;
+}
+
 export const generateImage = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => ImageInput.parse(d))
   .handler(async ({ data }): Promise<{ dataUrl: string; url: string }> => {
@@ -389,34 +457,39 @@ export const generateImage = createServerFn({ method: "POST" })
     if (!apiToken) throw new Error("CLOUDFLARE_API_TOKEN não configurado no servidor.");
     if (!accountId) throw new Error("CLOUDFLARE_ACCOUNT_ID não configurado no servidor.");
 
-    const fullPrompt = `${data.prompt}
+    const fullPrompt = `CREATE ONLY THE VISUAL LAYER FOR A HIGH-END INSTAGRAM CAMPAIGN. Zunexi will add typography, logos, prices and graphic elements later as editable layers.
 
-CREATE ONLY THE PREMIUM VISUAL LAYER FOR AN INSTAGRAM DESIGN — the Zunexi editor will add all typography and graphic layout as separate editable layers.
-Canvas aspect ratio: ${data.aspectRatio}. Full bleed, high-end commercial image.
-Slide role: ${data.slideKind || "content"}. Slide ${data.slideIndex || 1} of ${data.slideTotal || 1}.
-Brand identity must be expressed only through palette, art direction and any supplied visual reference; never spell or render the brand name.
-Visual style: ${data.style || "premium commercial art direction, polished editorial photography"}.
-Color palette direction: ${data.palette || "cohesive, branded and high contrast"}.
+SOURCE CREATIVE BRIEF:
+${data.prompt}
 
+Canvas aspect ratio: ${data.aspectRatio}. Full bleed commercial key visual.
+Slide role and copy-safe composition: ${data.slideKind || "content"}. Slide ${data.slideIndex || 1} of ${data.slideTotal || 1}.
+Visual style: ${data.style || "premium commercial campaign, contemporary editorial art direction"}.
+Palette guidance: ${data.palette || "cohesive brand palette with natural subject colors"}.
 
-IMAGE QUALITY REQUIREMENTS:
-- No text, no letters, no numbers, no typography, no captions, no logo text, no prices, no phone numbers, no watermark, no UI and no poster mockup.
-- Focus on a strong hero subject/product/event scene with believable anatomy, materials, reflections, shadows and proportions.
-- Premium advertising photography or illustration, intentional lighting, controlled contrast, rich texture, realistic detail and clean color grading.
-- Compose with natural negative space suitable for later typography, but never create an obvious blank card or empty template panel.
-- Keep the frame visually clean: avoid clutter, duplicate objects, distorted hands/faces, random symbols and meaningless pseudo-writing.
-- Make each slide visually distinct through camera angle, focal length, crop, subject placement, depth and lighting while preserving campaign consistency.
+${creativeProfile(data)}
 
-${data.referenceImageUrl ? `REFERENCE IMAGE INSTRUCTIONS:
-- Use input image 0 as the main visual reference for subject, product, colors, style or identity.
-- Preserve recognizable product/brand characteristics when present.
-- Integrate the reference naturally while keeping the result polished and realistic.` : ""}
+ART-DIRECTION STANDARD:
+- The image must feel commissioned for an advertising campaign, not like a stock photo, template, generic AI render or ordinary lifestyle snapshot.
+- Use a deliberate hero subject, strong foreground/midground/background separation, intentional lens choice, professional lighting and believable physical materials.
+- Preserve local color fidelity. NEVER tint the entire frame with the palette. Brand colors should occupy roughly 10-30% of the scene as accents, practical lighting, props or background details.
+- Create subject/background separation using contrast, light, depth and composition instead of a flat monochrome filter.
+- Favor asymmetry, editorial cropping and real campaign framing. Avoid placing the main subject dead-center unless the requested composition explicitly needs it.
+- Keep copy-safe space exactly where the slide-role instruction requests it. Do not place important faces/products under that area.
+- No text, letters, numbers, typography, captions, logo text, prices, phone numbers, watermark, UI, poster mockup or fake signage.
+- No duplicate objects, melted anatomy, extra fingers, warped product geometry, meaningless symbols or pseudo-writing.
+- Do not invent visible brand names. Brand identity comes from art direction, palette accents and supplied reference imagery only.
+
+${data.referenceImageUrl ? `REFERENCE IMAGE:
+- Input image 0 is the primary identity/product reference.
+- Preserve recognizable product shape, packaging, logo geometry/colors and key visual characteristics when present.
+- Integrate it naturally into the campaign scene instead of loosely imitating it.` : ""}
 
 Unique variation seed: ${data.seed}.`;
 
     try {
       const referenceImage = data.referenceImageUrl ? await fetchAsBase64(data.referenceImageUrl) : undefined;
-      const { mimeType, base64 } = await callCloudflareImage(apiToken, accountId, fullPrompt, data.aspectRatio, data.seed, referenceImage);
+      const { mimeType, base64 } = await callCloudflareImage(apiToken, accountId, fullPrompt, data.aspectRatio, data.seed, referenceImage, "generation", data.imageQuality);
       const url = await uploadToSupabaseStorage(base64, mimeType, "slide");
       return { dataUrl: `data:${mimeType};base64,${base64}`, url };
     } catch (error) {
@@ -427,27 +500,29 @@ Unique variation seed: ${data.seed}.`;
   });
 
 export const testCloudflareConnection = createServerFn({ method: "POST" })
-  .handler(async (): Promise<{ ok: boolean; message: string; model: string; dataUrl?: string }> => {
+  .inputValidator((d: unknown) => z.object({ imageQuality: z.enum(["fast", "premium"]).optional().default("premium") }).parse(d ?? {}))
+  .handler(async ({ data }): Promise<{ ok: boolean; message: string; model: string; dataUrl?: string }> => {
     const apiToken = process.env.CLOUDFLARE_API_TOKEN;
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
     if (!apiToken) {
-      return { ok: false, model: CLOUDFLARE_IMAGE_MODEL, message: "CLOUDFLARE_API_TOKEN não configurado no servidor." };
+      return { ok: false, model: imageModelFor(data.imageQuality), message: "CLOUDFLARE_API_TOKEN não configurado no servidor." };
     }
     if (!accountId) {
-      return { ok: false, model: CLOUDFLARE_IMAGE_MODEL, message: "CLOUDFLARE_ACCOUNT_ID não configurado no servidor." };
+      return { ok: false, model: imageModelFor(data.imageQuality), message: "CLOUDFLARE_ACCOUNT_ID não configurado no servidor." };
     }
 
+    const model = imageModelFor(data.imageQuality);
     const testPrompt = `Create a polished square Instagram advertising visual, 1:1, dark premium background with subtle electric blue and violet lighting, one futuristic abstract AI object as the visual hero, professional editorial composition, realistic depth and clean negative space for later layout. No text, letters, numbers, logos, watermarks or UI.`;
     try {
-      const { mimeType, base64 } = await callCloudflareImage(apiToken, accountId, testPrompt, "1:1", `test-${Date.now()}`, undefined, "test");
+      const { mimeType, base64 } = await callCloudflareImage(apiToken, accountId, testPrompt, "1:1", `test-${Date.now()}`, undefined, "test", data.imageQuality);
       return {
         ok: true,
-        model: CLOUDFLARE_IMAGE_MODEL,
-        message: `Cloudflare Workers AI conectado e gerando imagens corretamente (${CLOUDFLARE_IMAGE_MODEL}).`,
+        model,
+        message: `Cloudflare Workers AI conectado e gerando imagens corretamente (${model}).`,
         dataUrl: `data:${mimeType};base64,${base64}`,
       };
     } catch (error) {
       const err = error as Error;
-      return { ok: false, model: CLOUDFLARE_IMAGE_MODEL, message: err.message || "Falha desconhecida ao testar o Cloudflare Workers AI." };
+      return { ok: false, model: imageModelFor(data.imageQuality), message: err.message || "Falha desconhecida ao testar o Cloudflare Workers AI." };
     }
   });

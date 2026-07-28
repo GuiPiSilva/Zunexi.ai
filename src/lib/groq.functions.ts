@@ -20,7 +20,7 @@ const Input = z.object({
   publicoAlvo: z.string().trim().max(300).optional().default(""),
   tom: z.string().trim().max(100).optional().default("profissional"),
   quantidadeSlides: z.number().int().min(1).max(20),
-  informacoesAdicionais: z.string().trim().max(1000).optional().default(""),
+  informacoesAdicionais: z.string().trim().max(3000).optional().default(""),
 });
 
 interface SlideOut {
@@ -76,7 +76,7 @@ export const generateInstagramContent = createServerFn({ method: "POST" })
 
     const brand = brandMatch?.[1]?.trim() || "marca do cliente";
     const product = productMatch?.[1]?.trim() || data.tema;
-    const visualStyle = styleMatch?.[1]?.trim() || "publicidade premium, composição editorial forte";
+    const visualStyle = styleMatch?.[1]?.trim() || "publicidade premium, composição editorial forte, visual de campanha autoral";
     const palette = paletteMatch?.[1]?.trim() || "paleta coerente com a marca, alto contraste";
     const requestedCta = ctaMatch?.[1]?.trim() || "";
 
@@ -111,11 +111,14 @@ PLANEJAMENTO OBRIGATÓRIO:
 ${slideRoles}
 
 PADRÃO DE QUALIDADE VISUAL:
-- Cada slide deve ter uma direção de arte forte, coerente e com qualidade publicitária.
-- O layout, a tipografia, textos, formas, selos e elementos gráficos serão montados depois pela Zunexi como camadas editáveis; o promptImagem deve focar somente no visual principal.
-- Use fotografia de produto extremamente apetitosa ou premium quando o tema envolver alimentos/produtos; use mockups, interfaces, objetos e cenas coerentes quando for serviço ou tecnologia.
-- Preserve uma identidade visual única em todos os slides: mesma paleta, textura, linguagem tipográfica, tratamento fotográfico e assinatura da marca.
-- Varie a composição entre slides: capa hero, produto + benefício, comparação, lista, cardápio, oferta, prova e CTA. Não repita o mesmo enquadramento.
+- Pense como diretor de arte de uma campanha real. Cada slide precisa ter um CONCEITO VISUAL deliberado, não apenas “uma foto bonita”.
+- O layout, tipografia, textos, formas, selos e elementos gráficos serão montados depois pela Zunexi como camadas editáveis; o promptImagem descreve somente a fotografia/ilustração principal.
+- O produto, serviço ou assunto do cliente deve ser o herói. Evite cenas genéricas de escritório, restaurante, cidade ou pessoas sorrindo sem função narrativa.
+- Quando o tema for comida, descreva fotografia gastronômica de campanha: produto dominante, textura real, luz controlada, profundidade, cor natural dos ingredientes e enquadramento apetitoso. Não use filtro laranja/bege global.
+- Quando for tecnologia, pense em key visual de lançamento: materiais precisos, luz escultural, composição limpa e sofisticada; evite hologramas e circuitos clichês sem motivo.
+- Quando for automotivo, preserve proporções e use linguagem de campanha automotiva, não foto comum de concessionária.
+- A paleta da marca deve aparecer como ACENTOS controlados em luz, cenário ou props. Nunca transforme a foto inteira em uma única cor.
+- Preserve uma assinatura visual única ao longo do carrossel: mesma lógica de luz, contraste, materiais e tratamento; varie câmera, distância, perspectiva e posição do assunto.
 - Não use metáforas surreais aleatórias quando elas não combinarem com o negócio. A direção visual deve nascer do produto, do nicho e do objetivo.
 - Não invente telefone, preço, endereço, desconto, data ou condição comercial. Use somente dados fornecidos; quando não houver, não inclua.
 
@@ -127,13 +130,15 @@ REGRAS DE COPY:
 - Hashtags entre 8 e 15, sem # dentro do JSON.
 
 REGRAS DO promptImagem:
-- Escreva em inglês.
-- Gere SOMENTE o visual principal do slide: fotografia, produto, personagem, ambiente, textura, iluminação e composição.
+- Escreva em inglês, com direção de arte específica e útil ao modelo de imagem.
+- Gere SOMENTE o visual principal do slide: hero subject, environment, camera, lens, lighting, materials, depth, color treatment and composition.
+- Cada promptImagem deve indicar claramente: (1) o que é o herói, (2) onde ele está no quadro, (3) tipo de luz, (4) distância/ângulo de câmera, (5) textura/material e (6) estética de campanha.
 - NÃO peça texto, tipografia, letras, números, logotipo, preço, telefone, watermark, UI, moldura ou palavras na imagem.
-- Considere que título e texto serão adicionados depois como camadas editáveis. Deixe áreas de respiro/negative space adequadas para o papel do slide, sem criar uma caixa vazia artificial.
-- Descreva com precisão o assunto, câmera/lente quando útil, iluminação, materiais, profundidade, enquadramento, tratamento comercial e direção de arte.
-- Preserve a mesma linguagem visual da campanha, mas varie enquadramento, distância, perspectiva e distribuição do assunto entre slides.
-- Evite aparência genérica de banco de imagens, arte surreal aleatória, mãos deformadas, objetos duplicados e fundos poluídos.`;
+- Considere que título e texto serão adicionados depois como camadas editáveis. Deixe negative space natural, sem criar cartão vazio ou painel artificial.
+- Peça natural local colors e controlled brand-color accents; proíba global monochrome color cast quando a paleta for intensa.
+- Evite “stock photo”, “generic modern interior”, “generic smiling person”, composições centralizadas sem intenção, mãos deformadas, objetos duplicados e fundos poluídos.
+- Em alimentação/produto físico, o produto deve ocupar visualmente cerca de 35–55% da cena quando fizer sentido, com detalhes de campanha e não uma visão distante do ambiente.
+- Preserve a mesma linguagem visual da campanha, mas varie enquadramento, distância, perspectiva e distribuição do assunto entre slides.`;
 
     const userPrompt = `Crie o carrossel completo com estes dados:
 Tema: ${data.tema}
@@ -164,7 +169,7 @@ Semente de variação: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
         signal: controller.signal,
         body: JSON.stringify({
           model: process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile",
-          temperature: 0.9,
+          temperature: 0.78,
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: systemPrompt },
@@ -336,7 +341,7 @@ function normalizePromptData(value: Partial<CarouselPromptData>): CarouselPrompt
     publicoAlvo: String(value.publicoAlvo || "").trim(),
     tom: String(value.tom || "profissional").trim() || "profissional",
     quantidadeSlides: Math.min(20, Math.max(1, Number(value.quantidadeSlides) || 5)),
-    estilo: String(value.estilo || "moderno e tecnológico").trim() || "moderno e tecnológico",
+    estilo: String(value.estilo || "publicidade premium").trim() || "publicidade premium",
     paleta: String(value.paleta || "roxo, azul, ciano e branco").trim() || "roxo, azul, ciano e branco",
     cta: String(value.cta || "").trim(),
     informacoesAdicionais: String(value.informacoesAdicionais || "").trim(),

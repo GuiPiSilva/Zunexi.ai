@@ -41,7 +41,8 @@ export function addNotification(input: Omit<InLabsNotification, "id" | "createdA
   };
   saveNotifications([item, ...loadNotifications(ownerScope)], ownerScope);
 
-  if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+  const browserNotificationsEnabled = typeof window === "undefined" || localStorage.getItem("zunexi.notifications.enabled") !== "false";
+  if (browserNotificationsEnabled && typeof Notification !== "undefined" && Notification.permission === "granted") {
     const notification = new Notification(input.title, {
       body: input.message,
       icon: "/favicon.png",

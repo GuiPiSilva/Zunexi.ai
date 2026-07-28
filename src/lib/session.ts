@@ -12,14 +12,15 @@ export function setAccessKey(key: string) {
 }
 
 export function getAccessUserName(): string {
-  if (typeof window === "undefined") return "Usuário InLabs";
-  return localStorage.getItem(USER_NAME)?.trim() || "Usuário InLabs";
+  if (typeof window === "undefined") return "Usuário Zunexi.ai";
+  return localStorage.getItem(USER_NAME)?.trim() || "Usuário Zunexi.ai";
 }
 
 export function setAccessUserName(name: string) {
   const normalized = name.trim();
   if (normalized) localStorage.setItem(USER_NAME, normalized);
   else localStorage.removeItem(USER_NAME);
+  window.dispatchEvent(new CustomEvent("zunexi:profile-updated"));
 }
 
 export function clearAccessKey() {
