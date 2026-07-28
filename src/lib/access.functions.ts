@@ -12,6 +12,26 @@ export type CreditStatus = {
   resetDate: string;
 };
 
+export type CloudflareUsageDay = {
+  date: string;
+  neurons: number;
+  images: number;
+};
+
+export type CloudflareUsageSummary = {
+  setupRequired: boolean;
+  dailyLimit: number;
+  usedToday: number;
+  remainingToday: number;
+  percentage: number;
+  imagesToday: number;
+  averageNeuronsPerImage: number;
+  estimatedImagesRemaining: number | null;
+  resetsAt: string;
+  model: string;
+  history: CloudflareUsageDay[];
+};
+
 type AccessKeyRow = Database["public"]["Tables"]["access_keys"]["Row"];
 
 export function admin() {
@@ -165,6 +185,109 @@ export const adminListKeys = createServerFn({ method: "POST" })
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
     return rows ?? [];
+  });
+
+const CLOUDFLARE_FREE_NEURONS_PER_DAY = 10_000;
+const CLOUDFLARE_DEFAULT_IMAGE_MODEL = "@cf/black-forest-labs/flux-2-klein-4b";
+
+function startOfUtcDay(date = new Date()) {
+  const value = new Date(date);
+  value.setUTCHours(0, 0, 0, 0);
+  return value;
+}
+
+function nextUtcReset(date = new Date()) {
+  const value = startOfUtcDay(date);
+  value.setUTCDate(value.getUTCDate() + 1);
+  return value;
+}
+
+function emptyCloudflareUsage(setupRequired = false): CloudflareUsageSummary {
+  const now = new Date();
+  const history: CloudflareUsageDay[] = [];
+  for (let offset = 6; offset >= 0; offset -= 1) {
+    const day = startOfUtcDay(now);
+    day.setUTCDate(day.getUTCDate() - offset);
+    history.push({ date: day.toISOString().slice(0, 10), neurons: 0, images: 0 });
+  }
+  return {
+    setupRequired,
+    dailyLimit: CLOUDFLARE_FREE_NEURONS_PER_DAY,
+    usedToday: 0,
+    remainingToday: CLOUDFLARE_FREE_NEURONS_PER_DAY,
+    percentage: 0,
+    imagesToday: 0,
+    averageNeuronsPerImage: 0,
+    estimatedImagesRemaining: null,
+    resetsAt: nextUtcReset(now).toISOString(),
+    model: process.env.CLOUDFLARE_IMAGE_MODEL || CLOUDFLARE_DEFAULT_IMAGE_MODEL,
+    history,
+  };
+}
+
+export const adminGetCloudflareUsage = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => z.object({ token: z.string().min(20) }).parse(d))
+  .handler(async ({ data }): Promise<CloudflareUsageSummary> => {
+    checkAdmin(data.token);
+    const sb = admin();
+    const now = new Date();
+    const historyStart = startOfUtcDay(now);
+    historyStart.setUTCDate(historyStart.getUTCDate() - 6);
+
+    const { data: events, error } = await sb
+      .from("cloudflare_ai_usage")
+      .select("created_at, estimated_neurons, source")
+      .gte("created_at", historyStart.toISOString())
+      .order("created_at", { ascending: true })
+      .limit(20_000);
+
+    if (error) {
+      if (/cloudflare_ai_usage|relation .* does not exist|schema cache|PGRST205/i.test(error.message)) {
+        return emptyCloudflareUsage(true);
+      }
+      throw new Error(`Não foi possível carregar o uso da Cloudflare: ${error.message}`);
+    }
+
+    const byDate = new Map<string, CloudflareUsageDay>();
+    for (let offset = 6; offset >= 0; offset -= 1) {
+      const day = startOfUtcDay(now);
+      day.setUTCDate(day.getUTCDate() - offset);
+      const date = day.toISOString().slice(0, 10);
+      byDate.set(date, { date, neurons: 0, images: 0 });
+    }
+
+    for (const event of events ?? []) {
+      const date = new Date(event.created_at).toISOString().slice(0, 10);
+      const bucket = byDate.get(date);
+      if (!bucket) continue;
+      bucket.neurons += Number(event.estimated_neurons || 0);
+      bucket.images += 1;
+    }
+
+    const today = now.toISOString().slice(0, 10);
+    const todayBucket = byDate.get(today) ?? { date: today, neurons: 0, images: 0 };
+    const usedToday = Math.round(todayBucket.neurons * 100) / 100;
+    const remainingToday = Math.max(CLOUDFLARE_FREE_NEURONS_PER_DAY - usedToday, 0);
+    const averageNeuronsPerImage = todayBucket.images > 0
+      ? Math.round((usedToday / todayBucket.images) * 100) / 100
+      : 0;
+
+    return {
+      setupRequired: false,
+      dailyLimit: CLOUDFLARE_FREE_NEURONS_PER_DAY,
+      usedToday,
+      remainingToday: Math.round(remainingToday * 100) / 100,
+      percentage: Math.min(100, Math.round((usedToday / CLOUDFLARE_FREE_NEURONS_PER_DAY) * 10_000) / 100),
+      imagesToday: todayBucket.images,
+      averageNeuronsPerImage,
+      estimatedImagesRemaining: averageNeuronsPerImage > 0 ? Math.floor(remainingToday / averageNeuronsPerImage) : null,
+      resetsAt: nextUtcReset(now).toISOString(),
+      model: process.env.CLOUDFLARE_IMAGE_MODEL || CLOUDFLARE_DEFAULT_IMAGE_MODEL,
+      history: Array.from(byDate.values()).map((item) => ({
+        ...item,
+        neurons: Math.round(item.neurons * 100) / 100,
+      })),
+    };
   });
 
 export const adminCreateKey = createServerFn({ method: "POST" })
