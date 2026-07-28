@@ -149,7 +149,28 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
   useEffect(() => {
     const canvas = fcRef.current;
     if (!canvas) return;
-    canvas.setDimensions({ width: Math.round(width * zoom), height: Math.round(height * zoom) }, { cssOnly: true });
+
+    const displayWidth = Math.max(1, Math.round(width * zoom));
+    const displayHeight = Math.max(1, Math.round(height * zoom));
+    const cssWidth = `${displayWidth}px`;
+    const cssHeight = `${displayHeight}px`;
+
+    // Fabric 7 separa o tamanho lógico (backstore) do tamanho CSS. Quando
+    // cssOnly=true, as dimensões precisam levar unidade. Sem o "px", o
+    // wrapper podia encolher enquanto os canvases internos permaneciam com
+    // 1080px, fazendo texto/imagens parecerem gigantes e cortados.
+    canvas.setDimensions({ width: cssWidth, height: cssHeight }, { cssOnly: true });
+
+    // Mantemos os três elementos do Fabric perfeitamente sincronizados.
+    // Isto também protege o editor de estilos antigos salvos em cache pelo
+    // navegador e de diferenças entre versões do Fabric.
+    canvas.wrapperEl.style.width = cssWidth;
+    canvas.wrapperEl.style.height = cssHeight;
+    canvas.lowerCanvasEl.style.width = cssWidth;
+    canvas.lowerCanvasEl.style.height = cssHeight;
+    canvas.upperCanvasEl.style.width = cssWidth;
+    canvas.upperCanvasEl.style.height = cssHeight;
+
     canvas.calcOffset();
     canvas.requestRenderAll();
   }, [height, width, zoom]);
@@ -273,7 +294,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
 
       {/* Canvas viewport */}
       <div ref={viewportRef} className="grid min-h-0 flex-1 place-items-center overflow-auto bg-background p-3">
-        <div style={{ width: width * zoom, height: height * zoom }} className="relative shrink-0 shadow-2xl">
+        <div
+          style={{ width: Math.max(1, Math.round(width * zoom)), height: Math.max(1, Math.round(height * zoom)) }}
+          className="relative shrink-0 shadow-2xl"
+        >
           <canvas ref={canvasRef} />
         </div>
       </div>
