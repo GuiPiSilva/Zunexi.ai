@@ -190,8 +190,10 @@
   .secondary-button:hover { border-color: oklch(0.5 0.15 285); background: var(--secondary-button-hover); }
   .eyebrow { font-size: .68rem; font-weight: 700; letter-spacing: .19em; text-transform: uppercase; color: var(--color-muted-foreground); }
   .section-title { font-family: var(--font-display); font-weight: 700; letter-spacing: -.025em; }
-  .brand-logo-full { transition: filter .18s ease, opacity .18s ease; }
-  .light .brand-logo-full { filter: brightness(.15) saturate(.35); }
+  .brand-logo-full, .brand-logo-icon { transition: filter .18s ease, opacity .18s ease; }
+  .brand-logo-tile { background: #050505; transition: background-color .18s ease, border-color .18s ease; }
+  .light .brand-logo-full, .light .brand-logo-icon { filter: brightness(0) saturate(100%); }
+  .light .brand-logo-tile { background: #ffffff; }
 }
 
 @media (min-width: 1024px) {
