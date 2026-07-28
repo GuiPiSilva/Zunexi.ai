@@ -115,7 +115,7 @@ export const generateCartaz = createServerFn({ method: "POST" })
 
 REGRAS:
 - title: chamada principal curta e impactante em português.
-- body: somente as informações reais fornecidas pelo usuário, organizadas de forma clara; inclua data, horário e local apenas quando existirem.
+- body: organize somente as informações reais fornecidas pelo usuário de forma clara e bem escrita; inclua data, horário e local apenas quando existirem. Quando o pedido indicar cardápio, lista, catálogo, sabores, preços ou itens detalhados, o body pode ser mais completo, com quebras de linha, seções e itens no estilo "## Seção" e "**Item — preço**".
 - imagePrompt: em inglês, descreva SOMENTE o visual principal do cartaz: fotografia ou ilustração coerente com o evento, cenário, assunto, iluminação, textura, profundidade, enquadramento e direção de arte.
 - NÃO peça texto, tipografia, letras, números, logotipo, preço, telefone, watermark, moldura ou UI dentro da imagem. A Zunexi adicionará todas as informações como camadas editáveis depois.
 - O visual deve parecer produzido para uma campanha de agência, com composição forte e áreas de respiro naturais para receber o layout.
@@ -473,41 +473,46 @@ export const uploadReferenceImage = createServerFn({ method: "POST" })
 function creativeProfile(data: z.infer<typeof ImageInput>) {
   const haystack = `${data.prompt} ${data.slideTitle} ${data.slideBody} ${data.slideKind} ${data.style} ${data.brand}`.toLowerCase();
 
-  if (/hamb|burger|food|comida|restaurante|lanche|pizza|sorvet|bebida|drink|café|cafe|gastron/.test(haystack)) {
-    return `FOOD COMMERCIAL DIRECTION:
-- Treat the food/product as a premium hero object, never as a generic lifestyle prop.
-- Use tactile macro detail: crisp edges, natural gloss, believable steam/condensation, accurate ingredients and appetizing texture.
-- Prefer dramatic commercial food lighting, directional highlights, colored rim light, deep but clean shadows, shallow depth of field and a close hero crop.
-- Add campaign-grade supporting details when useful: ingredient fragments, condensation, sauce/cheese motion, glossy surfaces, subtle smoke/steam, branded-color practical lights and layered foreground props.
-- Avoid beige/orange wash over the whole frame. Keep food colors natural; use brand colors only as accents in light, props or background details.
-- The result should resemble a commissioned restaurant campaign or high-end delivery launch visual, with the food immediately dominating the frame, not stock photography.`;
+  if (/hamb|burger|food|comida|restaurante|lanche|pizza|sorvet|bebida|drink|café|cafe|gastron|card[aá]pio/.test(haystack)) {
+    return `FOOD POSTER CAMPAIGN DIRECTION:
+- Visual language: premium charcoal-black textured background, warm ember particles, smoke/steam, dark wood or stone surface, amber/orange practical light accents and cream highlights.
+- The food must be a LARGE hero, usually 45-70% of the frame, sharply appetizing, glossy but believable, with strong rim light and deep controlled shadows.
+- Prefer close-up advertising photography, low three-quarter angles, macro ingredient detail, dramatic depth and layered foreground/background.
+- Create natural dark negative-space zones where large distressed display typography, prices, badges and menu information can be added later.
+- For menu/list slides, arrange multiple food items in deliberate zones with visual separation, like a professional restaurant menu campaign — but DO NOT generate any written text.
+- Use fire/smoke/embers only as tasteful atmosphere. Keep ingredients realistic and product colors natural.
+- The result should resemble a commissioned burger/pizzeria campaign poster, not a normal restaurant photo and not a minimalist template.`;
+  }
+
+  if (/igreja|culto|evangel|worship|church|fé|fe |jesus|crist|biblia|bíblia/.test(haystack)) {
+    return `FAITH / VINTAGE EDITORIAL POSTER DIRECTION:
+- Use warm parchment, ivory, burgundy, antique-gold and burnt-orange visual language when compatible with the requested palette.
+- Favor symbolic central illustration or cinematic subject, refined vintage print texture, ornamental botanical/details and balanced editorial symmetry.
+- Leave intentional zones for very large serif display typography and a smaller scripture/supporting line later; DO NOT render letters or verse text inside the image.
+- Avoid generic worship stock photography, artificial halos and cheap church flyer aesthetics.
+- The result should feel like a premium illustrated editorial poster with classical hierarchy and modern finishing.`;
+  }
+
+  if (/tech|tecnolog|software|app|ia|ai |digital|saas|plataforma|zunexi/.test(haystack)) {
+    return `TECH LAUNCH POSTER DIRECTION:
+- Use a deep black background with controlled electric-blue, violet and magenta light fields, luminous dot-matrix/halftone waves, digital particles and sculptural glow.
+- Keep a premium black center or deliberate negative-space area for logo/headline placement later.
+- Build strong depth with luminous data-like surfaces around the edges, elegant gradients and high contrast; avoid fake UI screens and cliché circuitry.
+- The result should feel like a major AI/software launch campaign: minimal, dramatic, futuristic and expensive.`;
   }
 
   if (/carro|automot|vehicle|car |suv|sedan|concession/.test(haystack)) {
-    return `AUTOMOTIVE COMMERCIAL DIRECTION:
-- Preserve accurate body geometry, wheels, reflections, paint and proportions.
-- Use premium automotive campaign lighting, deliberate environment reflections and a strong low/three-quarter camera angle.
-- Keep the scene uncluttered and cinematic; avoid generic dealership stock-photo staging.`;
+    return `AUTOMOTIVE POSTER CAMPAIGN DIRECTION:
+- Hero vehicle should dominate the frame with accurate geometry, premium reflections and dramatic low/three-quarter camera angle.
+- Use dark cinematic environment, directional rim light, atmospheric haze and bold negative space for oversized headline/price later.
+- Make it look like an automotive launch poster, never a dealership snapshot.`;
   }
 
-  if (/tech|tecnolog|software|app|ia|ai |digital|saas|plataforma/.test(haystack)) {
-    return `TECH CAMPAIGN DIRECTION:
-- Create a bold product-launch key visual with sculptural lighting, precise materials, controlled glow and editorial negative space.
-- Avoid random holograms, meaningless UI, fake text and cliché blue circuit-board imagery unless explicitly requested.
-- Use the palette as lighting accents instead of tinting the entire image.`;
-  }
-
-  if (/igreja|culto|evangel|worship|church|fé|fe |jesus|crist/.test(haystack)) {
-    return `INSPIRATIONAL EVENT DIRECTION:
-- Use cinematic documentary-style light, authentic atmosphere, natural people and emotionally grounded composition.
-- Avoid kitschy religious clip-art, artificial halos and generic stock-photo poses.
-- Preserve realistic skin tones and use the palette as subtle environmental lighting accents.`;
-  }
-
-  return `COMMERCIAL CAMPAIGN DIRECTION:
-- Build one strong visual idea with an intentional hero subject and editorial composition.
-- Avoid generic stock-photo staging, random props and bland centered compositions.
-- Preserve natural material/skin/product colors; use the brand palette as controlled accents rather than a global color filter.`;
+  return `PREMIUM POSTER CAMPAIGN DIRECTION:
+- Compose like a finished advertising key visual: one dominant hero subject, dramatic contrast, deliberate negative space, layered depth, texture and strong lighting.
+- The final composition will receive oversized editable typography, badges, prices, separators and supporting copy, so design clear visual zones for them.
+- Avoid generic centered stock-photo composition and bland minimalist white panels.
+- Use the requested palette as controlled art-direction accents while preserving believable local colors and materials.`;
 }
 
 export const generateImage = createServerFn({ method: "POST" })
@@ -537,15 +542,12 @@ Palette guidance: ${data.palette || "cohesive brand palette with natural subject
 ${creativeProfile(data)}
 
 ART-DIRECTION STANDARD:
-- The image must feel commissioned for an advertising campaign, not like a stock photo, template, generic AI render or ordinary lifestyle snapshot.
-- Aim for the visual energy of premium social-media campaign key art: a dominant hero subject, bold scale changes, layered depth, controlled glow, sculptural light, atmospheric particles/reflections and deliberate decorative objects related to the niche.
-- Build a designed environment around the subject. A plain room, empty tabletop, generic office, generic restaurant interior or flat studio backdrop is NOT enough unless explicitly requested.
+- The image must feel commissioned for a bold POSTER CAMPAIGN, not like a stock photo, generic template, ordinary lifestyle snapshot or plain background image.
 - Use a deliberate hero subject, strong foreground/midground/background separation, intentional lens choice, professional lighting and believable physical materials.
-- When appropriate, use a clean cutout-like silhouette, rim lighting, floating/foreground props, soft volumetric light, gradients created by light, glossy/translucent materials and dynamic crops — without adding text or fake UI.
 - Preserve local color fidelity. NEVER tint the entire frame with the palette. Brand colors should occupy roughly 10-30% of the scene as accents, practical lighting, props or background details.
 - Create subject/background separation using contrast, light, depth and composition instead of a flat monochrome filter.
-- Favor asymmetry, editorial cropping and campaign framing with intentional overlap and depth. Avoid placing the main subject dead-center unless the requested composition explicitly needs it.
-- Keep copy-safe space exactly where the slide-role instruction requests it, but make that space visually rich through lighting/texture rather than a blank colored rectangle.
+- Favor poster-scale hierarchy, oversized hero subjects, editorial cropping, real campaign framing, textures, atmospheric effects and strong contrast. Avoid timid compositions with a small subject floating in empty space.
+- Keep copy-safe space exactly where the slide-role instruction requests it. Do not place important faces/products under that area.
 - No text, letters, numbers, typography, captions, logo text, prices, phone numbers, watermark, UI, poster mockup, social-media template, split graphic panel or fake signage.
 - No duplicate objects, melted anatomy, extra fingers, warped product geometry, meaningless symbols or pseudo-writing.
 - Do not invent visible brand names. Brand identity comes from art direction, palette accents and supplied reference imagery only.

@@ -79,6 +79,9 @@ export const generateInstagramContent = createServerFn({ method: "POST" })
     const visualStyle = styleMatch?.[1]?.trim() || "publicidade premium, composição editorial forte, visual de campanha autoral";
     const palette = paletteMatch?.[1]?.trim() || "paleta coerente com a marca, alto contraste";
     const requestedCta = ctaMatch?.[1]?.trim() || "";
+    const denseContentMode = /card[aá]pio|menu|cat[aá]logo|lista|tabela|pre[cç]o|sabores|pizzas|bebidas|tradicionais|doces|promo[cç][aã]o/.test(
+      `${data.tema} ${data.informacoesAdicionais} ${product}`.toLowerCase(),
+    );
 
     const slideRoles = Array.from({ length: data.quantidadeSlides }, (_, index) => {
       if (index == 0) return `Slide 1: CAPA — interromper o scroll, apresentar a promessa principal e estabelecer a identidade visual.`;
@@ -112,6 +115,9 @@ ${slideRoles}
 
 PADRÃO DE QUALIDADE VISUAL:
 - Pense como diretor de arte de uma campanha real. Cada slide precisa ter um CONCEITO VISUAL deliberado, não apenas “uma foto bonita”.
+- A referência de qualidade é CARTAZ PUBLICITÁRIO: tipografia visualmente dominante, produto/personagem grande, textura, contraste, selos, divisores e informação organizada. Como a tipografia será adicionada pela Zunexi, o promptImagem deve reservar zonas para essa hierarquia sem desenhar letras.
+- Use arquétipos por nicho: FOOD/DELIVERY = preto/carvão texturizado + âmbar/laranja + fumaça/brasa + produto enorme; TECH/AI = preto profundo + azul/violeta/magenta + ondas/halftone/dots luminosos; IGREJA/FÉ = editorial clássico/vintage, marfim/pergaminho, vinho/dourado, ilustração simbólica e ornamentação elegante; outros nichos = key visual publicitário forte equivalente.
+- NÃO faça todos os slides com o mesmo grid. Varie entre: hero gigante + título lateral; produto + preço/oferta; cardápio/lista em blocos; composição central editorial; close-up com CTA; vários produtos organizados em zonas.
 - O layout, tipografia, textos, formas, selos e elementos gráficos serão montados depois pela Zunexi como camadas editáveis; o promptImagem descreve somente a fotografia/ilustração principal.
 - O produto, serviço ou assunto do cliente deve ser o herói. Evite cenas genéricas de escritório, restaurante, cidade ou pessoas sorrindo sem função narrativa.
 - Quando o tema for comida, descreva fotografia gastronômica de campanha: produto dominante, textura real, luz controlada, profundidade, cor natural dos ingredientes e enquadramento apetitoso. Não use filtro laranja/bege global.
@@ -123,15 +129,12 @@ PADRÃO DE QUALIDADE VISUAL:
 - Não invente telefone, preço, endereço, desconto, data ou condição comercial. Use somente dados fornecidos; quando não houver, não inclua.
 
 REGRAS DE COPY:
-- Português brasileiro correto, natural, persuasivo e específico. Evite frases vazias como “descubra o melhor”, “qualidade que você merece” ou variações genéricas sem informação concreta.
-- Título: normalmente entre 3 e 10 palavras, forte, claro e ligado ao conteúdo real do slide.
-- O campo texto NÃO deve ser apenas uma legenda curta. Ele deve entregar conteúdo suficiente para o usuário sentir que o slide está pronto para publicação.
-- Em slides comuns, escreva aproximadamente 45 a 110 palavras, usando quebras de linha quando melhorarem a leitura.
-- Em cardápios, catálogos, listas de serviços, tabelas de preço, programação, benefícios ou comparativos, use 70 a 180 palavras por slide quando necessário e organize em linhas/seções legíveis.
-- Para listas, prefira estrutura visual em texto simples, por exemplo: “🍕 PIZZAS TRADICIONAIS\nMussarela — R$ 29,90\nMolho de tomate, mussarela e orégano.\n\nCalabresa — R$ 31,90\n...”. Não use markdown com ** ou # porque o editor exibirá esses caracteres.
-- Se houver muito conteúdo, DISTRIBUA entre os slides. Não resuma um cardápio completo em uma frase e não tente colocar tudo em um único slide.
-- Preserve literalmente preços, nomes, datas, sabores, ingredientes, condições e outras informações fornecidas pelo usuário. Nunca invente valores ou dados comerciais ausentes.
-- A capa deve apresentar a proposta e um gancho. Slides intermediários devem desenvolver informações reais. O último slide deve concluir e trazer CTA claro.
+- Português brasileiro correto, natural e persuasivo.
+- Título entre 2 e 8 palavras, legível e forte.
+- Quando o conteúdo for normal, escreva um texto secundário realmente útil, com 1 a 3 frases curtas, e não apenas uma linha genérica. Inclua benefício, contexto, prova, característica ou ação concreta quando houver dados para isso.
+- Quando o pedido indicar cardápio, catálogo, lista, preços, sabores, itens ou informações detalhadas, o campo "texto" pode e deve ser mais completo, com quebras de linha, subtítulos e itens organizados para caber em um layout informativo premium.
+- Nesses casos de conteúdo denso, prefira estrutura clara como: subtítulo, seções, itens e pequenas descrições. Você pode usar linhas no estilo "## Seção", "**Item — preço**" e linhas de apoio.
+- Evite texto vazio como "saiba mais", "aproveite" ou "qualidade" sem informação concreta. Cada slide precisa entregar conteúdo real.
 - O primeiro slide é "capa", os intermediários são "conteudo" e o último é "cta".
 - Hashtags entre 8 e 15, sem # dentro do JSON.
 
@@ -159,9 +162,8 @@ Paleta: ${palette}
 CTA fornecido: ${requestedCta || "nenhum CTA específico"}
 Informações adicionais completas: ${data.informacoesAdicionais || "nenhuma"}
 
-Faça os slides funcionarem como uma campanha contínua. O promptImagem de cada slide deve gerar apenas o visual fotográfico/ilustrado principal, sem texto, deixando a composição preparada para a Zunexi aplicar o layout editável depois.
-
-IMPORTANTE SOBRE CONTEÚDO: se o pedido trouxer um cardápio, catálogo, preços, lista de produtos, serviços ou muitas informações, use os slides para mostrar o conteúdo de forma COMPLETA. Separe por categorias e preserve cada dado recebido. Não transforme informações detalhadas em slogans curtos. Se o usuário fornecer um exemplo longo de conteúdo, trate o nível de detalhe desse exemplo como referência de profundidade. Não invente dados ausentes.
+Faça os slides funcionarem como uma campanha contínua. O promptImagem de cada slide deve gerar apenas o visual fotográfico/ilustrado principal, sem texto, deixando a composição preparada para a Zunexi aplicar o layout editável depois. Não invente dados ausentes.
+${denseContentMode ? "MODELO DE CONTEÚDO DENSO: o texto de cada slide pode ser mais completo, com blocos, listas, preços, sabores, itens e descrições quando isso fizer sentido para o pedido." : "MODELO DE CONTEÚDO PADRÃO: faça textos mais bem trabalhados, com mais substância e clareza, porém ainda enxutos e fáceis de ler."}
 Semente de variação: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
     const controller = new AbortController();
