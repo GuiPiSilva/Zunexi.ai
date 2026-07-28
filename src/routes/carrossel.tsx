@@ -26,6 +26,7 @@ import { generateImage, testCloudflareConnection, uploadReferenceImage } from "@
 import { generateInstagramContent, testGroqConnection, updateSlide, type CarrosselOut } from "@/lib/groq.functions";
 import { getAccessKey } from "@/lib/session";
 import { newProject, upsertProject } from "@/lib/storage";
+import { buildLayout, compositionForLayout, fontPairFromStyle, layoutForSlide, paletteFromDescription } from "@/lib/layouts";
 import {
   createCreationJob,
   getActiveCreationJob,
@@ -281,7 +282,7 @@ function NovoCarrossel() {
                   slideBody: slide.texto,
                   slideIndex: slide.numero,
                   slideTotal: output.slides.length,
-                  slideKind: slide.tipo,
+                  slideKind: `${slide.tipo}. ${compositionForLayout(layoutForSlide(index, slide.tipo))}`,
                   brand: payload.form.empresa,
                   palette: payload.form.paleta,
                   style: `${payload.form.estilo}; tom ${payload.form.tom}`,
@@ -320,6 +321,8 @@ function NovoCarrossel() {
             name: output.titulo || payload.form.tema,
             caption: `${output.legenda}\n\n${output.hashtags.map((tag) => `#${tag}`).join(" ")}`.trim(),
             style: payload.form.estilo,
+            palette: payload.form.paleta,
+            brand: payload.form.empresa,
             reference: payload.referenceName,
             ownerScope: job.ownerScope,
           });
@@ -715,6 +718,8 @@ async function saveCarouselProject({
   name,
   caption,
   style,
+  palette,
+  brand,
   reference,
   ownerScope,
 }: {
@@ -723,6 +728,8 @@ async function saveCarouselProject({
   name: string;
   caption: string;
   style: string;
+  palette: string;
+  brand?: string;
   reference?: string;
   ownerScope?: string;
 }): Promise<string> {
@@ -733,18 +740,38 @@ async function saveCarouselProject({
     reference,
   });
 
-  project.slides = await Promise.all(output.slides.map(async (slide) => {
+  const resolvedPalette = paletteFromDescription(palette);
+  const fonts = fontPairFromStyle(style);
+
+  project.slides = await Promise.all(output.slides.map(async (slide, index) => {
     const asset = assets[slide.numero];
     const thumb = asset?.dataUrl ? await resizeImageDataUrl(asset.dataUrl, 360, 0.72) : asset?.url;
     const storedImage = asset?.url || (asset?.dataUrl ? await resizeImageDataUrl(asset.dataUrl, 1080, 0.88) : undefined);
 
-    const elements = storedImage
-      ? [{ kind: "image" as const, x: 0, y: 0, w: 1080, h: 1080, url: storedImage }]
-      : [
-          { kind: "rect" as const, x: 0, y: 0, w: 1080, h: 1080, fill: "#090b14" },
-          { kind: "text" as const, x: 90, y: 310, w: 900, text: slide.titulo, size: 78, color: "#ffffff", align: "center" as const, weight: 700 },
-          { kind: "text" as const, x: 120, y: 520, w: 840, text: slide.texto, size: 38, color: "#d4d4df", align: "center" as const },
-        ];
+    const elements = buildLayout(layoutForSlide(index, slide.tipo), {
+      title: slide.titulo,
+      body: slide.texto,
+      imageUrl: storedImage,
+      palette: resolvedPalette,
+      width: 1080,
+      height: 1080,
+      fonts,
+    });
+
+    if (brand?.trim()) {
+      elements.push({
+        kind: "text",
+        x: 64,
+        y: 1018,
+        w: 952,
+        text: brand.trim(),
+        size: 22,
+        color: resolvedPalette[3],
+        align: "left",
+        weight: 600,
+        font: fonts.body,
+      });
+    }
 
     return {
       id: crypto.randomUUID(),
@@ -753,8 +780,8 @@ async function saveCarouselProject({
       thumb,
       canvas: {
         elements,
-        background: "#090b14",
-        fonts: { display: "Space Grotesk", body: "Inter" },
+        background: resolvedPalette[0],
+        fonts,
       },
     };
   }));

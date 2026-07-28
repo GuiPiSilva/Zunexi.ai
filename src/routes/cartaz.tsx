@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { generateCartaz, generateImage } from "@/lib/ai.functions";
 import { newProject, upsertProject } from "@/lib/storage";
+import { buildLayout, compositionForLayout, fontPairFromStyle, paletteFromDescription } from "@/lib/layouts";
 import { getAccessKey } from "@/lib/session";
 import {
   createCreationJob,
@@ -155,7 +156,7 @@ function NovoCartaz() {
               seed,
               slideTitle: generated.title,
               slideBody: generated.body,
-              slideKind: `cartaz profissional de ${currentForm.kind}`,
+              slideKind: `cartaz profissional de ${currentForm.kind}. ${compositionForLayout("text-over-image")}`,
               brand: currentForm.title,
               palette: currentForm.palette,
               style: `${currentForm.style}; cartaz de evento premium; arte final pronta para publicação`,
@@ -172,14 +173,25 @@ function NovoCartaz() {
         let projectId = job.projectId;
         if (!projectId) {
           const project = newProject("cartaz", currentForm.title, { style: currentForm.style, ratio: currentForm.format });
+          const resolvedPalette = paletteFromDescription(currentForm.palette);
+          const fonts = fontPairFromStyle(currentForm.style);
+          const elements = buildLayout("text-over-image", {
+            title: generated.title,
+            body: generated.body,
+            imageUrl,
+            palette: resolvedPalette,
+            width,
+            height,
+            fonts,
+          });
           project.slides = [{
             id: crypto.randomUUID(),
             width,
             height,
             canvas: {
-              elements: [{ kind: "image" as const, x: 0, y: 0, w: width, h: height, url: imageUrl }],
-              background: "#05050a",
-              fonts: { display: "Bebas Neue", body: "Inter" },
+              elements,
+              background: resolvedPalette[0],
+              fonts,
             },
           }];
           upsertProject(project, job.ownerScope);

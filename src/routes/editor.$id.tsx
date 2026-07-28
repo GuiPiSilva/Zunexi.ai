@@ -10,6 +10,7 @@ import {
   Plus,
   Save,
   Sparkles,
+  Layers3,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -132,6 +133,18 @@ function EditorPage() {
     if (!result) toast.error("Não foi possível exportar esta página.");
   }
 
+  async function exportCurrentPsd() {
+    const filename = `${safeFileName(project.name)}-${String(active + 1).padStart(2, "0")}.psd`;
+    try {
+      const result = await editorRef.current?.exportPsd(filename);
+      if (!result) toast.error("Não foi possível exportar o PSD desta página.");
+      else toast.success("PSD gerado com as camadas do editor.");
+    } catch (error) {
+      console.error("Falha ao exportar PSD", error);
+      toast.error("Não foi possível gerar o PSD.");
+    }
+  }
+
   async function exportAll() {
     if (exportingAll) return;
     setExportingAll(true);
@@ -238,6 +251,9 @@ function EditorPage() {
           <div className="flex flex-wrap gap-2">
             <button onClick={() => exportCurrent(1)} className="secondary-button px-3 py-2 text-xs">
               <Download className="h-4 w-4" /> Baixar PNG
+            </button>
+            <button onClick={() => void exportCurrentPsd()} className="secondary-button px-3 py-2 text-xs">
+              <Layers3 className="h-4 w-4" /> Baixar PSD
             </button>
             {project.type === "carrossel" && (
               <button onClick={exportAll} disabled={exportingAll} className="secondary-button px-3 py-2 text-xs disabled:opacity-50">
