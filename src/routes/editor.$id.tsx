@@ -229,8 +229,8 @@ function EditorPage() {
           <div className="hidden items-center gap-1.5 px-2 text-[10px] text-[#a8a8a8] lg:flex">
             {saved ? <><Check className="h-3 w-3 text-emerald-400" /> Salvo</> : <><Save className="h-3 w-3" /> Salvando...</>}
           </div>
-          <button onClick={() => commit(project)} className="editor-route-action hidden sm:inline-flex">
-            <Save className="h-3.5 w-3.5" /> Salvar
+          <button onClick={() => commit(project)} className="editor-route-action inline-flex" title="Salvar projeto">
+            <Save className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Salvar</span>
           </button>
           <button onClick={() => exportCurrent(2)} className="inline-flex h-8 items-center gap-1.5 rounded-[3px] bg-[#2b78c5] px-3 text-[11px] font-semibold text-white hover:bg-[#3589da]">
             <Download className="h-3.5 w-3.5" /> Exportar HD
@@ -255,9 +255,9 @@ function EditorPage() {
               <Images className="h-3.5 w-3.5" /> {exportingAll ? "Baixando..." : "Todas"}
             </button>
           )}
-          <button onClick={duplicateWholeProject} className="editor-route-action"><Sparkles className="h-3.5 w-3.5" /> Nova versão</button>
-          <button onClick={saveToLibrary} className="editor-route-action"><FolderHeart className="h-3.5 w-3.5" /> Biblioteca</button>
-          <button onClick={copyCaption} className="editor-route-action"><Copy className="h-3.5 w-3.5" /> Legenda</button>
+          <button onClick={duplicateWholeProject} className="editor-route-action hidden sm:inline-flex"><Sparkles className="h-3.5 w-3.5" /> Nova versão</button>
+          <button onClick={saveToLibrary} className="editor-route-action"><FolderHeart className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Biblioteca</span></button>
+          <button onClick={copyCaption} className="editor-route-action hidden sm:inline-flex"><Copy className="h-3.5 w-3.5" /> Legenda</button>
         </section>
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -322,12 +322,13 @@ function EditorPage() {
         </div>
 
         {project.type === "carrossel" && (
-          <div className="flex shrink-0 gap-2 overflow-x-auto border-t border-border bg-card p-2 md:hidden">
+          <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-t border-[#343434] bg-[#232323] p-2 md:hidden">
+            <button onClick={duplicateSlide} title="Duplicar página" className="grid h-14 w-10 shrink-0 place-items-center rounded-md border border-[#444] text-[#ddd]"><Copy className="h-4 w-4" /></button>
             {project.slides.map((item, index) => (
               <button
                 key={item.id}
                 onClick={() => setActive(index)}
-                className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 bg-secondary ${
+                className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border-2 bg-secondary ${
                   active === index ? "border-primary" : "border-transparent"
                 }`}
               >
@@ -338,9 +339,10 @@ function EditorPage() {
                 )}
               </button>
             ))}
-            <button onClick={addSlide} className="grid h-16 w-16 shrink-0 place-items-center rounded-lg border border-dashed border-border">
+            <button onClick={addSlide} className="grid h-14 w-14 shrink-0 place-items-center rounded-lg border border-dashed border-[#555] text-[#ddd]">
               <Plus className="h-4 w-4" />
             </button>
+            <button onClick={deleteSlide} title="Excluir página" className="grid h-14 w-10 shrink-0 place-items-center rounded-md border border-red-500/30 text-red-400"><Trash2 className="h-4 w-4" /></button>
           </div>
         )}
       </div>
