@@ -170,7 +170,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="font-semibold">{credits?.unlimited ? "Créditos infinitos" : `${credits?.remaining ?? "—"} créditos hoje`}</span>
           </div>
           <div className="flex items-center gap-3 rounded-xl border border-sidebar-border bg-card/55 p-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-primary/25 bg-[#0d1020] p-1.5 shadow-[0_0_20px_rgba(139,92,246,0.16)]"><img src={logoIcon} alt="Zunexi.ai" className="h-full w-full object-contain" /></div>
+            <div className="brand-logo-tile grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-primary/25 p-1.5 shadow-[0_0_20px_rgba(139,92,246,0.16)]"><img src={logoIcon} alt="Zunexi.ai" className="brand-logo-icon h-full w-full object-contain" /></div>
             <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold" title={userName}>{userName}</div><div className="truncate text-[11px] text-muted-foreground">Acesso autorizado</div></div>
             <button onClick={logout} title="Sair" className="rounded-lg p-2 text-muted-foreground transition hover:bg-secondary/70 hover:text-foreground"><LogOut className="h-4 w-4" /></button>
           </div>
@@ -228,7 +228,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               aria-haspopup="menu"
               className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 hover:border-primary/35 hover:bg-secondary/60"
             >
-              <div className="grid h-8 w-8 place-items-center overflow-hidden rounded-lg border border-primary/25 bg-black p-1"><img src={logoIcon} alt="Zunexi.ai" className="h-full w-full object-contain" /></div>
+              <div className="brand-logo-tile grid h-8 w-8 place-items-center overflow-hidden rounded-lg border border-primary/25 p-1"><img src={logoIcon} alt="Zunexi.ai" className="brand-logo-icon h-full w-full object-contain" /></div>
               <div className="text-left"><div className="max-w-[130px] truncate text-xs font-semibold" title={userName}>{userName}</div><div className="text-[10px] text-muted-foreground">{credits?.unlimited ? "Créditos infinitos" : `${credits?.remaining ?? "—"} créditos`}</div></div>
               <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${profileOpen ? "rotate-180" : ""}`} />
             </button>
