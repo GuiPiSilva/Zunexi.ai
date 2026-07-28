@@ -403,7 +403,7 @@ function NovoCarrossel() {
               </Field>
 
               <div className="grid gap-5 md:grid-cols-2">
-                <Field label="Nome da empresa ou marca"><input value={form.empresa} onChange={(e) => setForm({ ...form, empresa: e.target.value })} placeholder="Ex.: InLabs.Ia Studios" className="app-input" /></Field>
+                <Field label="Nome da empresa ou marca"><input value={form.empresa} onChange={(e) => setForm({ ...form, empresa: e.target.value })} placeholder="Ex.: Zunexi.ai" className="app-input" /></Field>
                 <Field label="Produto ou serviço"><input value={form.produto} onChange={(e) => setForm({ ...form, produto: e.target.value })} placeholder="Ex.: Plataforma de criação de conteúdo" className="app-input" /></Field>
                 <Field label="Público-alvo"><input value={form.publicoAlvo} onChange={(e) => setForm({ ...form, publicoAlvo: e.target.value })} placeholder="Empreendedores e social medias" className="app-input" /></Field>
                 <Field label="Objetivo do carrossel"><select value={form.objetivo} onChange={(e) => setForm({ ...form, objetivo: e.target.value })} className="app-input"><option value="vender">Vender</option><option value="educar">Educar</option><option value="engajar">Engajar</option><option value="informar">Informar</option><option value="captar clientes">Captar clientes</option></select></Field>
