@@ -31,7 +31,7 @@ import { clearAdminToken, getAdminToken, setAdminToken } from "@/lib/session";
 export const Route = createFileRoute("/admin")({
   head: () => ({
     meta: [
-      { title: "Administração — InLabs.Ia Studios" },
+      { title: "Administração — Zunexi.ai" },
       { name: "description", content: "Painel restrito para administração de chaves de acesso." },
     ],
   }),
