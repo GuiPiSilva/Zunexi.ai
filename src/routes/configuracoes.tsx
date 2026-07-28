@@ -6,7 +6,7 @@ import { AppShell } from "@/components/AppShell";
 import { clearAccessKey, getAccessKey, getAccessUserName } from "@/lib/session";
 
 export const Route = createFileRoute("/configuracoes")({
-  head: () => ({ meta: [{ title: "Configurações — InLabs.Ia Studios" }] }),
+  head: () => ({ meta: [{ title: "Configurações — Zunexi.ai" }] }),
   component: Configuracoes,
 });
 
