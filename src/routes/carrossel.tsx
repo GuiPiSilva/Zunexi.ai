@@ -752,7 +752,7 @@ async function saveCarouselProject({
     const asset = assets[slide.numero];
     const storedImage = asset?.url || (asset?.dataUrl ? await resizeImageDataUrl(asset.dataUrl, 1080, 0.9) : undefined);
 
-    const elements = buildLayout(layoutForSlide(index, slide.tipo), {
+    const elements = buildLayout(layoutForSlide(index, slide.tipo, slide.titulo, slide.texto), {
       title: slide.titulo,
       body: slide.texto,
       imageUrl: storedImage,
