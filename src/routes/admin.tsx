@@ -213,7 +213,7 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
     <main className="min-h-screen bg-background">
       <header className="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur-xl">
         <div className="mx-auto flex h-[76px] max-w-[1500px] items-center gap-4 px-5 lg:px-8">
-          <img src={logoFull} alt="InLabs.Ia Studios" className="h-10 w-auto max-w-[190px] object-contain" />
+          <img src={logoFull} alt="Zunexi.ai" className="h-10 w-auto max-w-[190px] object-contain" />
           <span className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">ADMIN</span>
           <button onClick={onLogout} className="secondary-button ml-auto"><LogOut className="h-4 w-4" /> Encerrar sessão</button>
         </div>
