@@ -94,7 +94,7 @@ function Login({ onOk }: { onOk: (token: string) => void }) {
     <main className="relative grid min-h-screen place-items-center overflow-hidden bg-[#050711] px-4 py-10">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(650px_circle_at_20%_30%,rgba(124,58,237,.22),transparent_58%),radial-gradient(750px_circle_at_80%_70%,rgba(37,99,235,.14),transparent_60%)]" />
       <form onSubmit={submit} className="panel relative w-full max-w-md border-primary/20 p-7 sm:p-9">
-        <div className="mb-7 flex justify-center"><img src={logoFull} alt="InLabs.Ia Studios" className="h-12 w-auto max-w-[250px] object-contain" /></div>
+        <div className="mb-7 flex justify-center"><img src={logoFull} alt="Zunexi.ai" className="h-12 w-auto max-w-[250px] object-contain" /></div>
         <div className="text-center">
           <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-primary/15 text-primary"><ShieldCheck className="h-7 w-7" /></div>
           <h1 className="section-title text-2xl">Área do administrador</h1>
