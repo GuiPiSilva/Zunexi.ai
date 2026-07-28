@@ -44,7 +44,7 @@ export const generateInstagramContent = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => Input.parse(d))
   .handler(async ({ data }): Promise<CarrosselOut> => {
     const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) throw new Error("GROQ_API_KEY não configurada no servidor.");
+    if (!apiKey) throw new Error("Chave do serviço de geração de texto não configurada no servidor.");
 
     const sb = admin();
     const keyRow = await requireAccessKey(sb, data.accessKey);
@@ -180,28 +180,28 @@ Semente de variação: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
     } catch (e) {
       const err = e as Error;
       if (err.name === "AbortError") throw new Error("Tempo esgotado ao gerar. Tente novamente.");
-      throw new Error("Falha ao chamar a Groq API.");
+      throw new Error("Falha ao chamar o serviço de geração de texto.");
     } finally { clearTimeout(t); }
 
     if (!response.ok) {
       const body = await response.text();
-      console.error("Groq error", response.status, body.slice(0, 500));
-      if (response.status === 429) throw new Error("Limite da Groq API atingido. Tente novamente em instantes.");
-      if (response.status === 401 || response.status === 403) throw new Error("Chave da Groq inválida ou sem permissão.");
-      throw new Error("A Groq retornou um erro. Tente novamente.");
+      console.error("Text generation error", response.status, body.slice(0, 500));
+      if (response.status === 429) throw new Error("Limite do serviço de geração de texto atingido. Tente novamente em instantes.");
+      if (response.status === 401 || response.status === 403) throw new Error("Chave do serviço de geração de texto inválida ou sem permissão.");
+      throw new Error("O serviço de geração de texto retornou um erro. Tente novamente.");
     }
 
     const json = await response.json() as { choices?: { message?: { content?: string } }[] };
     const raw = json.choices?.[0]?.message?.content ?? "";
-    if (!raw) throw new Error("Resposta vazia da Groq.");
+    if (!raw) throw new Error("Resposta vazia do serviço de geração de texto.");
     let parsed: Omit<CarrosselOut, "id">;
     try { parsed = JSON.parse(raw) as Omit<CarrosselOut, "id">; }
-    catch { throw new Error("Resposta da Groq em formato inválido."); }
+    catch { throw new Error("Resposta do serviço de geração de texto em formato inválido."); }
 
     if (
       !parsed || typeof parsed.titulo !== "string" || typeof parsed.legenda !== "string" ||
       !Array.isArray(parsed.hashtags) || !Array.isArray(parsed.slides) || parsed.slides.length === 0
-    ) throw new Error("Resposta da Groq não segue o formato esperado.");
+    ) throw new Error("A resposta do serviço de geração de texto não segue o formato esperado.");
 
     const slides = parsed.slides.slice(0, data.quantidadeSlides).map((s, i) => ({
       numero: i + 1,
@@ -272,7 +272,8 @@ export const testGroqConnection = createServerFn({ method: "POST" })
   .handler(async (): Promise<{ ok: boolean; model: string; message: string }> => {
     const apiKey = process.env.GROQ_API_KEY;
     const model = process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile";
-    if (!apiKey) return { ok: false, model, message: "GROQ_API_KEY não configurada no servidor." };
+    const publicModelLabel = "Modelo de texto configurado";
+    if (!apiKey) return { ok: false, model: publicModelLabel, message: "Chave do serviço de geração de texto não configurada no servidor." };
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 15_000);
     try {
@@ -292,17 +293,18 @@ export const testGroqConnection = createServerFn({ method: "POST" })
       });
       if (!r.ok) {
         const body = await r.text();
-        if (r.status === 401 || r.status === 403) return { ok: false, model, message: "Chave da Groq inválida ou sem permissão." };
-        if (r.status === 429) return { ok: false, model, message: "Limite da Groq atingido no momento." };
-        return { ok: false, model, message: `Erro Groq ${r.status}: ${body.slice(0, 160)}` };
+        if (r.status === 401 || r.status === 403) return { ok: false, model: publicModelLabel, message: "Chave do serviço de geração de texto inválida ou sem permissão." };
+        if (r.status === 429) return { ok: false, model: publicModelLabel, message: "Limite do serviço de geração de texto atingido no momento." };
+        console.error("Text generation test error", r.status, body.slice(0, 500));
+        return { ok: false, model: publicModelLabel, message: `Erro no serviço de geração de texto (${r.status}).` };
       }
       const j = await r.json() as { choices?: { message?: { content?: string } }[] };
       const txt = j.choices?.[0]?.message?.content?.trim() ?? "";
-      return { ok: true, model, message: `Conexão OK. Resposta: "${txt || "(vazia)"}"` };
+      return { ok: true, model: publicModelLabel, message: `Conexão OK. Resposta: "${txt || "(vazia)"}"` };
     } catch (e) {
       const err = e as Error;
-      if (err.name === "AbortError") return { ok: false, model, message: "Tempo esgotado ao contatar a Groq." };
-      return { ok: false, model, message: "Falha de rede ao contatar a Groq." };
+      if (err.name === "AbortError") return { ok: false, model: publicModelLabel, message: "Tempo esgotado ao contatar o serviço de geração de texto." };
+      return { ok: false, model: publicModelLabel, message: "Falha de rede ao contatar o serviço de geração de texto." };
     } finally { clearTimeout(t); }
   });
 
@@ -352,7 +354,7 @@ export const generateCarouselPrompt = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => PromptCreatorInput.parse(d))
   .handler(async ({ data }): Promise<CarouselPromptData> => {
     const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) throw new Error("GROQ_API_KEY não configurada no servidor.");
+    if (!apiKey) throw new Error("Chave do serviço de geração de texto não configurada no servidor.");
 
     const sb = admin();
     await requireAccessKey(sb, data.accessKey);
@@ -383,14 +385,14 @@ export const generateCarouselPrompt = createServerFn({ method: "POST" })
       });
 
       if (!response.ok) {
-        if (response.status === 429) throw new Error("Limite da Groq atingido. Tente novamente em instantes.");
-        if (response.status === 401 || response.status === 403) throw new Error("Chave da Groq inválida ou sem permissão.");
-        throw new Error("A Groq não conseguiu criar o prompt.");
+        if (response.status === 429) throw new Error("Limite do serviço de geração de texto atingido. Tente novamente em instantes.");
+        if (response.status === 401 || response.status === 403) throw new Error("Chave do serviço de geração de texto inválida ou sem permissão.");
+        throw new Error("O serviço de geração de texto não conseguiu criar o prompt.");
       }
 
       const json = await response.json() as { choices?: { message?: { content?: string } }[] };
       const content = json.choices?.[0]?.message?.content?.trim();
-      if (!content) throw new Error("A Groq retornou um prompt vazio.");
+      if (!content) throw new Error("O serviço de geração de texto retornou um prompt vazio.");
 
       let parsed: Partial<CarouselPromptData>;
       try {

@@ -239,9 +239,7 @@ const CLOUDFLARE_FAST_IMAGE_MODEL = process.env.CLOUDFLARE_IMAGE_MODEL_FAST || p
 const CLOUDFLARE_PREMIUM_IMAGE_MODEL = process.env.CLOUDFLARE_IMAGE_MODEL_PREMIUM || "@cf/black-forest-labs/flux-2-klein-9b";
 
 function cloudflareModelLabel() {
-  return CLOUDFLARE_FAST_IMAGE_MODEL === CLOUDFLARE_PREMIUM_IMAGE_MODEL
-    ? CLOUDFLARE_FAST_IMAGE_MODEL
-    : `Rápida: ${CLOUDFLARE_FAST_IMAGE_MODEL} · Premium: ${CLOUDFLARE_PREMIUM_IMAGE_MODEL}`;
+  return "Modos rápido e premium";
 }
 
 function startOfUtcDay(date = new Date()) {
@@ -299,7 +297,8 @@ export const adminGetCloudflareUsage = createServerFn({ method: "POST" })
       if (/cloudflare_ai_usage|relation .* does not exist|schema cache|PGRST205/i.test(error.message)) {
         return emptyCloudflareUsage(true);
       }
-      throw new Error(`Não foi possível carregar o uso da Cloudflare: ${error.message}`);
+      console.error("Falha ao carregar métricas de geração de imagens", error);
+      throw new Error("Não foi possível carregar o uso da geração de imagens.");
     }
 
     const byDate = new Map<string, CloudflareUsageDay>();
