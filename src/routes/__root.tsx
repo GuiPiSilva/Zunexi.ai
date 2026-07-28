@@ -19,7 +19,7 @@ function NotFoundComponent() {
       <div className="max-w-md text-center">
         <h1 className="text-7xl font-bold text-gradient-brand font-display">404</h1>
         <h2 className="mt-4 text-xl font-semibold">Página não encontrada</h2>
-        <p className="mt-2 text-sm text-muted-foreground">Essa rota não existe no InLabs.Ia Studios.</p>
+        <p className="mt-2 text-sm text-muted-foreground">Essa rota não existe no Zunexi.ai.</p>
         <div className="mt-6">
           <Link to="/" className="inline-flex items-center rounded-md gradient-brand px-4 py-2 text-sm font-medium text-primary-foreground">
             Voltar ao Dashboard
@@ -54,9 +54,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "InLabs.Ia Studios — Estúdio criativo de conteúdo para Instagram" },
+      { title: "Zunexi.ai— Estúdio criativo de conteúdo para Instagram" },
       { name: "description", content: "Crie carrosséis e cartazes para Instagram com editor visual e IA, com layouts sempre diferentes." },
-      { property: "og:title", content: "InLabs.Ia Studios" },
+      { property: "og:title", content: "Zunexi.ai" },
       { property: "og:description", content: "Editor visual + IA para conteúdo de Instagram." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
