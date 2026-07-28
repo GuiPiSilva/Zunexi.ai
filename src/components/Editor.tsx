@@ -3,6 +3,7 @@ import * as fabric from "fabric";
 import type { ElementDesc } from "@/lib/layouts";
 import { Type, Image as ImageIcon, Square, Circle as CircleIcon, Trash2, Copy, Undo2, Redo2, Download, Bold, Italic, AlignLeft, AlignCenter, AlignRight, Layers3 } from "lucide-react";
 import { exportFabricCanvasToPsd } from "@/lib/psd-export";
+import { addElementDescToCanvas, loadFabricImage, normalizeCanvasJson } from "@/lib/fabric-elements";
 
 export interface EditorHandle {
   exportPng: (filename?: string, multiplier?: number) => string | null;
@@ -25,6 +26,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
   const history = useRef<string[]>([]);
   const historyIdx = useRef(-1);
   const skipHistory = useRef(false);
+  const onChangeRef = useRef(onChange);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   useImperativeHandle(ref, () => ({
     getDataUrl(multiplier = 1) {
@@ -51,19 +57,19 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
 
   const emit = useCallback(() => {
     const c = fcRef.current; if (!c) return;
-    const json = c.toJSON();
-    const thumb = c.toDataURL({ format: "jpeg", quality: 0.55, multiplier: 0.08 });
-    onChange?.(json, thumb);
-  }, [onChange]);
+    const json = serializeCanvas(c, width, height);
+    const thumb = c.toDataURL({ format: "jpeg", quality: 0.72, multiplier: Math.min(0.36, 420 / Math.max(width, height)) });
+    onChangeRef.current?.(json, thumb);
+  }, [height, width]);
 
   const snapshot = useCallback(() => {
     const c = fcRef.current; if (!c || skipHistory.current) return;
-    const json = JSON.stringify(c.toJSON());
+    const json = JSON.stringify(serializeCanvas(c, width, height));
     history.current = history.current.slice(0, historyIdx.current + 1);
     history.current.push(json);
     historyIdx.current = history.current.length - 1;
     emit();
-  }, [emit]);
+  }, [emit, height, width]);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -90,15 +96,15 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
         if (initial && "elements" in initial) {
           c.backgroundColor = initial.background || "#111";
           for (const el of initial.elements as ElementDesc[]) {
-            await addDesc(c, el);
+            await addElementDescToCanvas(c, el);
           }
         } else if (initial) {
-          await c.loadFromJSON(normalizeCanvasJson(initial));
+          await c.loadFromJSON(prepareCanvasJson(initial, width, height));
         }
 
         if (cancelled) return;
         c.requestRenderAll();
-        const json = JSON.stringify(c.toJSON());
+        const json = JSON.stringify(serializeCanvas(c, width, height));
         history.current = [json];
         historyIdx.current = 0;
       } catch (error) {
@@ -120,15 +126,17 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
 
   const viewportRef = useRef<HTMLDivElement>(null);
 
-  // Fit zoom to container with ResizeObserver (responsive)
+  // Ajusta apenas o tamanho CSS do Fabric. O backstore continua no tamanho
+  // lógico do documento; assim coordenadas, seleção e exportação permanecem
+  // idênticas independentemente do tamanho disponível na tela.
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
     function fit() {
-      const pw = el!.clientWidth - 24;
-      const ph = el!.clientHeight - 24;
+      const pw = el.clientWidth - 24;
+      const ph = el.clientHeight - 24;
       if (pw <= 0 || ph <= 0) return;
-      const z = Math.min(pw / width, ph / height);
+      const z = Math.min(pw / width, ph / height, 1);
       setZoom(Math.max(0.05, z));
     }
     fit();
@@ -137,6 +145,14 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
     window.addEventListener("resize", fit);
     return () => { ro.disconnect(); window.removeEventListener("resize", fit); };
   }, [width, height]);
+
+  useEffect(() => {
+    const canvas = fcRef.current;
+    if (!canvas) return;
+    canvas.setDimensions({ width: Math.round(width * zoom), height: Math.round(height * zoom) }, { cssOnly: true });
+    canvas.calcOffset();
+    canvas.requestRenderAll();
+  }, [height, width, zoom]);
 
   function undo() {
     if (historyIdx.current <= 0) return;
@@ -256,11 +272,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({ wi
       )}
 
       {/* Canvas viewport */}
-      <div ref={viewportRef} className="grid min-h-0 flex-1 place-items-center overflow-hidden bg-background p-3">
-        <div style={{ width: width*zoom, height: height*zoom }} className="relative shadow-2xl">
-          <div style={{ transform: `scale(${zoom})`, transformOrigin: "top left", width, height }}>
-            <canvas ref={canvasRef} />
-          </div>
+      <div ref={viewportRef} className="grid min-h-0 flex-1 place-items-center overflow-auto bg-background p-3">
+        <div style={{ width: width * zoom, height: height * zoom }} className="relative shrink-0 shadow-2xl">
+          <canvas ref={canvasRef} />
         </div>
       </div>
     </div>
@@ -275,82 +289,37 @@ function ToolBtn({ icon: Icon, label, onClick, disabled }: { icon: React.Compone
   );
 }
 
-async function addDesc(c: fabric.Canvas, el: ElementDesc) {
-  if (el.kind === "rect") {
-    c.add(new fabric.Rect({ left: el.x, top: el.y, width: el.w, height: el.h, fill: el.fill, opacity: el.opacity ?? 1, rx: el.rx || 0, ry: el.rx || 0 }));
-  } else if (el.kind === "circle") {
-    c.add(new fabric.Circle({ left: el.cx - el.r, top: el.cy - el.r, radius: el.r, fill: el.fill, opacity: el.opacity ?? 1 }));
-  } else if (el.kind === "text") {
-    const t = new fabric.Textbox(el.text, { left: el.x, top: el.y, width: el.w, fontSize: el.size, fill: el.color, textAlign: el.align, fontWeight: el.weight ?? 400, fontStyle: el.italic ? "italic" : "normal", fontFamily: el.font || "Inter" });
-    if (el.shadow) t.set("shadow", new fabric.Shadow({ color: "rgba(0,0,0,0.5)", blur: 20, offsetX: 0, offsetY: 4 }));
-    c.add(t);
-  } else if (el.kind === "image") {
-    const img = await loadFabricImage(el.url);
-    const sourceWidth = img.width || 1;
-    const sourceHeight = img.height || 1;
-    const scale = Math.max(el.w / sourceWidth, el.h / sourceHeight);
-    const cropWidth = Math.min(sourceWidth, el.w / scale);
-    const cropHeight = Math.min(sourceHeight, el.h / scale);
 
-    img.set({
-      left: el.x,
-      top: el.y,
-      width: cropWidth,
-      height: cropHeight,
-      cropX: Math.max(0, (sourceWidth - cropWidth) / 2),
-      cropY: Math.max(0, (sourceHeight - cropHeight) / 2),
-      scaleX: scale,
-      scaleY: scale,
-      opacity: el.opacity ?? 1,
-    });
-    c.add(img);
-  }
+function serializeCanvas(canvas: fabric.Canvas, width: number, height: number) {
+  return {
+    ...canvas.toJSON(),
+    zunexiCanvasWidth: width,
+    zunexiCanvasHeight: height,
+  };
 }
 
-async function loadFabricImage(source: string) {
-  const normalizedSource = normalizeImageSource(source);
-  if (!/^https?:\/\//i.test(normalizedSource)) {
-    return fabric.FabricImage.fromURL(normalizedSource);
-  }
+function prepareCanvasJson(value: unknown, targetWidth: number, targetHeight: number) {
+  const normalized = normalizeCanvasJson(value) as any;
+  if (!normalized || typeof normalized !== "object") return normalized;
 
-  try {
-    return await fabric.FabricImage.fromURL(normalizedSource, { crossOrigin: "anonymous" });
-  } catch {
-    return fabric.FabricImage.fromURL(normalizedSource);
-  }
-}
+  const sourceWidth = Number(normalized.zunexiCanvasWidth || 0);
+  const sourceHeight = Number(normalized.zunexiCanvasHeight || 0);
+  if (!sourceWidth || !sourceHeight || (sourceWidth === targetWidth && sourceHeight === targetHeight)) return normalized;
 
-function normalizeCanvasJson(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(normalizeCanvasJson);
-  if (!value || typeof value !== "object") return value;
+  const scaleX = targetWidth / sourceWidth;
+  const scaleY = targetHeight / sourceHeight;
+  const objects = Array.isArray(normalized.objects) ? normalized.objects.map((object: any) => ({
+    ...object,
+    left: typeof object.left === "number" ? object.left * scaleX : object.left,
+    top: typeof object.top === "number" ? object.top * scaleY : object.top,
+    scaleX: (typeof object.scaleX === "number" ? object.scaleX : 1) * scaleX,
+    scaleY: (typeof object.scaleY === "number" ? object.scaleY : 1) * scaleY,
+  })) : normalized.objects;
 
-  return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [
-      key,
-      key === "src" && typeof item === "string" ? normalizeImageSource(item) : normalizeCanvasJson(item),
-    ]),
-  );
-}
-
-function normalizeImageSource(source: string) {
-  const match = source.match(/^data:([^;,]*)(;base64)?,(.*)$/s);
-  if (!match || !match[2]) return source;
-
-  const currentType = match[1].toLowerCase();
-  if (currentType.startsWith("image/")) return source;
-
-  try {
-    const header = atob(match[3].slice(0, 96));
-    const bytes = Array.from(header, (char) => char.charCodeAt(0));
-    let mime = "image/png";
-
-    if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) mime = "image/jpeg";
-    else if (header.startsWith("GIF8")) mime = "image/gif";
-    else if (header.startsWith("RIFF") && header.slice(8, 12) === "WEBP") mime = "image/webp";
-    else if (header.includes("<svg")) mime = "image/svg+xml";
-
-    return `data:${mime};base64,${match[3]}`;
-  } catch {
-    return source;
-  }
+  return {
+    ...normalized,
+    objects,
+    zunexiCanvasWidth: targetWidth,
+    zunexiCanvasHeight: targetHeight,
+  };
 }

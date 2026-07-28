@@ -58,11 +58,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   const loc = useLocation();
   const getCredits = useServerFn(getAccessCreditStatus);
   const notificationBox = useRef<HTMLDivElement | null>(null);
+  const profileBox = useRef<HTMLDivElement | null>(null);
   const [ready, setReady] = useState(false);
   const [authed, setAuthed] = useState(false);
   const [userName, setUserName] = useState("Usuário Zunexi.ai");
   const [open, setOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [notifications, setNotifications] = useState<InLabsNotification[]>([]);
   const [credits, setCredits] = useState<CreditStatus | null>(null);
 
@@ -85,7 +87,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (key) void refreshCredits();
   }, [loc.pathname]);
 
-  useEffect(() => setOpen(false), [loc.pathname]);
+  useEffect(() => {
+    setOpen(false);
+    setProfileOpen(false);
+  }, [loc.pathname]);
 
   useEffect(() => subscribeNotifications(() => setNotifications(loadNotifications())), []);
 
@@ -97,10 +102,22 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     function close(event: MouseEvent) {
-      if (notificationBox.current && !notificationBox.current.contains(event.target as Node)) setNotificationOpen(false);
+      const target = event.target as Node;
+      if (notificationBox.current && !notificationBox.current.contains(target)) setNotificationOpen(false);
+      if (profileBox.current && !profileBox.current.contains(target)) setProfileOpen(false);
     }
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
+  }, []);
+
+  useEffect(() => {
+    const refreshUserName = () => setUserName(getAccessUserName());
+    window.addEventListener("zunexi:profile-updated", refreshUserName);
+    window.addEventListener("storage", refreshUserName);
+    return () => {
+      window.removeEventListener("zunexi:profile-updated", refreshUserName);
+      window.removeEventListener("storage", refreshUserName);
+    };
   }, []);
 
   const pageTitle = useMemo(() => {
@@ -200,11 +217,49 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
           </div>
 
-          <button className="hidden items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 sm:flex">
-            <div className="grid h-8 w-8 place-items-center overflow-hidden rounded-lg border border-primary/25 bg-[#0d1020] p-1"><img src={logoIcon} alt="InLabs" className="h-full w-full object-contain" /></div>
-            <div className="text-left"><div className="max-w-[130px] truncate text-xs font-semibold" title={userName}>{userName}</div><div className="text-[10px] text-muted-foreground">{credits?.unlimited ? "Créditos infinitos" : `${credits?.remaining ?? "—"} créditos`}</div></div>
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-          </button>
+          <div ref={profileBox} className="relative hidden sm:block">
+            <button
+              type="button"
+              onClick={() => {
+                setProfileOpen((value) => !value);
+                setNotificationOpen(false);
+              }}
+              aria-expanded={profileOpen}
+              aria-haspopup="menu"
+              className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 hover:border-primary/35 hover:bg-white/[0.035]"
+            >
+              <div className="grid h-8 w-8 place-items-center overflow-hidden rounded-lg border border-primary/25 bg-black p-1"><img src={logoIcon} alt="Zunexi.ai" className="h-full w-full object-contain" /></div>
+              <div className="text-left"><div className="max-w-[130px] truncate text-xs font-semibold" title={userName}>{userName}</div><div className="text-[10px] text-muted-foreground">{credits?.unlimited ? "Créditos infinitos" : `${credits?.remaining ?? "—"} créditos`}</div></div>
+              <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${profileOpen ? "rotate-180" : ""}`} />
+            </button>
+
+            {profileOpen && (
+              <div role="menu" className="absolute right-0 top-12 z-50 w-60 overflow-hidden rounded-2xl border border-border bg-[#090c16] p-2 shadow-2xl">
+                <div className="border-b border-border px-3 py-2.5">
+                  <div className="truncate text-sm font-semibold" title={userName}>{userName}</div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">{credits?.unlimited ? "Créditos infinitos" : `${credits?.remaining ?? "—"} créditos disponíveis`}</div>
+                </div>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setProfileOpen(false); navigate({ to: "/configuracoes" }); }}
+                  className="mt-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm text-muted-foreground hover:bg-white/5 hover:text-white"
+                >
+                  <Settings className="h-4 w-4 text-primary" />
+                  Configurações
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={logout}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm text-red-300/90 hover:bg-red-500/10 hover:text-red-200"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Sair da conta
+                </button>
+              </div>
+            )}
+          </div>
         </header>
 
         <main className="min-h-[calc(100vh-76px)]">{children}</main>
