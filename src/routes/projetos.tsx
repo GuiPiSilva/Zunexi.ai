@@ -17,7 +17,7 @@ import { AppShell } from "@/components/AppShell";
 import { deleteProject, duplicateProject, loadProjects, subscribeProjects, type Project } from "@/lib/storage";
 
 export const Route = createFileRoute("/projetos")({
-  head: () => ({ meta: [{ title: "Meus projetos — InLabs.Ia Studios" }] }),
+  head: () => ({ meta: [{ title: "Meus projetos — Zunexi.ai" }] }),
   component: MeusProjetos,
 });
 
