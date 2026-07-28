@@ -80,6 +80,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const [zoom, setZoom] = useState(0.5);
   const [tool, setTool] = useState<EditorTool>("move");
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("layers");
+  const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
   const [uiVersion, setUiVersion] = useState(0);
 
   useEffect(() => {
@@ -89,9 +90,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const renderLogicalDataUrl = useCallback((format: "png" | "jpeg", multiplier = 1, quality = 1) => {
     const canvas = fcRef.current;
     if (!canvas) return null;
-    // The backing store always remains at the logical document size. CSS zoom
-    // does not affect export resolution, so no temporary resize is needed.
-    canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+    // O backing store permanece sempre nas dimensões lógicas do documento.
+    // O zoom do editor é apenas CSS, então a exportação nunca herda escala de tela.
     canvas.requestRenderAll();
     return canvas.toDataURL({ format, quality, multiplier });
   }, []);
@@ -112,7 +112,6 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     async exportPsd(filename = "zunexi-design.psd") {
       const canvas = fcRef.current;
       if (!canvas) return false;
-      canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
       canvas.requestRenderAll();
       return await exportFabricCanvasToPsd(canvas, filename);
     },
@@ -167,7 +166,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     let cancelled = false;
 
     const selectionChanged = () => refreshUi();
-    const objectChanged = () => snapshot();
+    const objectChanged = (event?: { target?: fabric.FabricObject }) => {
+      if (event?.target) keepObjectReachable(event.target);
+      snapshot();
+    };
 
     canvas.on("selection:created", selectionChanged);
     canvas.on("selection:updated", selectionChanged);
@@ -241,22 +243,23 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     };
   }, [fitToWorkspace]);
 
-  // Keep Fabric's internal coordinate system at the REAL document size.
-  // Only the CSS presentation is scaled. The previous implementation resized
-  // the backing canvas AND applied viewport zoom, effectively scaling objects
-  // twice and producing the "art stuck in the top-left corner" bug.
+  // A prancheta SEMPRE continua em width × height lógicos. O zoom é somente
+  // visual (CSS). Isso evita salvar objetos em coordenadas de um canvas reduzido
+  // e elimina o erro de abrir a imagem/textos fora do campo de design.
   useEffect(() => {
     const canvas = fcRef.current;
     if (!canvas) return;
     const displayWidth = Math.max(1, Math.round(width * zoom));
     const displayHeight = Math.max(1, Math.round(height * zoom));
-
-    canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-    canvas.setDimensions({ width, height });
     canvas.setDimensions(
       { width: `${displayWidth}px`, height: `${displayHeight}px` },
       { cssOnly: true },
     );
+    canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+    if (canvas.wrapperEl) {
+      canvas.wrapperEl.style.width = `${displayWidth}px`;
+      canvas.wrapperEl.style.height = `${displayHeight}px`;
+    }
     canvas.calcOffset();
     canvas.requestRenderAll();
   }, [height, width, zoom]);
@@ -529,6 +532,16 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     snapshot();
   }
 
+  function keepObjectReachable(object: fabric.FabricObject) {
+    const objectWidth = Math.max(1, object.getScaledWidth());
+    const objectHeight = Math.max(1, object.getScaledHeight());
+    const minVisibleX = Math.min(80, objectWidth * 0.18);
+    const minVisibleY = Math.min(80, objectHeight * 0.18);
+    object.left = clampNumber(object.left || 0, -objectWidth + minVisibleX, width - minVisibleX);
+    object.top = clampNumber(object.top || 0, -objectHeight + minVisibleY, height - minVisibleY);
+    object.setCoords();
+  }
+
   const objects = useMemo(() => {
     void uiVersion;
     return [...(fcRef.current?.getObjects() || [])].reverse();
@@ -538,9 +551,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const selectedFill = typeof (sel as any)?.fill === "string" ? String((sel as any).fill) : "#ffffff";
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[48px_minmax(0,1fr)_286px] grid-rows-[40px_minmax(0,1fr)_30px] overflow-hidden bg-[#1f1f1f] text-[#e8e8e8]">
+    <div className="grid h-full min-h-0 grid-cols-[42px_minmax(0,1fr)] grid-rows-[40px_minmax(0,1fr)_34px] overflow-hidden bg-[#1f1f1f] text-[#e8e8e8] md:grid-cols-[48px_minmax(0,1fr)_286px] md:grid-rows-[40px_minmax(0,1fr)_30px]">
       {/* Photoshop-like contextual options bar */}
-      <div className="col-span-3 flex min-w-0 items-center gap-2 overflow-x-auto border-b border-[#343434] bg-[#252525] px-2 text-[11px]">
+      <div className="col-span-2 flex min-w-0 items-center gap-2 overflow-x-auto border-b border-[#343434] bg-[#252525] px-2 text-[11px] md:col-span-3">
         <div className="flex items-center gap-1.5 border-r border-[#3a3a3a] pr-3">
           <MousePointer2 className="h-3.5 w-3.5 text-[#c9c9c9]" />
           <span className="font-medium capitalize">{tool === "rect" ? "retângulo" : tool === "circle" ? "círculo" : tool === "hand" ? "mão" : tool}</span>
@@ -587,14 +600,17 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         }}
       >
         <div className="flex min-h-full min-w-full items-center justify-center p-9">
-          <div className="relative shrink-0 border border-black/70 bg-white shadow-[0_18px_70px_rgba(0,0,0,.62)]">
+          <div
+            className="relative shrink-0 overflow-hidden border border-black/70 bg-white shadow-[0_18px_70px_rgba(0,0,0,.62)]"
+            style={{ width: Math.round(width * zoom), height: Math.round(height * zoom) }}
+          >
             <canvas ref={canvasRef} />
           </div>
         </div>
       </main>
 
       {/* Right inspector */}
-      <aside className="row-start-2 min-h-0 border-l border-[#343434] bg-[#242424]">
+      <aside className={`${mobileInspectorOpen ? "fixed inset-x-2 bottom-10 z-40 block max-h-[46dvh] overflow-hidden rounded-lg border border-[#444] shadow-2xl" : "hidden"} row-start-2 min-h-0 border-l border-[#343434] bg-[#242424] md:static md:block md:max-h-none md:rounded-none md:border-y-0 md:border-r-0 md:shadow-none`}>
         <div className="grid h-full min-h-0 grid-rows-[38px_minmax(0,1fr)]">
           <div className="grid grid-cols-2 border-b border-[#393939] text-[11px] font-medium">
             <button onClick={() => setInspectorTab("properties")} className={inspectorTab === "properties" ? "bg-[#303030] text-white" : "text-[#b7b7b7] hover:bg-[#2b2b2b]"}>
@@ -657,18 +673,29 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       </aside>
 
       {/* Status bar */}
-      <footer className="col-span-3 row-start-3 flex items-center border-t border-[#343434] bg-[#242424] px-2 text-[10px] text-[#b0b0b0]">
+      <footer className="col-span-2 row-start-3 flex items-center border-t border-[#343434] bg-[#242424] px-2 text-[10px] text-[#b0b0b0] md:col-span-3">
         <div className="flex items-center gap-2 border-r border-[#3b3b3b] pr-3">
           <button onClick={() => setManualZoom(zoom - 0.1)} className="rounded p-1 hover:bg-[#343434]"><ZoomOut className="h-3 w-3" /></button>
           <button onClick={resetFit} className="min-w-12 rounded px-1 py-0.5 text-center hover:bg-[#343434]">{Math.round(zoom * 100)}%</button>
           <button onClick={() => setManualZoom(zoom + 0.1)} className="rounded p-1 hover:bg-[#343434]"><ZoomIn className="h-3 w-3" /></button>
         </div>
-        <span className="px-3">Documento: {width} × {height}px</span>
-        <span className="ml-auto pr-2">Zunexi Editor · camadas editáveis</span>
+        <span className="hidden px-3 sm:inline">Documento: {width} × {height}px</span>
+        <button
+          type="button"
+          onClick={() => setMobileInspectorOpen((value) => !value)}
+          className="ml-auto inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] hover:bg-[#343434] md:hidden"
+        >
+          <Layers3 className="h-3 w-3" /> {mobileInspectorOpen ? "Fechar" : "Camadas"}
+        </button>
+        <span className="ml-auto hidden pr-2 md:inline">Zunexi Editor · camadas editáveis</span>
       </footer>
     </div>
   );
 });
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
 
 function VerticalTool({
   icon: Icon,
@@ -906,6 +933,31 @@ function prepareCanvasJson(value: unknown, targetWidth: number, targetHeight: nu
 function repairLegacyObjects(canvas: fabric.Canvas, width: number, height: number, aggressive = false) {
   const objects = canvas.getObjects();
   for (const object of objects) {
+    // Migração das versões antigas: a imagem principal podia ser salva como
+    // um bloco pequeno no canto por causa do zoom aplicado ao backing store.
+    // Para os layouts Zunexi atuais, a camada hero deve preencher a prancheta.
+    if (object instanceof fabric.FabricImage && ((object as any).zunexiRole === "hero" || (object as any).name === "Imagem principal")) {
+      const currentW = object.getScaledWidth();
+      const currentH = object.getScaledHeight();
+      if (aggressive || currentW < width * 0.72 || currentH < height * 0.72) {
+        const element = object.getElement() as HTMLImageElement;
+        const sourceWidth = element.naturalWidth || element.width || object.width || 1;
+        const sourceHeight = element.naturalHeight || element.height || object.height || 1;
+        const scale = Math.max(width / sourceWidth, height / sourceHeight);
+        const cropWidth = Math.min(sourceWidth, width / scale);
+        const cropHeight = Math.min(sourceHeight, height / scale);
+        object.set({
+          left: 0,
+          top: 0,
+          width: cropWidth,
+          height: cropHeight,
+          cropX: Math.max(0, (sourceWidth - cropWidth) / 2),
+          cropY: Math.max(0, (sourceHeight - cropHeight) / 2),
+          scaleX: scale,
+          scaleY: scale,
+        });
+      }
+    }
     if (!Number.isFinite(object.left || 0)) object.left = 0;
     if (!Number.isFinite(object.top || 0)) object.top = 0;
     if (!Number.isFinite(object.scaleX || 1) || Math.abs(object.scaleX || 1) < 0.0001) object.scaleX = 1;
