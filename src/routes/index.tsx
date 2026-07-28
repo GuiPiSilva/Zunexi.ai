@@ -132,7 +132,7 @@ function Dashboard() {
             <div className="flex items-start gap-3">
               <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary"><Sparkles className="h-5 w-5" /></div>
               <div>
-                <h3 className="font-semibold">Dica InLabs.Ia Studios</h3>
+                <h3 className="font-semibold">Dica Zunexi.ai</h3>
                 <p className="mt-1 text-sm text-muted-foreground">Quanto mais detalhes você fornecer, mais alinhado será o conteúdo criado pela IA.</p>
               </div>
             </div>
