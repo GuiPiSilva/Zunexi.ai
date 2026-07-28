@@ -477,9 +477,10 @@ function creativeProfile(data: z.infer<typeof ImageInput>) {
     return `FOOD COMMERCIAL DIRECTION:
 - Treat the food/product as a premium hero object, never as a generic lifestyle prop.
 - Use tactile macro detail: crisp edges, natural gloss, believable steam/condensation, accurate ingredients and appetizing texture.
-- Prefer controlled restaurant/studio lighting, directional highlights, deep but clean shadows and shallow depth of field.
-- Avoid beige/orange wash over the whole frame. Keep food colors natural; use brand colors only as small accents in practical lights, props or background details.
-- The result should resemble a commissioned restaurant campaign or high-end delivery ad, not stock photography.`;
+- Prefer dramatic commercial food lighting, directional highlights, colored rim light, deep but clean shadows, shallow depth of field and a close hero crop.
+- Add campaign-grade supporting details when useful: ingredient fragments, condensation, sauce/cheese motion, glossy surfaces, subtle smoke/steam, branded-color practical lights and layered foreground props.
+- Avoid beige/orange wash over the whole frame. Keep food colors natural; use brand colors only as accents in light, props or background details.
+- The result should resemble a commissioned restaurant campaign or high-end delivery launch visual, with the food immediately dominating the frame, not stock photography.`;
   }
 
   if (/carro|automot|vehicle|car |suv|sedan|concession/.test(haystack)) {
@@ -537,11 +538,14 @@ ${creativeProfile(data)}
 
 ART-DIRECTION STANDARD:
 - The image must feel commissioned for an advertising campaign, not like a stock photo, template, generic AI render or ordinary lifestyle snapshot.
+- Aim for the visual energy of premium social-media campaign key art: a dominant hero subject, bold scale changes, layered depth, controlled glow, sculptural light, atmospheric particles/reflections and deliberate decorative objects related to the niche.
+- Build a designed environment around the subject. A plain room, empty tabletop, generic office, generic restaurant interior or flat studio backdrop is NOT enough unless explicitly requested.
 - Use a deliberate hero subject, strong foreground/midground/background separation, intentional lens choice, professional lighting and believable physical materials.
+- When appropriate, use a clean cutout-like silhouette, rim lighting, floating/foreground props, soft volumetric light, gradients created by light, glossy/translucent materials and dynamic crops — without adding text or fake UI.
 - Preserve local color fidelity. NEVER tint the entire frame with the palette. Brand colors should occupy roughly 10-30% of the scene as accents, practical lighting, props or background details.
 - Create subject/background separation using contrast, light, depth and composition instead of a flat monochrome filter.
-- Favor asymmetry, editorial cropping and real campaign framing. Avoid placing the main subject dead-center unless the requested composition explicitly needs it.
-- Keep copy-safe space exactly where the slide-role instruction requests it. Do not place important faces/products under that area.
+- Favor asymmetry, editorial cropping and campaign framing with intentional overlap and depth. Avoid placing the main subject dead-center unless the requested composition explicitly needs it.
+- Keep copy-safe space exactly where the slide-role instruction requests it, but make that space visually rich through lighting/texture rather than a blank colored rectangle.
 - No text, letters, numbers, typography, captions, logo text, prices, phone numbers, watermark, UI, poster mockup, social-media template, split graphic panel or fake signage.
 - No duplicate objects, melted anatomy, extra fingers, warped product geometry, meaningless symbols or pseudo-writing.
 - Do not invent visible brand names. Brand identity comes from art direction, palette accents and supplied reference imagery only.
