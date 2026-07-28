@@ -203,19 +203,18 @@ function EditorPage() {
 
   return (
     <AppShell>
-      <div className="flex h-[calc(100dvh-76px)] min-h-0 flex-col overflow-hidden bg-[#080b14]">
-        <header className="flex min-h-[66px] shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card/90 px-3 py-2 sm:px-5">
+      <div className="flex h-[calc(100dvh-76px)] min-h-0 flex-col overflow-hidden bg-[#1b1b1b]">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-[#343434] bg-[#202020] px-2 sm:px-3">
           <Link
             to="/projetos"
-            className="rounded-xl p-2 text-muted-foreground hover:bg-white/5 hover:text-white"
+            title="Voltar aos projetos"
+            className="grid h-8 w-8 place-items-center rounded-[3px] text-[#bdbdbd] hover:bg-[#353535] hover:text-white"
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className="h-4 w-4" />
           </Link>
 
-          <div className="min-w-[180px] flex-1">
-            <div className="text-[10px] uppercase tracking-[.18em] text-muted-foreground">
-              {project.type}
-            </div>
+          <div className="min-w-0 flex-1 border-l border-[#3b3b3b] pl-3">
+            <div className="text-[9px] uppercase tracking-[.17em] text-[#8f8f8f]">{project.type}</div>
             <input
               value={project.name}
               onChange={(event) => {
@@ -223,69 +222,55 @@ function EditorPage() {
                 setProject({ ...project, name: event.target.value });
               }}
               onBlur={() => commit(project)}
-              className="w-full truncate bg-transparent text-sm font-semibold outline-none sm:text-base"
+              className="w-full truncate bg-transparent text-[12px] font-semibold text-[#f1f1f1] outline-none sm:text-[13px]"
             />
           </div>
 
-          <div className="hidden items-center gap-1.5 text-xs text-muted-foreground lg:flex">
-            {saved ? (
-              <>
-                <Check className="h-3.5 w-3.5 text-emerald-400" /> Salvo automaticamente
-              </>
-            ) : (
-              <>
-                <Save className="h-3.5 w-3.5" /> Salvando...
-              </>
-            )}
+          <div className="hidden items-center gap-1.5 px-2 text-[10px] text-[#a8a8a8] lg:flex">
+            {saved ? <><Check className="h-3 w-3 text-emerald-400" /> Salvo</> : <><Save className="h-3 w-3" /> Salvando...</>}
           </div>
-
-          <button onClick={() => commit(project)} className="secondary-button px-3 py-2 text-xs">
+          <button onClick={() => commit(project)} className="editor-route-action hidden sm:inline-flex">
             <Save className="h-3.5 w-3.5" /> Salvar
           </button>
-          <button onClick={() => exportCurrent(2)} className="primary-button px-3 py-2 text-xs">
-            <Download className="h-3.5 w-3.5" /> Baixar HD
+          <button onClick={() => exportCurrent(2)} className="inline-flex h-8 items-center gap-1.5 rounded-[3px] bg-[#2b78c5] px-3 text-[11px] font-semibold text-white hover:bg-[#3589da]">
+            <Download className="h-3.5 w-3.5" /> Exportar HD
           </button>
         </header>
 
-        <section className="shrink-0 border-b border-border bg-[#0b0e19] px-3 py-3 sm:px-5">
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => exportCurrent(1)} className="secondary-button px-3 py-2 text-xs">
-              <Download className="h-4 w-4" /> Baixar PNG
-            </button>
-            <button onClick={() => void exportCurrentPsd()} className="secondary-button px-3 py-2 text-xs">
-              <Layers3 className="h-4 w-4" /> Baixar PSD
-            </button>
-            {project.type === "carrossel" && (
-              <button onClick={exportAll} disabled={exportingAll} className="secondary-button px-3 py-2 text-xs disabled:opacity-50">
-                <Images className="h-4 w-4" /> {exportingAll ? "Baixando..." : "Baixar todas"}
-              </button>
-            )}
-            <button onClick={duplicateWholeProject} className="secondary-button px-3 py-2 text-xs">
-              <Sparkles className="h-4 w-4" /> Criar outra versão
-            </button>
-            <button onClick={saveToLibrary} className="secondary-button px-3 py-2 text-xs">
-              <FolderHeart className="h-4 w-4" /> Salvar na biblioteca
-            </button>
-            <button onClick={copyCaption} className="secondary-button px-3 py-2 text-xs">
-              <Copy className="h-4 w-4" /> Copiar legenda
-            </button>
-            <Link to="/projetos" className="secondary-button px-3 py-2 text-xs">
-              Voltar aos projetos
-            </Link>
+        <section className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-[#343434] bg-[#252525] px-2 text-[10px] text-[#c1c1c1]">
+          <div className="mr-2 hidden items-center gap-1 md:flex">
+            <span className="editor-menu-label">Arquivo</span>
+            <span className="editor-menu-label">Editar</span>
+            <span className="editor-menu-label">Imagem</span>
+            <span className="editor-menu-label">Camada</span>
+            <span className="editor-menu-label">Texto</span>
+            <span className="editor-menu-label">Selecionar</span>
+            <span className="editor-menu-label">Visualizar</span>
           </div>
+          <div className="hidden h-5 w-px bg-[#3b3b3b] md:block" />
+          <button onClick={() => exportCurrent(1)} className="editor-route-action"><Download className="h-3.5 w-3.5" /> PNG</button>
+          <button onClick={() => void exportCurrentPsd()} className="editor-route-action"><Layers3 className="h-3.5 w-3.5" /> PSD</button>
+          {project.type === "carrossel" && (
+            <button onClick={exportAll} disabled={exportingAll} className="editor-route-action disabled:opacity-45">
+              <Images className="h-3.5 w-3.5" /> {exportingAll ? "Baixando..." : "Todas"}
+            </button>
+          )}
+          <button onClick={duplicateWholeProject} className="editor-route-action"><Sparkles className="h-3.5 w-3.5" /> Nova versão</button>
+          <button onClick={saveToLibrary} className="editor-route-action"><FolderHeart className="h-3.5 w-3.5" /> Biblioteca</button>
+          <button onClick={copyCaption} className="editor-route-action"><Copy className="h-3.5 w-3.5" /> Legenda</button>
         </section>
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
           {project.type === "carrossel" && (
-            <aside className="hidden w-40 shrink-0 flex-col border-r border-border bg-[#0b0e19] md:flex">
-              <div className="flex items-center justify-between border-b border-border px-3 py-3">
+            <aside className="hidden w-36 shrink-0 flex-col border-r border-[#343434] bg-[#232323] md:flex">
+              <div className="flex items-center justify-between border-b border-[#343434] px-3 py-2.5">
                 <span className="text-xs font-semibold">Páginas</span>
                 <button onClick={addSlide} className="rounded-lg p-1.5 text-muted-foreground hover:bg-white/5 hover:text-white">
                   <Plus className="h-4 w-4" />
                 </button>
               </div>
 
-              <div className="flex-1 space-y-3 overflow-y-auto p-3">
+              <div className="flex-1 space-y-2 overflow-y-auto p-2">
                 {project.slides.map((item, index) => (
                   <button
                     key={item.id}
@@ -313,7 +298,7 @@ function EditorPage() {
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 border-t border-border p-3">
+              <div className="grid grid-cols-2 gap-2 border-t border-[#343434] p-2">
                 <button onClick={duplicateSlide} title="Duplicar página" className="secondary-button px-2 py-2">
                   <Copy className="h-4 w-4" />
                 </button>
