@@ -19,12 +19,12 @@ export const Route = createFileRoute("/acesso")({
   head: () => ({
     meta: [
       {
-        title: "Acesso — InLabs.Ia Studios",
+        title: "Acesso — Zunexi.ai",
       },
       {
         name: "description",
         content:
-          "Entre no InLabs.Ia Studios usando uma chave liberada pelo administrador.",
+          "Entre no Zunexi.ai usando uma chave liberada pelo administrador.",
       },
     ],
   }),
@@ -137,7 +137,7 @@ function Access() {
               <div className="mb-8 flex justify-center">
                 <img
                   src={logoFull}
-                  alt="InLabs.Ia Studios"
+                  alt="Zunexi.ai"
                   className="h-20 w-auto max-w-[390px] object-contain"
                 />
               </div>
@@ -149,7 +149,7 @@ function Access() {
 
                 <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
                   Digite o código de acesso fornecido pelo administrador para
-                  entrar no InLabs.Ia Studios.
+                  entrar no Zunexi.ai
                 </p>
               </div>
 
