@@ -105,7 +105,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const pageTitle = useMemo(() => {
     if (loc.pathname.startsWith("/editor/")) return "Editor visual";
-    return PAGE_TITLES[loc.pathname] ?? "InLabs.Ia Studios";
+    return PAGE_TITLES[loc.pathname] ?? "Zunexi.ai";
   }, [loc.pathname]);
 
   const unread = notifications.filter((item) => !item.read).length;
@@ -132,7 +132,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-background text-foreground lg:flex">
       <aside className={`fixed inset-y-0 left-0 z-50 flex w-[264px] flex-col border-r border-sidebar-border bg-sidebar/95 shadow-2xl backdrop-blur-xl transition-transform lg:sticky lg:top-0 lg:h-screen ${open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
         <div className="flex h-[76px] items-center border-b border-sidebar-border px-4">
-          <img src={logoFull} alt="InLabs.Ia Studios" className="h-14 w-auto max-w-[225px] object-contain drop-shadow-[0_0_18px_rgba(99,102,241,.22)]" />
+          <img src={logoFull} alt="Zunexi.ai" className="h-14 w-auto max-w-[225px] object-contain drop-shadow-[0_0_18px_rgba(99,102,241,.22)]" />
         </div>
 
         <div className="px-4 pt-5">
@@ -165,7 +165,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="min-w-0 flex-1">
         <header className="sticky top-0 z-30 flex h-[76px] items-center gap-3 border-b border-border/80 bg-background/80 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
           <button onClick={() => setOpen(true)} className="rounded-xl border border-border bg-card p-2.5 lg:hidden">{open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}</button>
-          <div className="min-w-0"><p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">InLabs.Ia Studios</p><h2 className="truncate text-base font-semibold">{pageTitle}</h2></div>
+          <div className="min-w-0"><p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Zunexi.ai</p><h2 className="truncate text-base font-semibold">{pageTitle}</h2></div>
           <div className="ml-auto hidden w-full max-w-sm items-center gap-2 rounded-xl border border-border bg-card/70 px-3 py-2.5 md:flex"><Search className="h-4 w-4 text-muted-foreground" /><input aria-label="Buscar" placeholder="Buscar projetos e conteúdos..." className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground" /><kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">⌘K</kbd></div>
 
           <div ref={notificationBox} className="relative">
