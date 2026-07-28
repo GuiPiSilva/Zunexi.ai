@@ -107,7 +107,7 @@ function Access() {
 
               <img
                 src={logoIcon}
-                alt="Símbolo InLabs.Ia Studios"
+                alt="Símbolo Zunexi.ai"
                 className="relative h-full w-full scale-[1.08] object-contain drop-shadow-[0_22px_45px_rgba(101,80,255,.42)]"
               />
             </div>
