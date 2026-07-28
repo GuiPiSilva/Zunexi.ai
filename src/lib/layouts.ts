@@ -55,8 +55,20 @@ export function pickLayout(): LayoutId {
 function estimatedLineCount(text: string, width: number, fontSize: number) {
   const clean = text.trim();
   if (!clean) return 0;
-  const charsPerLine = Math.max(4, Math.floor(width / Math.max(1, fontSize * 0.56)));
-  return Math.max(1, Math.ceil(clean.length / charsPerLine));
+  const charsPerLine = Math.max(4, Math.floor(width / Math.max(1, fontSize * 0.53)));
+  return clean.split(/\n/).reduce((total, line) => {
+    const length = Math.max(1, line.trim().length);
+    return total + Math.max(1, Math.ceil(length / charsPerLine));
+  }, 0);
+}
+
+function fittedBodySize(text: string | undefined, width: number, height: number, max = 34, min = 18) {
+  if (!text?.trim()) return max;
+  for (let size = max; size >= min; size -= 1) {
+    const lines = estimatedLineCount(text, width, size);
+    if (lines * size * 1.24 <= height) return size;
+  }
+  return min;
 }
 
 function fittedTitleSize(text: string, width: number, max: number, min: number, desiredLines = 2) {
@@ -86,14 +98,16 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
   const [bg, primary, accent, text] = palette;
   const els: ElementDesc[] = [];
   const P = px(W * 0.065);
-  const bodySize = px(clamp(W * 0.032, 27, 38));
+  // Body copy can now be substantially longer (menus, catalogs, detailed slides).
+  // Fit it to a realistic reading area instead of forcing a fixed large size.
+  const bodySize = fittedBodySize(body, W * 0.58, H * 0.46, px(clamp(W * 0.032, 28, 36)), 18);
 
   // O fundo base não deve ser movido por acidente no editor.
   els.push({ kind: "rect", x: 0, y: 0, w: W, h: H, fill: bg, selectable: false, name: "Fundo", role: "background" });
 
   switch (id) {
     case "text-over-image": {
-      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl, name: "Imagem principal", role: "hero" });
+      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl });
       addLeftScrim(els, W, H);
       const boxW = W * 0.47;
       const titleSize = fittedTitleSize(title, boxW, W * 0.086, W * 0.052, 2);
@@ -131,7 +145,7 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
     }
 
     case "bottom-text": {
-      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl, name: "Imagem principal", role: "hero" });
+      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl });
       addBottomScrim(els, W, H);
       const boxW = W - 2 * P;
       const titleSize = fittedTitleSize(title, boxW, W * 0.078, W * 0.05, 2);
@@ -145,18 +159,18 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
 
     case "top-text": {
       if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl, name: "Imagem principal", role: "hero" });
-      els.push({ kind: "rect", x: 0, y: 0, w: W, h: H * 0.44, fill: "#000000", opacity: 0.40, selectable: false, name: "Sombra de leitura", role: "scrim" });
+      els.push({ kind: "rect", x: 0, y: 0, w: W, h: H * 0.48, fill: "#000000", opacity: 0.48, selectable: false, name: "Sombra de leitura", role: "scrim" });
       const boxW = W - 2 * P;
       const titleSize = fittedTitleSize(title, boxW, W * 0.075, W * 0.048, 2);
       const lines = Math.min(3, estimatedLineCount(title, boxW, titleSize));
       addBrandAccent(els, P, P, W * 0.08, accent);
-      els.push({ kind: "text", x: P, y: P + 28, w: boxW, text: title, size: titleSize, color: text, align: "left", weight: 750, font: fonts.display, lineHeight: 0.96, charSpacing: -6 });
-      if (body) els.push({ kind: "text", x: P, y: P + 28 + lines * titleSize + 20, w: W * 0.72, text: body, size: bodySize, color: text, align: "left", font: fonts.body, lineHeight: 1.16 });
+      els.push({ kind: "text", x: P, y: P + 28, w: boxW, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 750, font: fonts.display, lineHeight: 0.96, charSpacing: -6 });
+      if (body) els.push({ kind: "text", x: P, y: P + 28 + lines * titleSize + 20, w: W * 0.72, text: body, size: bodySize, color: "#ffffff", align: "left", font: fonts.body, lineHeight: 1.16 });
       break;
     }
 
     case "center-text": {
-      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl, opacity: 0.78, name: "Imagem principal", role: "hero" });
+      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl, opacity: 0.78 });
       els.push({ kind: "rect", x: W * 0.12, y: H * 0.23, w: W * 0.76, h: H * 0.52, fill: "#050505", opacity: 0.62, rx: 32, selectable: false });
       const boxW = W * 0.64;
       const titleSize = fittedTitleSize(title, boxW, W * 0.082, W * 0.05, 2);
@@ -168,7 +182,7 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
     }
 
     case "hero-image": {
-      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl, name: "Imagem principal", role: "hero" });
+      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl });
       addBottomScrim(els, W, H);
       const boxW = W * 0.7;
       const titleSize = fittedTitleSize(title, boxW, W * 0.072, W * 0.047, 2);
@@ -195,33 +209,30 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
     }
 
     case "framed": {
-      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl, name: "Imagem principal", role: "hero" });
-      addBottomScrim(els, W, H);
-      // Moldura editorial feita por áreas de respiro transparentes, sem reduzir a foto.
-      els.push({ kind: "rect", x: P * 0.55, y: P * 0.55, w: W - P * 1.1, h: 5, fill: accent, opacity: 0.72, selectable: false, name: "Moldura superior", role: "accent" });
+      if (imageUrl) els.push({ kind: "image", x: P, y: P, w: W - 2 * P, h: H * 0.58, url: imageUrl });
+      els.push({ kind: "rect", x: P, y: P, w: W - 2 * P, h: H * 0.58, fill: "#000000", opacity: 0.06, selectable: false });
       const boxW = W - 2 * P;
       const titleSize = fittedTitleSize(title, boxW, W * 0.068, W * 0.046, 2);
       const lines = Math.min(3, estimatedLineCount(title, boxW, titleSize));
       const y = H * 0.69;
-      els.push({ kind: "text", x: P, y, w: boxW, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 750, font: fonts.display, lineHeight: 0.96, charSpacing: -5, shadow: "soft" });
-      if (body) els.push({ kind: "text", x: P, y: y + lines * titleSize + 20, w: W * 0.7, text: body, size: bodySize, color: "#ffffff", align: "left", font: fonts.body, lineHeight: 1.16, shadow: "soft" });
+      els.push({ kind: "text", x: P, y, w: boxW, text: title, size: titleSize, color: text, align: "left", weight: 750, font: fonts.display, lineHeight: 0.96, charSpacing: -5 });
+      if (body) els.push({ kind: "text", x: P, y: y + lines * titleSize + 20, w: W * 0.7, text: body, size: bodySize, color: text, align: "left", font: fonts.body, lineHeight: 1.16 });
       break;
     }
 
     case "big-text-small-image": {
-      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl, name: "Imagem principal", role: "hero" });
-      addLeftScrim(els, W, H);
-      const boxW = W * 0.66;
+      const boxW = W * 0.7;
       const titleSize = fittedTitleSize(title, boxW, W * 0.09, W * 0.052, 3);
       const lines = Math.min(4, estimatedLineCount(title, boxW, titleSize));
       addBrandAccent(els, P, P, W * 0.1, accent);
-      els.push({ kind: "text", x: P, y: P + 30, w: boxW, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 780, font: fonts.display, lineHeight: 0.92, charSpacing: -8, shadow: "soft" });
-      if (body) els.push({ kind: "text", x: P, y: P + 30 + lines * titleSize + 28, w: W * 0.48, text: body, size: bodySize, color: "#ffffff", align: "left", font: fonts.body, lineHeight: 1.16, shadow: "soft" });
+      els.push({ kind: "text", x: P, y: P + 30, w: boxW, text: title, size: titleSize, color: text, align: "left", weight: 780, font: fonts.display, lineHeight: 0.92, charSpacing: -8 });
+      if (imageUrl) els.push({ kind: "image", x: W * 0.56, y: H * 0.52, w: W * 0.38, h: H * 0.4, url: imageUrl });
+      if (body) els.push({ kind: "text", x: P, y: P + 30 + lines * titleSize + 28, w: W * 0.46, text: body, size: bodySize, color: text, align: "left", font: fonts.body, lineHeight: 1.16 });
       break;
     }
 
     case "diagonal": {
-      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl, name: "Imagem principal", role: "hero" });
+      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl });
       addLeftScrim(els, W, H);
       els.push({ kind: "circle", cx: W * 0.92, cy: H * 0.08, r: W * 0.22, fill: primary, opacity: 0.18, selectable: false });
       const boxW = W * 0.49;
@@ -234,20 +245,20 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
     }
 
     case "geometric-bg": {
+      els.push({ kind: "circle", cx: W * 0.86, cy: H * 0.16, r: W * 0.26, fill: primary, opacity: 0.24, selectable: false });
+      els.push({ kind: "circle", cx: W * 0.16, cy: H * 0.84, r: W * 0.18, fill: accent, opacity: 0.2, selectable: false });
       if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl, name: "Imagem principal", role: "hero" });
-      addLeftScrim(els, W, H);
-      els.push({ kind: "circle", cx: W * 0.86, cy: H * 0.16, r: W * 0.26, fill: primary, opacity: 0.16, selectable: false, name: "Forma de marca", role: "accent" });
-      els.push({ kind: "circle", cx: W * 0.16, cy: H * 0.84, r: W * 0.18, fill: accent, opacity: 0.14, selectable: false, name: "Forma de marca", role: "accent" });
-      const boxW = W * 0.46;
+      els.push({ kind: "rect", x: 0, y: 0, w: W * 0.52, h: H, fill: "#000000", opacity: 0.48, selectable: false, name: "Sombra de leitura", role: "scrim" });
+      const boxW = W * 0.42;
       const titleSize = fittedTitleSize(title, boxW, W * 0.068, W * 0.044, 3);
       const lines = Math.min(4, estimatedLineCount(title, boxW, titleSize));
-      els.push({ kind: "text", x: P, y: H * 0.28, w: boxW, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 750, font: fonts.display, lineHeight: 0.96, charSpacing: -5, shadow: "soft" });
-      if (body) els.push({ kind: "text", x: P, y: H * 0.28 + lines * titleSize + 24, w: boxW, text: body, size: bodySize, color: "#ffffff", align: "left", font: fonts.body, lineHeight: 1.16, shadow: "soft" });
+      els.push({ kind: "text", x: P, y: H * 0.28, w: boxW, text: title, size: titleSize, color: text, align: "left", weight: 750, font: fonts.display, lineHeight: 0.96, charSpacing: -5 });
+      if (body) els.push({ kind: "text", x: P, y: H * 0.28 + lines * titleSize + 24, w: boxW, text: body, size: bodySize, color: text, align: "left", font: fonts.body, lineHeight: 1.16 });
       break;
     }
 
     case "quote-card": {
-      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl, opacity: 0.38, name: "Imagem principal", role: "hero" });
+      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl, opacity: 0.38 });
       els.push({ kind: "rect", x: W * 0.08, y: H * 0.14, w: W * 0.84, h: H * 0.72, fill: bg, opacity: 0.92, rx: 32, selectable: false });
       const boxW = W * 0.68;
       const titleSize = fittedTitleSize(title, boxW, W * 0.067, W * 0.043, 4);
@@ -342,7 +353,7 @@ export function layoutForSlide(index: number, kind: string): LayoutId {
   const role = kind.toLowerCase();
   if (role.includes("capa")) return "text-over-image";
   if (role.includes("cta")) return "center-text";
-  const sequence: LayoutId[] = ["side-text", "hero-image", "bottom-text", "diagonal", "text-over-image", "framed", "top-text"];
+  const sequence: LayoutId[] = ["side-text", "hero-image", "bottom-text", "text-over-image", "top-text", "center-text"];
   return sequence[Math.max(0, index - 1) % sequence.length];
 }
 
