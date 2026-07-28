@@ -89,20 +89,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const renderLogicalDataUrl = useCallback((format: "png" | "jpeg", multiplier = 1, quality = 1) => {
     const canvas = fcRef.current;
     if (!canvas) return null;
-
-    // O backing store permanece sempre no tamanho lógico do documento.
-    // O zoom visual é aplicado apenas nas dimensões CSS, então exportar não
-    // pode deslocar, recortar ou redimensionar as camadas.
-    const previousViewport = canvas.viewportTransform ? [...canvas.viewportTransform] : [1, 0, 0, 1, 0, 0];
-    try {
-      canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-      canvas.requestRenderAll();
-      return canvas.toDataURL({ format, quality, multiplier });
-    } finally {
-      canvas.setViewportTransform(previousViewport as fabric.TMat2D);
-      canvas.calcOffset();
-      canvas.requestRenderAll();
-    }
+    // The backing store always remains at the logical document size. CSS zoom
+    // does not affect export resolution, so no temporary resize is needed.
+    canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+    canvas.requestRenderAll();
+    return canvas.toDataURL({ format, quality, multiplier });
   }, []);
 
   useImperativeHandle(ref, () => ({
@@ -121,16 +112,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     async exportPsd(filename = "zunexi-design.psd") {
       const canvas = fcRef.current;
       if (!canvas) return false;
-      const previousViewport = canvas.viewportTransform ? [...canvas.viewportTransform] : [1, 0, 0, 1, 0, 0];
-      try {
-        canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-        canvas.requestRenderAll();
-        return await exportFabricCanvasToPsd(canvas, filename);
-      } finally {
-        canvas.setViewportTransform(previousViewport as fabric.TMat2D);
-        canvas.calcOffset();
-        canvas.requestRenderAll();
-      }
+      canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+      canvas.requestRenderAll();
+      return await exportFabricCanvasToPsd(canvas, filename);
     },
   }), [renderLogicalDataUrl]);
 
@@ -204,27 +188,14 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         }
 
         if (cancelled) return;
-        const sourceVersion = initial && !("elements" in initial) ? Number((initial as any).zunexiEditorVersion || 0) : 5;
-        const migrated = repairLegacyObjects(canvas, width, height, sourceVersion < 5);
+        repairLegacyObjects(canvas, width, height);
         canvas.discardActiveObject();
         canvas.requestRenderAll();
         initialLoaded.current = true;
-        const serialized = serializeCanvas(canvas, width, height);
-        const json = JSON.stringify(serialized);
+        const json = JSON.stringify(serializeCanvas(canvas, width, height));
         history.current = [json];
         historyIdx.current = 0;
         refreshUi();
-
-        // Salva automaticamente a migração de projetos criados por versões
-        // antigas do editor, para que eles não voltem a abrir quebrados.
-        if (migrated) {
-          const thumb = canvas.toDataURL({
-            format: "jpeg",
-            quality: 0.78,
-            multiplier: Math.min(1, 420 / Math.max(width, height)),
-          });
-          onChangeRef.current?.(serialized, thumb);
-        }
       } catch (error) {
         console.error("Falha ao carregar o projeto no editor", error);
       } finally {
@@ -270,10 +241,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     };
   }, [fitToWorkspace]);
 
-  // O documento continua SEMPRE em coordenadas lógicas (1080x1080,
-  // 1080x1350 etc.). Apenas o tamanho CSS da dupla de canvases do Fabric é
-  // reduzido para caber na área de trabalho. Isso evita o bug em que o canvas
-  // passava a medir ~330px enquanto os objetos continuavam em 1080px.
+  // Keep Fabric's internal coordinate system at the REAL document size.
+  // Only the CSS presentation is scaled. The previous implementation resized
+  // the backing canvas AND applied viewport zoom, effectively scaling objects
+  // twice and producing the "art stuck in the top-left corner" bug.
   useEffect(() => {
     const canvas = fcRef.current;
     if (!canvas) return;
@@ -598,7 +569,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         <VerticalTool icon={ZoomIn} label="Aumentar zoom" onClick={() => setManualZoom(zoom + 0.1)} />
         <VerticalTool icon={ZoomOut} label="Diminuir zoom" onClick={() => setManualZoom(zoom - 0.1)} />
         <div className="mt-auto flex flex-col gap-1 pb-1">
-          <VerticalTool icon={RotateCcw} label="Corrigir layout" onClick={repairCanvas} />
+          <VerticalTool icon={RotateCcw} label="Reencaixar camadas" onClick={repairCanvas} />
         </div>
       </aside>
 
@@ -638,8 +609,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
             <div className="min-h-0 overflow-y-auto">
               <div className="flex items-center justify-between border-b border-[#343434] px-3 py-2 text-[10px] uppercase tracking-[.12em] text-[#8f8f8f]">
                 <span>{objects.length} camadas</span>
-                <button onClick={repairCanvas} className="rounded px-1.5 py-1 normal-case tracking-normal hover:bg-[#343434]" title="Reconstruir imagem principal e copy de projetos antigos">
-                  Corrigir layout
+                <button onClick={repairCanvas} className="rounded px-1.5 py-1 normal-case tracking-normal hover:bg-[#343434]" title="Corrigir elementos que estejam fora da prancheta">
+                  Reencaixar
                 </button>
               </div>
               <div className="py-1">
@@ -934,178 +905,36 @@ function prepareCanvasJson(value: unknown, targetWidth: number, targetHeight: nu
 
 function repairLegacyObjects(canvas: fabric.Canvas, width: number, height: number, aggressive = false) {
   const objects = canvas.getObjects();
-  let changed = false;
-
   for (const object of objects) {
-    if (!Number.isFinite(object.left || 0)) { object.left = 0; changed = true; }
-    if (!Number.isFinite(object.top || 0)) { object.top = 0; changed = true; }
-    if (!Number.isFinite(object.scaleX || 1) || Math.abs(object.scaleX || 1) < 0.0001) { object.scaleX = 1; changed = true; }
-    if (!Number.isFinite(object.scaleY || 1) || Math.abs(object.scaleY || 1) < 0.0001) { object.scaleY = 1; changed = true; }
+    if (!Number.isFinite(object.left || 0)) object.left = 0;
+    if (!Number.isFinite(object.top || 0)) object.top = 0;
+    if (!Number.isFinite(object.scaleX || 1) || Math.abs(object.scaleX || 1) < 0.0001) object.scaleX = 1;
+    if (!Number.isFinite(object.scaleY || 1) || Math.abs(object.scaleY || 1) < 0.0001) object.scaleY = 1;
 
     let objectWidth = Math.max(1, object.getScaledWidth());
     let objectHeight = Math.max(1, object.getScaledHeight());
-    const maxW = width * (aggressive ? 1.35 : 3.5);
-    const maxH = height * (aggressive ? 1.35 : 3.5);
+
+    // Old editor versions could save objects after the display canvas had been
+    // resized. Only repair clearly impossible dimensions automatically.
+    const maxW = width * (aggressive ? 1.25 : 3.5);
+    const maxH = height * (aggressive ? 1.25 : 3.5);
     if (objectWidth > maxW || objectHeight > maxH) {
       const factor = Math.min(maxW / objectWidth, maxH / objectHeight);
       object.scaleX = (object.scaleX || 1) * factor;
       object.scaleY = (object.scaleY || 1) * factor;
       objectWidth = object.getScaledWidth();
       objectHeight = object.getScaledHeight();
-      changed = true;
     }
 
     const left = object.left || 0;
     const top = object.top || 0;
     const completelyOutside = left > width || top > height || left + objectWidth < 0 || top + objectHeight < 0;
-    if (completelyOutside) {
-      object.left = Math.max(0, Math.min(width - Math.min(objectWidth, width), left));
-      object.top = Math.max(0, Math.min(height - Math.min(objectHeight, height), top));
-      changed = true;
+    if (completelyOutside || aggressive) {
+      object.left = Math.max(-objectWidth * 0.25, Math.min(width - objectWidth * 0.08, left));
+      object.top = Math.max(-objectHeight * 0.25, Math.min(height - objectHeight * 0.08, top));
     }
+
     object.setCoords();
   }
-
-  if (aggressive) {
-    changed = migrateBrokenLegacyComposition(canvas, width, height) || changed;
-  }
-
   canvas.calcOffset();
-  canvas.requestRenderAll();
-  return changed;
 }
-
-function migrateBrokenLegacyComposition(canvas: fabric.Canvas, width: number, height: number) {
-  const objects = canvas.getObjects();
-  const images = objects.filter((object): object is fabric.FabricImage => object instanceof fabric.FabricImage);
-  if (!images.length) return false;
-
-  // A imagem principal é a maior imagem do documento ou a camada marcada como hero.
-  const hero = images
-    .slice()
-    .sort((a, b) => {
-      const aHero = String((a as any).zunexiRole || "").toLowerCase() === "hero" ? 1 : 0;
-      const bHero = String((b as any).zunexiRole || "").toLowerCase() === "hero" ? 1 : 0;
-      if (aHero !== bHero) return bHero - aHero;
-      return b.getScaledWidth() * b.getScaledHeight() - a.getScaledWidth() * a.getScaledHeight();
-    })[0];
-
-  const heroWidth = hero.getScaledWidth();
-  const heroHeight = hero.getScaledHeight();
-  const heroLeft = Number(hero.left || 0);
-  const heroTop = Number(hero.top || 0);
-  const clearlyBrokenHero =
-    heroWidth < width * 0.78 ||
-    heroHeight < height * 0.78 ||
-    heroLeft > width * 0.12 ||
-    heroTop > height * 0.12 ||
-    heroLeft < -width * 0.12 ||
-    heroTop < -height * 0.12;
-
-  const textObjects = objects.filter((object): object is fabric.Textbox => object instanceof fabric.Textbox);
-  const hasBrokenText = textObjects.some((text) => {
-    const left = Number(text.left || 0);
-    const top = Number(text.top || 0);
-    const scaledWidth = text.getScaledWidth();
-    return left < -24 || left > width - 24 || top < -24 || top > height - 24 || left + scaledWidth > width * 1.08;
-  });
-
-  if (!clearlyBrokenHero && !hasBrokenText) return false;
-
-  coverImageToDocument(hero, width, height);
-  (hero as any).name = (hero as any).name || "Imagem principal";
-  (hero as any).zunexiKind = "image";
-  (hero as any).zunexiRole = "hero";
-
-  // Mantém o fundo atrás da imagem e a imagem atrás da copy.
-  const background = objects.find((object) => String((object as any).zunexiRole || "").toLowerCase() === "background");
-  if (background instanceof fabric.Rect) {
-    background.set({ left: 0, top: 0, width, height, scaleX: 1, scaleY: 1 });
-    canvas.sendObjectToBack(background);
-  }
-  if (background) canvas.moveObjectTo(hero, 1);
-  else canvas.sendObjectToBack(hero);
-
-  // Remove o efeito visual dos painéis chapados gigantes que eram usados por
-  // versões antigas. A camada continua editável no painel de camadas.
-  for (const object of objects) {
-    if (!(object instanceof fabric.Rect) || object === background) continue;
-    const role = String((object as any).zunexiRole || "").toLowerCase();
-    const area = object.getScaledWidth() * object.getScaledHeight();
-    if ((role === "panel" || role === "scrim" || area > width * height * 0.32) && Number(object.opacity ?? 1) > 0.42) {
-      object.opacity = role === "accent" ? object.opacity : 0.28;
-    }
-  }
-
-  if (textObjects.length) {
-    const sorted = textObjects.slice().sort((a, b) => Number(b.fontSize || 0) - Number(a.fontSize || 0));
-    const title = sorted.find((object) => String((object as any).zunexiRole || "").toLowerCase() === "title") || sorted[0];
-    const body = sorted.find((object) => String((object as any).zunexiRole || "").toLowerCase() === "body") || sorted.find((object) => object !== title && Number(object.fontSize || 0) >= 24);
-    const padding = Math.round(width * 0.065);
-
-    if (title) {
-      const titleSize = Math.max(48, Math.min(92, Number(title.fontSize || 72)));
-      title.set({
-        left: padding,
-        top: Math.round(height * 0.12),
-        width: Math.round(width * 0.72),
-        scaleX: 1,
-        scaleY: 1,
-        fontSize: titleSize,
-        fill: "#ffffff",
-        textAlign: "left",
-        lineHeight: 0.96,
-      });
-      title.set("shadow", new fabric.Shadow({ color: "rgba(0,0,0,.55)", blur: 16, offsetX: 0, offsetY: 4 }));
-      (title as any).name = (title as any).name || "Título";
-      (title as any).zunexiRole = "title";
-      title.setCoords();
-    }
-
-    if (body && body !== title) {
-      body.set({
-        left: padding,
-        top: Math.round(height * 0.36),
-        width: Math.round(width * 0.60),
-        scaleX: 1,
-        scaleY: 1,
-        fontSize: Math.max(26, Math.min(40, Number(body.fontSize || 32))),
-        fill: "#ffffff",
-        textAlign: "left",
-        lineHeight: 1.16,
-      });
-      body.set("shadow", new fabric.Shadow({ color: "rgba(0,0,0,.45)", blur: 12, offsetX: 0, offsetY: 3 }));
-      (body as any).name = (body as any).name || "Texto";
-      (body as any).zunexiRole = "body";
-      body.setCoords();
-    }
-  }
-
-  canvas.getObjects().forEach((object) => object.setCoords());
-  return true;
-}
-
-function coverImageToDocument(image: fabric.FabricImage, width: number, height: number) {
-  const element = image.getElement() as HTMLImageElement;
-  const sourceWidth = Math.max(1, Number(element?.naturalWidth || element?.width || image.width || 1));
-  const sourceHeight = Math.max(1, Number(element?.naturalHeight || element?.height || image.height || 1));
-  const scale = Math.max(width / sourceWidth, height / sourceHeight);
-  const cropWidth = Math.max(1, Math.min(sourceWidth, width / scale));
-  const cropHeight = Math.max(1, Math.min(sourceHeight, height / scale));
-
-  image.set({
-    left: 0,
-    top: 0,
-    width: cropWidth,
-    height: cropHeight,
-    cropX: Math.max(0, (sourceWidth - cropWidth) / 2),
-    cropY: Math.max(0, (sourceHeight - cropHeight) / 2),
-    scaleX: scale,
-    scaleY: scale,
-    angle: 0,
-    skewX: 0,
-    skewY: 0,
-  });
-  image.setCoords();
-}
-
