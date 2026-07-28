@@ -3,8 +3,11 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
+  Activity,
   Check,
+  Cloud,
   Coins,
+  ImageIcon,
   Copy,
   KeyRound,
   Loader2,
@@ -12,6 +15,7 @@ import {
   LogOut,
   Plus,
   Power,
+  RefreshCw,
   Search,
   Save,
   ShieldCheck,
@@ -21,10 +25,12 @@ import logoFull from "@/assets/logo-full.png";
 import {
   adminCreateKey,
   adminDeleteKey,
+  adminGetCloudflareUsage,
   adminListKeys,
   adminLogin,
   adminToggleKey,
   adminUpdateCredits,
+  type CloudflareUsageSummary,
 } from "@/lib/access.functions";
 import { clearAdminToken, getAdminToken, setAdminToken } from "@/lib/session";
 
@@ -122,6 +128,7 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
   const toggle = useServerFn(adminToggleKey);
   const updateCredits = useServerFn(adminUpdateCredits);
   const remove = useServerFn(adminDeleteKey);
+  const getCloudflareUsage = useServerFn(adminGetCloudflareUsage);
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -130,6 +137,8 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
   const [creating, setCreating] = useState(false);
   const [creditsPerDay, setCreditsPerDay] = useState(30);
   const [unlimited, setUnlimited] = useState(false);
+  const [cloudflareUsage, setCloudflareUsage] = useState<CloudflareUsageSummary | null>(null);
+  const [cloudflareLoading, setCloudflareLoading] = useState(true);
 
   async function refresh() {
     setLoading(true);
@@ -143,7 +152,23 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
     }
   }
 
-  useEffect(() => { void refresh(); }, []);
+  async function refreshCloudflareUsage(showToast = false) {
+    setCloudflareLoading(true);
+    try {
+      setCloudflareUsage(await getCloudflareUsage({ data: { token } }));
+      if (showToast) toast.success("Uso da Cloudflare atualizado.");
+    } catch (error) {
+      toast.error((error as Error).message);
+      if (/sessão|expirada|inválida/i.test((error as Error).message)) onLogout();
+    } finally {
+      setCloudflareLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+    void refreshCloudflareUsage();
+  }, []);
 
   const filtered = useMemo(() => {
     const value = query.trim().toLowerCase();
@@ -235,6 +260,12 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
           <AdminMetric icon={ShieldCheck} value={useCount} label="Acessos registrados" />
         </section>
 
+        <CloudflareUsagePanel
+          usage={cloudflareUsage}
+          loading={cloudflareLoading}
+          onRefresh={() => void refreshCloudflareUsage(true)}
+        />
+
         <section className="panel p-5 sm:p-6">
           <div className="mb-4">
             <h2 className="section-title text-lg">Criar nova chave</h2>
@@ -306,6 +337,107 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
       </div>
     </main>
   );
+}
+
+
+function CloudflareUsagePanel({ usage, loading, onRefresh }: { usage: CloudflareUsageSummary | null; loading: boolean; onRefresh: () => void }) {
+  const percentage = usage?.percentage ?? 0;
+  const status = percentage >= 95
+    ? { label: "Crítico", className: "border-red-500/25 bg-red-500/10 text-red-300" }
+    : percentage >= 80
+      ? { label: "Atenção", className: "border-amber-500/25 bg-amber-500/10 text-amber-300" }
+      : { label: "Disponível", className: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300" };
+
+  return (
+    <section className="panel overflow-hidden">
+      <div className="flex flex-col gap-3 border-b border-border p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+        <div>
+          <div className="flex items-center gap-2">
+            <Cloud className="h-5 w-5 text-primary" />
+            <h2 className="section-title text-lg">Uso da Cloudflare AI</h2>
+            {usage && !usage.setupRequired && <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${status.className}`}>{status.label}</span>}
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">Estimativa de Neurons consumidos pelas gerações feitas dentro da Zunexi.ai. A franquia gratuita reinicia às 00:00 UTC.</p>
+        </div>
+        <button type="button" onClick={onRefresh} disabled={loading} className="secondary-button shrink-0 disabled:opacity-50">
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Atualizar
+        </button>
+      </div>
+
+      {loading && !usage ? (
+        <div className="grid min-h-48 place-items-center text-sm text-muted-foreground"><span><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Carregando uso da Cloudflare...</span></div>
+      ) : usage?.setupRequired ? (
+        <div className="p-5 sm:p-6">
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/8 p-4 text-sm text-amber-100">
+            Execute o arquivo SQL de uso da Cloudflare no Supabase para começar a registrar as gerações. Depois disso, este painel será preenchido automaticamente.
+          </div>
+        </div>
+      ) : usage ? (
+        <div className="space-y-5 p-5 sm:p-6">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <CloudflareMetric icon={Activity} value={formatNeurons(usage.usedToday)} label="Neurons usados hoje" />
+            <CloudflareMetric icon={Coins} value={formatNeurons(usage.remainingToday)} label="Estimativa restante" />
+            <CloudflareMetric icon={ImageIcon} value={usage.imagesToday.toLocaleString("pt-BR")} label="Imagens geradas hoje" />
+            <CloudflareMetric icon={ShieldCheck} value={`${usage.percentage.toFixed(1)}%`} label="Da franquia diária" />
+          </div>
+
+          <div className="rounded-2xl border border-border bg-[#080b15] p-4">
+            <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+              <span className="font-medium">{formatNeurons(usage.usedToday)} / {formatNeurons(usage.dailyLimit)} Neurons</span>
+              <span className="text-muted-foreground">{usage.estimatedImagesRemaining === null ? "Estimativa de imagens após o primeiro uso" : `≈ ${usage.estimatedImagesRemaining.toLocaleString("pt-BR")} imagens restantes no ritmo de hoje`}</span>
+            </div>
+            <div className="h-3 overflow-hidden rounded-full bg-white/[0.055]">
+              <div className={`h-full rounded-full transition-all ${usage.percentage >= 95 ? "bg-red-400" : usage.percentage >= 80 ? "bg-amber-400" : "bg-primary"}`} style={{ width: `${Math.min(100, usage.percentage)}%` }} />
+            </div>
+            <div className="mt-2 flex flex-wrap justify-between gap-2 text-[10px] text-muted-foreground">
+              <span>Média: {formatNeurons(usage.averageNeuronsPerImage)} Neurons/imagem</span>
+              <span>Reinicia em {new Date(usage.resetsAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} (horário de Brasília)</span>
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold">Últimos 7 dias</h3>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">Histórico estimado do consumo registrado pela aplicação.</p>
+              </div>
+              <span className="max-w-[260px] truncate rounded-lg border border-border bg-white/[0.025] px-2.5 py-1 text-[10px] text-muted-foreground" title={usage.model}>{usage.model}</span>
+            </div>
+            <div className="grid grid-cols-7 gap-2">
+              {usage.history.map((day) => {
+                const dayPercent = Math.min(100, (day.neurons / usage.dailyLimit) * 100);
+                return (
+                  <div key={day.date} className="rounded-xl border border-border bg-[#080b15] p-2.5 text-center">
+                    <div className="mx-auto flex h-20 w-3 items-end overflow-hidden rounded-full bg-white/[0.055]">
+                      <div className="w-full rounded-full bg-primary" style={{ height: `${Math.max(day.neurons > 0 ? 4 : 0, dayPercent)}%` }} />
+                    </div>
+                    <div className="mt-2 text-[10px] font-semibold">{new Date(`${day.date}T12:00:00Z`).toLocaleDateString("pt-BR", { weekday: "short", timeZone: "UTC" }).replace(".", "")}</div>
+                    <div className="mt-0.5 text-[9px] text-muted-foreground">{Math.round(day.neurons)} N · {day.images} img</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <p className="text-[10px] leading-relaxed text-muted-foreground">Observação: este número é uma estimativa calculada pela Zunexi.ai com base no modelo, dimensões e imagens de referência. Gerações feitas diretamente fora deste sistema não aparecem aqui; o valor oficial continua sendo o painel da Cloudflare.</p>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function CloudflareMetric({ icon: Icon, value, label }: { icon: React.ComponentType<{ className?: string }>; value: string; label: string }) {
+  return (
+    <div className="rounded-2xl border border-border bg-[#080b15] p-4">
+      <div className="mb-3 grid h-9 w-9 place-items-center rounded-xl bg-primary/12 text-primary"><Icon className="h-4 w-4" /></div>
+      <div className="text-xl font-bold sm:text-2xl">{value}</div>
+      <div className="mt-1 text-xs text-muted-foreground">{label}</div>
+    </div>
+  );
+}
+
+function formatNeurons(value: number) {
+  return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 }).format(value);
 }
 
 
