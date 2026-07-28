@@ -38,7 +38,7 @@ import {
 import { addNotification, requestNotificationPermission } from "@/lib/notifications";
 
 export const Route = createFileRoute("/carrossel")({
-  head: () => ({ meta: [{ title: "Criar carrossel — InLabs.Ia Studios" }] }),
+  head: () => ({ meta: [{ title: "Criar carrossel — Zunexi.ai" }] }),
   component: NovoCarrossel,
 });
 
