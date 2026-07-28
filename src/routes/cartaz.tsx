@@ -19,7 +19,7 @@ import {
 import { addNotification, requestNotificationPermission } from "@/lib/notifications";
 
 export const Route = createFileRoute("/cartaz")({
-  head: () => ({ meta: [{ title: "Criar cartaz — InLabs.Ia Studios" }] }),
+  head: () => ({ meta: [{ title: "Criar cartaz — Zunexi.ai" }] }),
   component: NovoCartaz,
 });
 
