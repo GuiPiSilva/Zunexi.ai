@@ -27,6 +27,7 @@ import { generateInstagramContent, testGroqConnection, updateSlide, type Carross
 import { getAccessKey } from "@/lib/session";
 import { newProject, upsertProject } from "@/lib/storage";
 import { buildLayout, compositionForLayout, fontPairFromStyle, layoutForSlide, paletteFromDescription } from "@/lib/layouts";
+import { renderElementsThumbnail } from "@/lib/fabric-elements";
 import {
   createCreationJob,
   getActiveCreationJob,
@@ -58,6 +59,7 @@ type CarouselForm = {
   paleta: string;
   cta: string;
   informacoesAdicionais: string;
+  imageQuality: "fast" | "premium";
 };
 
 const DEFAULT_FORM: CarouselForm = {
@@ -68,10 +70,11 @@ const DEFAULT_FORM: CarouselForm = {
   publicoAlvo: "",
   tom: "profissional",
   quantidadeSlides: 5,
-  estilo: "moderno e tecnológico",
+  estilo: "publicidade premium",
   paleta: "roxo, azul, ciano e branco",
   cta: "",
   informacoesAdicionais: "",
+  imageQuality: "premium",
 };
 
 type CarouselJobPayload = {
@@ -155,8 +158,8 @@ function NovoCarrossel() {
       if (latest.projectId) setSavedProjectId(latest.projectId);
       const images = Object.fromEntries(Object.entries(latest.assets).map(([number, asset]) => [Number(number), asset.url]));
       setAutoImages(images);
-      const savedForm = latest.payload.form as CarouselForm | undefined;
-      if (savedForm) setForm(savedForm);
+      const savedForm = latest.payload.form as Partial<CarouselForm> | undefined;
+      if (savedForm) setForm((current) => ({ ...current, ...savedForm }));
 
       if (latest.status === "review") {
         setStep(2);
@@ -287,6 +290,7 @@ function NovoCarrossel() {
                   palette: payload.form.paleta,
                   style: `${payload.form.estilo}; tom ${payload.form.tom}`,
                   referenceImageUrl: payload.referenceImageUrl,
+                  imageQuality: payload.form.imageQuality || "premium",
                 } });
                 break;
               } catch (error) {
@@ -574,7 +578,7 @@ function NovoCarrossel() {
     setCloudflareTesting(true);
     setCloudflareTestResult(null);
     try {
-      const response = await testCloudflare();
+      const response = await testCloudflare({ data: { imageQuality: form.imageQuality } });
       setCloudflareTestResult(response);
       response.ok ? toast.success("Cloudflare Workers AI conectado e funcionando.") : toast.error(response.message);
     } catch (error) {
@@ -618,8 +622,9 @@ function NovoCarrossel() {
                   <Field label="Objetivo do carrossel"><select value={form.objetivo} onChange={(e) => setForm({ ...form, objetivo: e.target.value })} className="app-input"><option value="vender">Vender</option><option value="educar">Educar</option><option value="engajar">Engajar</option><option value="informar">Informar</option><option value="captar clientes">Captar clientes</option></select></Field>
                   <Field label="Tom de voz"><select value={form.tom} onChange={(e) => setForm({ ...form, tom: e.target.value })} className="app-input"><option>profissional</option><option>amigável e inspirador</option><option>persuasivo</option><option>educativo</option><option>direto</option><option>elegante</option><option>divertido</option></select></Field>
                   <Field label="Quantidade de slides"><select value={form.quantidadeSlides} onChange={(e) => setForm({ ...form, quantidadeSlides: Number(e.target.value) })} className="app-input">{Array.from({ length: 20 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value} slides</option>)}</select></Field>
-                  <Field label="Estilo visual"><select value={form.estilo} onChange={(e) => setForm({ ...form, estilo: e.target.value })} className="app-input"><option>moderno e tecnológico</option><option>minimalista e premium</option><option>editorial</option><option>corporativo</option><option>vibrante</option><option>cinematográfico</option></select></Field>
+                  <Field label="Estilo visual"><select value={form.estilo} onChange={(e) => setForm({ ...form, estilo: e.target.value })} className="app-input"><option>publicidade premium</option><option>food commercial</option><option>cinematográfico</option><option>luxury campaign</option><option>editorial</option><option>minimalista e premium</option><option>tech campaign</option><option>3D publicitário</option><option>corporativo</option><option>vibrante</option></select></Field>
                   <Field label="Paleta de cores"><input value={form.paleta} onChange={(e) => setForm({ ...form, paleta: e.target.value })} className="app-input" /></Field>
+                  <Field label="Qualidade da imagem"><select value={form.imageQuality} onChange={(e) => setForm({ ...form, imageQuality: e.target.value as "fast" | "premium" })} className="app-input"><option value="premium">Premium — FLUX Klein 9B</option><option value="fast">Rápida — FLUX Klein 4B</option></select></Field>
                 </div>
 
                 <Field label="CTA — chamada para ação"><input value={form.cta} onChange={(e) => setForm({ ...form, cta: e.target.value })} placeholder="Ex.: Experimente grátis a Zunexi.ai" className="app-input" /></Field>
@@ -669,7 +674,7 @@ function NovoCarrossel() {
               <div className="panel p-5">
                 <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Teste Cloudflare Workers AI</h2><p className="mt-1 text-xs text-muted-foreground">Valida o token, a conta e o modelo de imagem.</p></div><ImageIcon className="h-5 w-5 text-primary" /></div>
                 <button type="button" onClick={runCloudflareTest} disabled={cloudflareTesting} className="secondary-button w-full disabled:opacity-60">{cloudflareTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />} {cloudflareTesting ? "Testando..." : "Testar Cloudflare"}</button>
-                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">Este teste consome uma geração da cota diária do Cloudflare Workers AI.</p>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">O teste usa o modo selecionado acima. Premium prioriza qualidade e consome mais da cota do Workers AI.</p>
                 {cloudflareTestResult && <div className={`mt-3 rounded-xl border p-3 text-xs ${cloudflareTestResult.ok ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-200" : "border-red-500/25 bg-red-500/8 text-red-200"}`}><div className="flex items-start gap-2">{cloudflareTestResult.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{cloudflareTestResult.message}</span></div>{cloudflareTestResult.model && <div className="mt-2 opacity-80">Modelo: {cloudflareTestResult.model}</div>}</div>}
                 {cloudflareTestResult?.dataUrl && <img src={cloudflareTestResult.dataUrl} alt="Imagem do teste Cloudflare Workers AI" className="mt-3 aspect-square w-full rounded-xl border border-border object-cover" />}
               </div>
@@ -745,8 +750,7 @@ async function saveCarouselProject({
 
   project.slides = await Promise.all(output.slides.map(async (slide, index) => {
     const asset = assets[slide.numero];
-    const thumb = asset?.dataUrl ? await resizeImageDataUrl(asset.dataUrl, 360, 0.72) : asset?.url;
-    const storedImage = asset?.url || (asset?.dataUrl ? await resizeImageDataUrl(asset.dataUrl, 1080, 0.88) : undefined);
+    const storedImage = asset?.url || (asset?.dataUrl ? await resizeImageDataUrl(asset.dataUrl, 1080, 0.9) : undefined);
 
     const elements = buildLayout(layoutForSlide(index, slide.tipo), {
       title: slide.titulo,
@@ -770,8 +774,17 @@ async function saveCarouselProject({
         align: "left",
         weight: 600,
         font: fonts.body,
+        lineHeight: 1,
       });
     }
+
+    const thumb = await renderElementsThumbnail({
+      elements,
+      background: resolvedPalette[0],
+      width: 1080,
+      height: 1080,
+      maxDimension: 420,
+    });
 
     return {
       id: crypto.randomUUID(),
