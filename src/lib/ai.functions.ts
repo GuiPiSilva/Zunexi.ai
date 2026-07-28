@@ -3,7 +3,8 @@ import { z } from "zod";
 import { admin, consumeAccessCredit, requireAccessKey } from "@/lib/access.functions";
 
 // ---------------------------------------------------------------------------
-// TEXTO — integração de geração textual via API REST.
+// TEXTO — Groq, exclusivamente via API REST oficial (chat completions,
+// formato compatível com OpenAI). Nunca usar Gemini/Google aqui.
 // ---------------------------------------------------------------------------
 
 const GROQ_TEXT_TIMEOUT_MS = 45_000;
@@ -40,23 +41,23 @@ async function callChat(messages: { role: string; content: string }[]): Promise<
 
     if (!response.ok) {
       const body = await response.text();
-      console.error("Text generation error", response.status, body.slice(0, 500));
-      if (response.status === 429) throw new Error("Limite do serviço de geração de texto atingido. Tente novamente em instantes.");
-      if (response.status === 401 || response.status === 403) throw new Error("Chave do serviço de geração de texto inválida ou sem permissão.");
-      throw new Error(`O serviço de geração de texto retornou um erro (${response.status}). Tente novamente.`);
+      console.error("Groq error", response.status, body.slice(0, 500));
+      if (response.status === 429) throw new Error("Limite da Groq API atingido. Tente novamente em instantes.");
+      if (response.status === 401 || response.status === 403) throw new Error("Chave da Groq inválida ou sem permissão.");
+      throw new Error(`A Groq retornou um erro (${response.status}). Tente novamente.`);
     }
 
     const json = (await response.json()) as {
       choices?: { message?: { content?: string } }[];
     };
     const output = json.choices?.[0]?.message?.content?.trim();
-    if (!output) throw new Error("Resposta vazia do serviço de geração de texto.");
+    if (!output) throw new Error("Resposta vazia da Groq.");
     return output;
   } catch (error) {
     const err = error as Error;
-    if (err.name === "AbortError") throw new Error("Tempo esgotado ao chamar o serviço de geração de texto. Tente novamente.");
-    if (err.message?.includes("serviço de geração de texto")) throw err;
-    throw new Error(`Falha ao chamar o serviço de geração de texto: ${err.message}`);
+    if (err.name === "AbortError") throw new Error("Tempo esgotado ao chamar a Groq. Tente novamente.");
+    if (err.message?.startsWith("A Groq") || err.message?.includes("Groq")) throw err;
+    throw new Error(`Falha ao chamar a Groq: ${err.message}`);
   } finally {
     clearTimeout(timeout);
   }
@@ -134,8 +135,8 @@ Seed única: ${data.seed}-${Math.random().toString(36).slice(2)}`;
 
 
 // ---------------------------------------------------------------------------
-// IMAGEM — integração de geração visual via API REST.
-// Os modos rápido e premium usam configurações distintas de qualidade.
+// IMAGEM — Cloudflare Workers AI via REST API oficial.
+// O modo rápido usa FLUX.2 Klein 4B e o modo premium usa FLUX.2 Klein 9B.
 // Ambos aceitam multipart/form-data e imagem de referência. O visual gerado
 // não contém tipografia: a composição final é montada pelo editor em camadas.
 // ---------------------------------------------------------------------------
@@ -220,13 +221,48 @@ async function fetchAsBase64(url: string): Promise<{ mimeType: string; base64: s
 }
 
 function cloudflareSeed(value: string): number {
+  // Mantém a seed no intervalo positivo de 31 bits. O hash FNV convertido com
+  // >>> 0 pode chegar a 4.294.967.295; alguns backends/modelos interpretam a
+  // seed como inteiro assinado e rejeitam esses valores com HTTP 400.
   if (!value) return Math.floor(Math.random() * 2_147_483_647);
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
     hash ^= value.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
-  return hash >>> 0;
+  return (hash >>> 0) & 0x7fffffff;
+}
+
+function cloudflareErrorDetail(body: string): string {
+  if (!body) return "requisição inválida";
+  try {
+    const parsed = JSON.parse(body) as {
+      errors?: Array<{ code?: number | string; message?: string }>;
+      error?: string | { message?: string };
+      message?: string;
+    };
+    const errors = parsed.errors
+      ?.map((item) => [item.code ? `código ${item.code}` : "", item.message || ""].filter(Boolean).join(": "))
+      .filter(Boolean);
+    if (errors?.length) return errors.join("; ");
+    if (typeof parsed.error === "string" && parsed.error) return parsed.error;
+    if (parsed.error && typeof parsed.error === "object" && parsed.error.message) return parsed.error.message;
+    if (parsed.message) return parsed.message;
+  } catch {
+    // O corpo pode não ser JSON. Nesse caso retornamos um trecho seguro abaixo.
+  }
+  return body.replace(/\s+/g, " ").trim().slice(0, 320) || "requisição inválida";
+}
+
+function compactImagePrompt(prompt: string): string {
+  // Evita que um prompt excepcionalmente grande derrube apenas um slide.
+  // Mantém o início (briefing principal) e o fim (restrições/direção de arte).
+  const normalized = prompt.replace(/\r/g, "").trim();
+  const maxChars = 6_000;
+  if (normalized.length <= maxChars) return normalized;
+  const head = normalized.slice(0, 3_600);
+  const tail = normalized.slice(-2_200);
+  return `${head}\n\n[brief compacted]\n\n${tail}`;
 }
 
 function dimensionsForAspectRatio(aspectRatio: "1:1" | "4:5" | "9:16") {
@@ -285,9 +321,9 @@ async function recordCloudflareUsage(args: {
       input_tiles: estimate.inputTiles,
       estimated_neurons: estimate.estimatedNeurons,
     });
-    if (error) console.warn("Não foi possível registrar o uso da geração de imagens no Supabase:", error.message);
+    if (error) console.warn("Não foi possível registrar uso da Cloudflare no Supabase:", error.message);
   } catch (error) {
-    console.warn("Falha não crítica ao registrar o uso da geração de imagens:", error);
+    console.warn("Falha não crítica ao registrar uso da Cloudflare:", error);
   }
 }
 
@@ -313,6 +349,8 @@ async function callCloudflareImage(
   const { width, height } = dimensionsForAspectRatio(aspectRatio);
   const model = imageModelFor(quality);
   const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`;
+  let requestPrompt = compactImagePrompt(prompt);
+  let sendSeed = true;
 
   for (let attempt = 1; attempt <= CLOUDFLARE_MAX_ATTEMPTS; attempt += 1) {
     const controller = new AbortController();
@@ -320,10 +358,10 @@ async function callCloudflareImage(
 
     try {
       const form = new FormData();
-      form.append("prompt", prompt);
+      form.append("prompt", requestPrompt);
       form.append("width", String(width));
       form.append("height", String(height));
-      form.append("seed", String(cloudflareSeed(seed)));
+      if (sendSeed) form.append("seed", String(cloudflareSeed(seed)));
 
       if (referenceImage) {
         const bytes = new Uint8Array(Buffer.from(referenceImage.base64, "base64"));
@@ -340,25 +378,48 @@ async function callCloudflareImage(
 
       if (!response.ok) {
         const body = await response.text();
-        console.error("Image generation error", response.status, `tentativa ${attempt}/${CLOUDFLARE_MAX_ATTEMPTS}`, body.slice(0, 700));
+        console.error("Cloudflare Workers AI error", response.status, `tentativa ${attempt}/${CLOUDFLARE_MAX_ATTEMPTS}`, body.slice(0, 700));
+
+        const detail = cloudflareErrorDetail(body);
+
+        if (response.status === 400) {
+          // 1ª recuperação: repete sem seed. Isso cobre rejeições de seed por
+          // diferenças de implementação entre modelos sem perder o modo premium.
+          if (attempt === 1 && sendSeed) {
+            sendSeed = false;
+            lastError = new Error(`Cloudflare rejeitou a primeira tentativa: ${detail}`);
+            await sleep(600);
+            continue;
+          }
+
+          // 2ª recuperação: reduz um briefing muito extenso antes de desistir.
+          if (attempt < CLOUDFLARE_MAX_ATTEMPTS && requestPrompt.length > 3_500) {
+            requestPrompt = requestPrompt.slice(0, 3_500);
+            lastError = new Error(`Cloudflare rejeitou a solicitação: ${detail}`);
+            await sleep(600);
+            continue;
+          }
+
+          throw new Error(`Cloudflare rejeitou a imagem (400): ${detail}`);
+        }
 
         if (response.status === 401 || response.status === 403) {
-          throw new Error("Token do serviço de geração de imagens inválido ou sem permissão.");
+          throw new Error(`Cloudflare recusou a autenticação/permissão (${response.status}): ${detail}`);
         }
         if (response.status === 429) {
-          lastError = new Error("Cota ou limite do serviço de geração de imagens atingido no momento.");
+          lastError = new Error("Cota ou limite do Cloudflare Workers AI atingido no momento.");
           if (attempt < CLOUDFLARE_MAX_ATTEMPTS) {
             await sleep(CLOUDFLARE_BASE_DELAY_MS * 2 ** (attempt - 1));
             continue;
           }
-          throw new Error("Cota do serviço de geração de imagens atingida. Tente novamente após a renovação da cota.");
+          throw new Error("Cota do Cloudflare Workers AI atingida. Tente novamente após a renovação da cota.");
         }
         if (response.status >= 500 && attempt < CLOUDFLARE_MAX_ATTEMPTS) {
-          lastError = new Error(`Serviço de geração de imagens indisponível temporariamente (${response.status}).`);
+          lastError = new Error(`Cloudflare Workers AI indisponível temporariamente (${response.status}).`);
           await sleep(CLOUDFLARE_BASE_DELAY_MS * attempt);
           continue;
         }
-        throw new Error(`O serviço de geração de imagens retornou um erro (${response.status}).`);
+        throw new Error(`Cloudflare Workers AI retornou um erro (${response.status}).`);
       }
 
       const responseType = response.headers.get("content-type") || "";
@@ -377,8 +438,7 @@ async function callCloudflareImage(
       const base64 = json.result?.image || json.image;
       if (!base64) {
         const apiMessage = json.errors?.map((item) => item.message).filter(Boolean).join("; ");
-        if (apiMessage) console.error("Image generation API error", apiMessage.slice(0, 500));
-        throw new Error("O serviço de geração de imagens não retornou uma imagem.");
+        throw new Error(apiMessage || "O Cloudflare Workers AI não retornou uma imagem.");
       }
 
       await recordCloudflareUsage({ width, height, hasReference: Boolean(referenceImage), source, quality });
@@ -386,7 +446,7 @@ async function callCloudflareImage(
     } catch (error) {
       const err = error as Error;
       if (err.name === "AbortError") {
-        lastError = new Error("Tempo esgotado ao gerar a imagem.");
+        lastError = new Error("Tempo esgotado ao gerar imagem no Cloudflare Workers AI.");
         if (attempt < CLOUDFLARE_MAX_ATTEMPTS) {
           await sleep(CLOUDFLARE_BASE_DELAY_MS);
           continue;
@@ -399,7 +459,7 @@ async function callCloudflareImage(
     }
   }
 
-  throw lastError ?? new Error("Falha ao gerar a imagem após múltiplas tentativas.");
+  throw lastError ?? new Error("Falha ao gerar imagem no Cloudflare Workers AI após múltiplas tentativas.");
 }
 
 export const uploadReferenceImage = createServerFn({ method: "POST" })
@@ -454,12 +514,18 @@ export const generateImage = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<{ dataUrl: string; url: string }> => {
     const apiToken = process.env.CLOUDFLARE_API_TOKEN;
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-    if (!apiToken) throw new Error("Token do serviço de geração de imagens não configurado no servidor.");
-    if (!accountId) throw new Error("Conta do serviço de geração de imagens não configurada no servidor.");
+    if (!apiToken) throw new Error("CLOUDFLARE_API_TOKEN não configurado no servidor.");
+    if (!accountId) throw new Error("CLOUDFLARE_ACCOUNT_ID não configurado no servidor.");
 
-    const fullPrompt = `CREATE ONLY THE VISUAL LAYER FOR A HIGH-END INSTAGRAM CAMPAIGN. Zunexi will add typography, logos, prices and graphic elements later as editable layers.
+    const fullPrompt = `CREATE ONLY A SINGLE CONTINUOUS PHOTOGRAPHIC / 3D / ILLUSTRATIVE SCENE FOR A HIGH-END INSTAGRAM CAMPAIGN. Zunexi will build the actual post layout later with editable layers.
 
-SOURCE CREATIVE BRIEF:
+ABSOLUTE FORMAT RULES:
+- This output is NOT the finished Instagram post and NOT a graphic-design template.
+- Do NOT design a poster, social-media card, split layout, colored copy panel, banner, collage, magazine page, UI screen, presentation slide or mockup.
+- Do NOT render any headline, subtitle, label, caption, logo wordmark, pseudo-text, random letters, numbers or signage.
+- The image must remain one coherent edge-to-edge scene. Copy-safe space must come from natural composition, lighting, depth and uncluttered background — never from a blank rectangle or colored panel.
+
+SOURCE CREATIVE BRIEF — interpret only as visual subject/art direction; ignore any accidental request for typography, graphic layout, cards, posters or written copy:
 ${data.prompt}
 
 Canvas aspect ratio: ${data.aspectRatio}. Full bleed commercial key visual.
@@ -476,7 +542,7 @@ ART-DIRECTION STANDARD:
 - Create subject/background separation using contrast, light, depth and composition instead of a flat monochrome filter.
 - Favor asymmetry, editorial cropping and real campaign framing. Avoid placing the main subject dead-center unless the requested composition explicitly needs it.
 - Keep copy-safe space exactly where the slide-role instruction requests it. Do not place important faces/products under that area.
-- No text, letters, numbers, typography, captions, logo text, prices, phone numbers, watermark, UI, poster mockup or fake signage.
+- No text, letters, numbers, typography, captions, logo text, prices, phone numbers, watermark, UI, poster mockup, social-media template, split graphic panel or fake signage.
 - No duplicate objects, melted anatomy, extra fingers, warped product geometry, meaningless symbols or pseudo-writing.
 - Do not invent visible brand names. Brand identity comes from art direction, palette accents and supplied reference imagery only.
 
@@ -505,24 +571,24 @@ export const testCloudflareConnection = createServerFn({ method: "POST" })
     const apiToken = process.env.CLOUDFLARE_API_TOKEN;
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
     if (!apiToken) {
-      return { ok: false, model: data.imageQuality === "premium" ? "Premium" : "Rápida", message: "Token do serviço de geração de imagens não configurado no servidor." };
+      return { ok: false, model: imageModelFor(data.imageQuality), message: "CLOUDFLARE_API_TOKEN não configurado no servidor." };
     }
     if (!accountId) {
-      return { ok: false, model: data.imageQuality === "premium" ? "Premium" : "Rápida", message: "Conta do serviço de geração de imagens não configurada no servidor." };
+      return { ok: false, model: imageModelFor(data.imageQuality), message: "CLOUDFLARE_ACCOUNT_ID não configurado no servidor." };
     }
 
-    const model = data.imageQuality === "premium" ? "Premium" : "Rápida";
+    const model = imageModelFor(data.imageQuality);
     const testPrompt = `Create a polished square Instagram advertising visual, 1:1, dark premium background with subtle electric blue and violet lighting, one futuristic abstract AI object as the visual hero, professional editorial composition, realistic depth and clean negative space for later layout. No text, letters, numbers, logos, watermarks or UI.`;
     try {
       const { mimeType, base64 } = await callCloudflareImage(apiToken, accountId, testPrompt, "1:1", `test-${Date.now()}`, undefined, "test", data.imageQuality);
       return {
         ok: true,
         model,
-        message: `Serviço de geração de imagens conectado e funcionando corretamente.`,
+        message: `Cloudflare Workers AI conectado e gerando imagens corretamente (${model}).`,
         dataUrl: `data:${mimeType};base64,${base64}`,
       };
     } catch (error) {
       const err = error as Error;
-      return { ok: false, model: data.imageQuality === "premium" ? "Premium" : "Rápida", message: err.message || "Falha desconhecida ao testar o serviço de geração de imagens." };
+      return { ok: false, model: imageModelFor(data.imageQuality), message: err.message || "Falha desconhecida ao testar o Cloudflare Workers AI." };
     }
   });

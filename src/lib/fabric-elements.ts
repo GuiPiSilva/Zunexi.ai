@@ -14,7 +14,7 @@ export async function ensureFabricFont(fontFamily?: string, weight: number | str
 
 export async function addElementDescToCanvas(canvas: CanvasLike, el: ElementDesc) {
   if (el.kind === "rect") {
-    canvas.add(new fabric.Rect({
+    const object = new fabric.Rect({
       left: el.x,
       top: el.y,
       width: el.w,
@@ -25,12 +25,17 @@ export async function addElementDescToCanvas(canvas: CanvasLike, el: ElementDesc
       ry: el.rx || 0,
       selectable: el.selectable ?? true,
       evented: el.selectable ?? true,
-    }));
+      objectCaching: false,
+    });
+    (object as any).name = el.name || (el.role === "background" ? "Fundo" : "Retângulo");
+    (object as any).zunexiKind = "rect";
+    (object as any).zunexiRole = el.role || "shape";
+    canvas.add(object);
     return;
   }
 
   if (el.kind === "circle") {
-    canvas.add(new fabric.Circle({
+    const object = new fabric.Circle({
       left: el.cx - el.r,
       top: el.cy - el.r,
       radius: el.r,
@@ -38,7 +43,12 @@ export async function addElementDescToCanvas(canvas: CanvasLike, el: ElementDesc
       opacity: el.opacity ?? 1,
       selectable: el.selectable ?? true,
       evented: el.selectable ?? true,
-    }));
+      objectCaching: false,
+    });
+    (object as any).name = el.name || "Círculo";
+    (object as any).zunexiKind = "circle";
+    (object as any).zunexiRole = el.role || "shape";
+    canvas.add(object);
     return;
   }
 
@@ -69,6 +79,9 @@ export async function addElementDescToCanvas(canvas: CanvasLike, el: ElementDesc
         offsetY: 4,
       }));
     }
+    (textbox as any).name = el.name || (el.role === "body" ? "Texto" : el.role === "title" ? "Título" : "");
+    (textbox as any).zunexiKind = "text";
+    (textbox as any).zunexiRole = el.role || "copy";
     canvas.add(textbox);
     return;
   }
@@ -77,8 +90,8 @@ export async function addElementDescToCanvas(canvas: CanvasLike, el: ElementDesc
   const sourceWidth = image.width || 1;
   const sourceHeight = image.height || 1;
   const scale = Math.max(el.w / sourceWidth, el.h / sourceHeight);
-  const cropWidth = Math.min(sourceWidth, el.w / scale);
-  const cropHeight = Math.min(sourceHeight, el.h / scale);
+  const cropWidth = Math.max(1, Math.min(sourceWidth, el.w / scale));
+  const cropHeight = Math.max(1, Math.min(sourceHeight, el.h / scale));
 
   image.set({
     left: el.x,
@@ -94,6 +107,10 @@ export async function addElementDescToCanvas(canvas: CanvasLike, el: ElementDesc
     selectable: el.selectable ?? true,
     evented: el.selectable ?? true,
   });
+  (image as any).name = el.name || "Imagem principal";
+  (image as any).zunexiKind = "image";
+  (image as any).zunexiRole = el.role || "hero";
+  (image as any).zunexiSourceUrl = el.url;
   canvas.add(image);
 }
 

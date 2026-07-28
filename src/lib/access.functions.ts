@@ -144,53 +144,6 @@ export const getAccessCreditStatus = createServerFn({ method: "POST" })
     return statusFromRow(row);
   });
 
-export const getAccessProfile = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => z.object({ key: z.string().trim().min(4).max(64) }).parse(d))
-  .handler(async ({ data }) => {
-    const row = await requireAccessKey(admin(), data.key);
-    return {
-      keyId: row.id,
-      name: row.label?.trim() || "Usuário Zunexi.ai",
-      credits: statusFromRow(row),
-    };
-  });
-
-export const updateAccessProfile = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) =>
-    z.object({
-      key: z.string().trim().min(4).max(64),
-      name: z.string().trim().min(2, "Informe um nome com pelo menos 2 caracteres.").max(60, "O nome pode ter no máximo 60 caracteres."),
-    }).parse(d),
-  )
-  .handler(async ({ data }) => {
-    const sb = admin();
-    const current = await requireAccessKey(sb, data.key);
-    const name = data.name.trim();
-
-    const { data: row, error } = await sb
-      .from("access_keys")
-      .update({ label: name })
-      .eq("id", current.id)
-      .eq("active", true)
-      .select("id, label, unlimited_credits, credits_per_day, credits_used_today, credits_reset_date")
-      .single();
-
-    if (error) {
-      console.error("Erro ao atualizar nome do perfil", error);
-      throw new Error(`Não foi possível salvar o nome do perfil. ${error.message}`);
-    }
-
-    return {
-      ok: true as const,
-      keyId: row.id,
-      name: row.label?.trim() || "Usuário Zunexi.ai",
-      credits: statusFromRow(row),
-    };
-  });
-
-// Alias para telas/componentes que usam um nome mais explícito para a mesma ação.
-export const updateAccessDisplayName = updateAccessProfile;
-
 export const verifyAccessKey = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ key: z.string().trim().min(4).max(64) }).parse(d))
   .handler(async ({ data }) => {
@@ -208,7 +161,7 @@ export const verifyAccessKey = createServerFn({ method: "POST" })
     return {
       ok: true as const,
       keyId: row.id,
-      name: row.label?.trim() || "Usuário Zunexi.ai",
+      name: row.label?.trim() || "Usuário InLabs",
       credits: statusFromRow(row),
     };
   });
@@ -239,7 +192,9 @@ const CLOUDFLARE_FAST_IMAGE_MODEL = process.env.CLOUDFLARE_IMAGE_MODEL_FAST || p
 const CLOUDFLARE_PREMIUM_IMAGE_MODEL = process.env.CLOUDFLARE_IMAGE_MODEL_PREMIUM || "@cf/black-forest-labs/flux-2-klein-9b";
 
 function cloudflareModelLabel() {
-  return "Modos rápido e premium";
+  return CLOUDFLARE_FAST_IMAGE_MODEL === CLOUDFLARE_PREMIUM_IMAGE_MODEL
+    ? CLOUDFLARE_FAST_IMAGE_MODEL
+    : `Rápida: ${CLOUDFLARE_FAST_IMAGE_MODEL} · Premium: ${CLOUDFLARE_PREMIUM_IMAGE_MODEL}`;
 }
 
 function startOfUtcDay(date = new Date()) {
@@ -297,8 +252,7 @@ export const adminGetCloudflareUsage = createServerFn({ method: "POST" })
       if (/cloudflare_ai_usage|relation .* does not exist|schema cache|PGRST205/i.test(error.message)) {
         return emptyCloudflareUsage(true);
       }
-      console.error("Falha ao carregar métricas de geração de imagens", error);
-      throw new Error("Não foi possível carregar o uso da geração de imagens.");
+      throw new Error(`Não foi possível carregar o uso da Cloudflare: ${error.message}`);
     }
 
     const byDate = new Map<string, CloudflareUsageDay>();

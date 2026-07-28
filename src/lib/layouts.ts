@@ -3,9 +3,9 @@
 // lógicas do documento (ex.: 1080x1080), independentemente do zoom do editor.
 
 export type ElementDesc =
-  | { kind: "rect"; x: number; y: number; w: number; h: number; fill: string; opacity?: number; rx?: number; selectable?: boolean }
-  | { kind: "circle"; cx: number; cy: number; r: number; fill: string; opacity?: number; selectable?: boolean }
-  | { kind: "image"; x: number; y: number; w: number; h: number; url: string; opacity?: number; selectable?: boolean }
+  | { kind: "rect"; x: number; y: number; w: number; h: number; fill: string; opacity?: number; rx?: number; selectable?: boolean; name?: string; role?: string }
+  | { kind: "circle"; cx: number; cy: number; r: number; fill: string; opacity?: number; selectable?: boolean; name?: string; role?: string }
+  | { kind: "image"; x: number; y: number; w: number; h: number; url: string; opacity?: number; selectable?: boolean; name?: string; role?: string }
   | {
       kind: "text";
       x: number;
@@ -22,6 +22,8 @@ export type ElementDesc =
       lineHeight?: number;
       charSpacing?: number;
       selectable?: boolean;
+      name?: string;
+      role?: string;
     };
 
 export interface LayoutInput {
@@ -87,7 +89,7 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
   const bodySize = px(clamp(W * 0.032, 27, 38));
 
   // O fundo base não deve ser movido por acidente no editor.
-  els.push({ kind: "rect", x: 0, y: 0, w: W, h: H, fill: bg, selectable: false });
+  els.push({ kind: "rect", x: 0, y: 0, w: W, h: H, fill: bg, selectable: false, name: "Fundo", role: "background" });
 
   switch (id) {
     case "text-over-image": {
@@ -114,16 +116,17 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
     }
 
     case "side-text": {
-      const panelW = W * 0.42;
-      els.push({ kind: "rect", x: 0, y: 0, w: panelW, h: H, fill: bg, selectable: false });
-      if (imageUrl) els.push({ kind: "image", x: panelW, y: 0, w: W - panelW, h: H, url: imageUrl });
-      els.push({ kind: "rect", x: panelW - 6, y: 0, w: 6, h: H, fill: accent, opacity: 0.88, selectable: false });
-      const boxW = panelW - P * 1.45;
-      const titleSize = fittedTitleSize(title, boxW, W * 0.072, W * 0.044, 3);
+      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl, name: "Imagem principal", role: "hero" });
+      // Em vez de cobrir quase metade da arte com uma cor chapada, criamos
+      // uma área de leitura translúcida sobre a própria fotografia.
+      els.push({ kind: "rect", x: 0, y: 0, w: W * 0.46, h: H, fill: "#000000", opacity: 0.5, selectable: false, name: "Sombra de leitura", role: "scrim" });
+      els.push({ kind: "rect", x: W * 0.455, y: H * 0.13, w: 6, h: H * 0.74, fill: accent, opacity: 0.9, selectable: false, name: "Acento", role: "accent" });
+      const boxW = W * 0.35;
+      const titleSize = fittedTitleSize(title, boxW, W * 0.068, W * 0.041, 3);
       const lines = Math.min(4, estimatedLineCount(title, boxW, titleSize));
       const y = H * 0.24;
-      els.push({ kind: "text", x: P * 0.72, y, w: boxW, text: title, size: titleSize, color: text, align: "left", weight: 750, font: fonts.display, lineHeight: 0.96, charSpacing: -6 });
-      if (body) els.push({ kind: "text", x: P * 0.72, y: y + lines * titleSize + 30, w: boxW, text: body, size: bodySize, color: text, align: "left", font: fonts.body, lineHeight: 1.18 });
+      els.push({ kind: "text", x: P, y, w: boxW, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 750, font: fonts.display, lineHeight: 0.96, charSpacing: -6, name: "Título", role: "title" });
+      if (body) els.push({ kind: "text", x: P, y: y + lines * titleSize + 30, w: boxW, text: body, size: bodySize, color: "#ffffff", align: "left", font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
       break;
     }
 
@@ -176,17 +179,17 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
     }
 
     case "split": {
-      const leftW = W * 0.56;
-      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: leftW, h: H, url: imageUrl });
-      els.push({ kind: "rect", x: leftW, y: 0, w: W - leftW, h: H, fill: bg, selectable: false });
-      els.push({ kind: "rect", x: leftW, y: H * 0.12, w: 7, h: H * 0.76, fill: accent, rx: 4, selectable: false });
-      const x = leftW + P * 0.72;
+      if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl, name: "Imagem principal", role: "hero" });
+      const panelX = W * 0.55;
+      els.push({ kind: "rect", x: panelX, y: 0, w: W - panelX, h: H, fill: "#050505", opacity: 0.52, selectable: false, name: "Painel translúcido", role: "scrim" });
+      els.push({ kind: "rect", x: panelX, y: H * 0.12, w: 7, h: H * 0.76, fill: accent, rx: 4, selectable: false, name: "Acento", role: "accent" });
+      const x = panelX + P * 0.72;
       const boxW = W - x - P * 0.72;
-      const titleSize = fittedTitleSize(title, boxW, W * 0.068, W * 0.042, 3);
+      const titleSize = fittedTitleSize(title, boxW, W * 0.064, W * 0.039, 3);
       const lines = Math.min(4, estimatedLineCount(title, boxW, titleSize));
       const y = H * 0.28;
-      els.push({ kind: "text", x, y, w: boxW, text: title, size: titleSize, color: text, align: "left", weight: 750, font: fonts.display, lineHeight: 0.96, charSpacing: -5 });
-      if (body) els.push({ kind: "text", x, y: y + lines * titleSize + 24, w: boxW, text: body, size: bodySize, color: text, align: "left", font: fonts.body, lineHeight: 1.18 });
+      els.push({ kind: "text", x, y, w: boxW, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 750, font: fonts.display, lineHeight: 0.96, charSpacing: -5, name: "Título", role: "title" });
+      if (body) els.push({ kind: "text", x, y: y + lines * titleSize + 24, w: boxW, text: body, size: bodySize, color: "#ffffff", align: "left", font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
       break;
     }
 
@@ -334,7 +337,7 @@ export function layoutForSlide(index: number, kind: string): LayoutId {
   const role = kind.toLowerCase();
   if (role.includes("capa")) return "text-over-image";
   if (role.includes("cta")) return "center-text";
-  const sequence: LayoutId[] = ["side-text", "hero-image", "bottom-text", "split", "top-text", "diagonal", "framed"];
+  const sequence: LayoutId[] = ["side-text", "hero-image", "bottom-text", "diagonal", "text-over-image", "framed", "top-text"];
   return sequence[Math.max(0, index - 1) % sequence.length];
 }
 
