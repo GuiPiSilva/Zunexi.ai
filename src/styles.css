@@ -60,16 +60,70 @@
   --sidebar: oklch(0.095 0.023 272);
   --sidebar-foreground: oklch(0.82 0.018 270);
   --sidebar-border: oklch(0.21 0.028 272);
+  --body-glow-primary: oklch(0.35 0.15 286 / 0.17);
+  --body-glow-accent: oklch(0.35 0.13 235 / 0.1);
+  --panel-start: oklch(0.17 0.03 272 / .94);
+  --panel-end: oklch(0.135 0.025 272 / .96);
+  --panel-soft-bg: oklch(0.16 0.028 272 / .72);
+  --panel-soft-border: oklch(0.26 0.035 272 / .9);
+  --input-bg: oklch(0.135 0.024 272 / .9);
+  --secondary-button-bg: oklch(0.17 0.03 272 / .82);
+  --secondary-button-hover: oklch(0.2 0.04 275);
+  --option-bg: #111525;
+  --option-fg: #ffffff;
+  --scrollbar-thumb: oklch(0.31 0.04 272);
+  --scrollbar-thumb-hover: oklch(0.42 0.07 285);
+  --panel-shadow: 0 18px 70px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.025);
+}
+
+.light {
+  --background: oklch(0.985 0.008 272);
+  --foreground: oklch(0.19 0.018 272);
+  --card: oklch(0.997 0.003 272);
+  --card-foreground: oklch(0.19 0.018 272);
+  --popover: oklch(0.997 0.003 272);
+  --popover-foreground: oklch(0.19 0.018 272);
+  --primary: oklch(0.58 0.245 299);
+  --primary-foreground: oklch(0.99 0.003 270);
+  --secondary: oklch(0.95 0.014 272);
+  --secondary-foreground: oklch(0.25 0.02 272);
+  --muted: oklch(0.955 0.012 272);
+  --muted-foreground: oklch(0.49 0.025 272);
+  --accent: oklch(0.61 0.155 233);
+  --accent-foreground: oklch(0.99 0.003 270);
+  --destructive: oklch(0.58 0.22 25);
+  --destructive-foreground: oklch(0.99 0.003 270);
+  --border: oklch(0.88 0.018 272);
+  --input: oklch(0.975 0.008 272);
+  --ring: oklch(0.58 0.245 299);
+  --sidebar: oklch(0.975 0.009 272);
+  --sidebar-foreground: oklch(0.33 0.024 272);
+  --sidebar-border: oklch(0.885 0.018 272);
+  --body-glow-primary: oklch(0.71 0.12 286 / 0.13);
+  --body-glow-accent: oklch(0.73 0.1 235 / 0.09);
+  --panel-start: oklch(0.998 0.002 272 / .98);
+  --panel-end: oklch(0.97 0.008 272 / .98);
+  --panel-soft-bg: oklch(0.965 0.01 272 / .86);
+  --panel-soft-border: oklch(0.88 0.02 272 / .95);
+  --input-bg: oklch(0.995 0.003 272 / .96);
+  --secondary-button-bg: oklch(0.96 0.012 272 / .94);
+  --secondary-button-hover: oklch(0.925 0.02 275);
+  --option-bg: #ffffff;
+  --option-fg: #191a24;
+  --scrollbar-thumb: oklch(0.78 0.025 272);
+  --scrollbar-thumb-hover: oklch(0.67 0.055 285);
+  --panel-shadow: 0 18px 60px rgba(35,39,58,.08), inset 0 1px 0 rgba(255,255,255,.8);
 }
 
 @layer base {
   * { border-color: var(--color-border); }
-  html { color-scheme: dark; }
+  html.dark, html:not(.light) { color-scheme: dark; }
+  html.light { color-scheme: light; }
   html, body {
     min-height: 100vh;
     background:
-      radial-gradient(900px circle at 85% -10%, oklch(0.35 0.15 286 / 0.17), transparent 55%),
-      radial-gradient(700px circle at -10% 80%, oklch(0.35 0.13 235 / 0.1), transparent 55%),
+      radial-gradient(900px circle at 85% -10%, var(--body-glow-primary), transparent 55%),
+      radial-gradient(700px circle at -10% 80%, var(--body-glow-accent), transparent 55%),
       var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
@@ -78,13 +132,13 @@
   button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
   button, a { transition: color .18s ease, background-color .18s ease, border-color .18s ease, opacity .18s ease, transform .18s ease; }
   input, textarea, select { color: var(--color-foreground); }
-  option { background: #111525; color: white; }
+  option { background: var(--option-bg); color: var(--option-fg); }
   .font-display { font-family: var(--font-display); }
   ::selection { background: oklch(0.66 0.24 299 / .42); color: white; }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: oklch(0.31 0.04 272); border-radius: 999px; }
-  ::-webkit-scrollbar-thumb:hover { background: oklch(0.42 0.07 285); }
+  ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 }
 
 @utility gradient-brand {
@@ -100,21 +154,21 @@
 @layer components {
   .page-wrap { width: 100%; max-width: 1440px; margin-inline: auto; padding: 1.5rem; }
   .panel {
-    background: linear-gradient(145deg, oklch(0.17 0.03 272 / .94), oklch(0.135 0.025 272 / .96));
+    background: linear-gradient(145deg, var(--panel-start), var(--panel-end));
     border: 1px solid var(--color-border);
     border-radius: 1rem;
-    box-shadow: 0 18px 70px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.025);
+    box-shadow: var(--panel-shadow);
   }
   .panel-soft {
-    background: oklch(0.16 0.028 272 / .72);
-    border: 1px solid oklch(0.26 0.035 272 / .9);
+    background: var(--panel-soft-bg);
+    border: 1px solid var(--panel-soft-border);
     border-radius: .9rem;
   }
   .app-input {
     width: 100%;
     border: 1px solid var(--color-border);
     border-radius: .72rem;
-    background: oklch(0.135 0.024 272 / .9);
+    background: var(--input-bg);
     padding: .72rem .85rem;
     font-size: .875rem;
     outline: none;
@@ -131,11 +185,13 @@
   .secondary-button {
     display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
     border: 1px solid var(--color-border); border-radius: .72rem; padding: .7rem .95rem;
-    background: oklch(0.17 0.03 272 / .82); font-size: .875rem; font-weight: 550;
+    background: var(--secondary-button-bg); font-size: .875rem; font-weight: 550;
   }
-  .secondary-button:hover { border-color: oklch(0.5 0.15 285); background: oklch(0.2 0.04 275); }
+  .secondary-button:hover { border-color: oklch(0.5 0.15 285); background: var(--secondary-button-hover); }
   .eyebrow { font-size: .68rem; font-weight: 700; letter-spacing: .19em; text-transform: uppercase; color: var(--color-muted-foreground); }
   .section-title { font-family: var(--font-display); font-weight: 700; letter-spacing: -.025em; }
+  .brand-logo-full { transition: filter .18s ease, opacity .18s ease; }
+  .light .brand-logo-full { filter: brightness(.15) saturate(.35); }
 }
 
 @media (min-width: 1024px) {
