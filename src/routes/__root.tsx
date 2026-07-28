@@ -7,11 +7,29 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Toaster } from "sonner";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { subscribeTheme, type ThemePreference } from "../lib/theme";
+
+const THEME_INIT_SCRIPT = `(() => {
+  try {
+    const key = "zunexi.theme";
+    const legacyKey = "inlabs.theme";
+    const stored = localStorage.getItem(key) || localStorage.getItem(legacyKey) || "escuro";
+    const preference = stored === "claro" || stored === "light" ? "claro" : stored === "sistema" || stored === "system" ? "sistema" : "escuro";
+    const resolved = preference === "sistema"
+      ? (matchMedia("(prefers-color-scheme: dark)").matches ? "escuro" : "claro")
+      : preference;
+    const root = document.documentElement;
+    root.classList.add(resolved === "claro" ? "light" : "dark");
+    root.dataset.theme = resolved;
+    root.dataset.themePreference = preference;
+    root.style.colorScheme = resolved === "claro" ? "light" : "dark";
+  } catch {}
+})();`;
 
 function NotFoundComponent() {
   return (
@@ -95,8 +113,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="pt-BR">
-      <head><HeadContent /></head>
+    <html lang="pt-BR" suppressHydrationWarning>
+      <head><HeadContent /><script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} /></head>
       <body>{children}<Scripts /></body>
     </html>
   );
@@ -104,10 +122,14 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const [theme, setTheme] = useState<ThemePreference>("escuro");
+
+  useEffect(() => subscribeTheme((preference) => setTheme(preference)), []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />
-      <Toaster theme="dark" position="top-right" />
+      <Toaster theme={theme === "claro" ? "light" : theme === "escuro" ? "dark" : "system"} position="top-right" />
     </QueryClientProvider>
   );
 }

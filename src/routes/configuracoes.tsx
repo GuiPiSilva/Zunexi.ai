@@ -1,10 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Bell, BellRing, KeyRound, LogOut, Monitor, Palette, Save, ShieldCheck, UserRound } from "lucide-react";
+import { Bell, BellRing, KeyRound, LogOut, Monitor, Moon, Palette, Save, ShieldCheck, Sun, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { requestNotificationPermission } from "@/lib/notifications";
 import { clearAccessKey, getAccessKey, getAccessUserName, setAccessUserName } from "@/lib/session";
+import { getThemePreference, setThemePreference, type ThemePreference } from "@/lib/theme";
 import logoIcon from "@/assets/logo-icon.png";
 
 export const Route = createFileRoute("/configuracoes")({
@@ -12,25 +13,23 @@ export const Route = createFileRoute("/configuracoes")({
   component: Configuracoes,
 });
 
-type Theme = "escuro" | "sistema";
 type SettingsTab = "perfil" | "preferencias" | "seguranca" | "notificacoes";
 type NotificationPermissionState = NotificationPermission | "unsupported";
 
-const THEME_KEY = "zunexi.theme";
 const NOTIFICATIONS_ENABLED_KEY = "zunexi.notifications.enabled";
 
 function Configuracoes() {
   const nav = useNavigate();
   const [activeTab, setActiveTab] = useState<SettingsTab>("perfil");
   const [name, setName] = useState("");
-  const [theme, setTheme] = useState<Theme>("escuro");
+  const [theme, setTheme] = useState<ThemePreference>("escuro");
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [browserPermission, setBrowserPermission] = useState<NotificationPermissionState>("unsupported");
   const [accessKey, setAccessKeyState] = useState("");
 
   useEffect(() => {
     setName(getAccessUserName());
-    setTheme((localStorage.getItem(THEME_KEY) as Theme) || (localStorage.getItem("inlabs.theme") as Theme) || "escuro");
+    setTheme(getThemePreference());
     setNotificationsEnabled(localStorage.getItem(NOTIFICATIONS_ENABLED_KEY) !== "false");
     setAccessKeyState(getAccessKey() || "");
     setBrowserPermission(typeof Notification === "undefined" ? "unsupported" : Notification.permission);
@@ -58,8 +57,7 @@ function Configuracoes() {
 
     setAccessUserName(normalizedName);
     setName(normalizedName);
-    localStorage.setItem(THEME_KEY, theme);
-    localStorage.removeItem("inlabs.theme");
+    setThemePreference(theme);
     localStorage.setItem(NOTIFICATIONS_ENABLED_KEY, String(notificationsEnabled));
     toast.success("Alterações salvas.");
   }
@@ -76,6 +74,11 @@ function Configuracoes() {
     } else if (permission === "unsupported") {
       toast.error("Este navegador não oferece notificações para esta página.");
     }
+  }
+
+  function changeTheme(nextTheme: ThemePreference) {
+    setTheme(nextTheme);
+    setThemePreference(nextTheme);
   }
 
   function logout() {
@@ -128,7 +131,7 @@ function Configuracoes() {
                     </span>
                   </label>
                   <div><span className="mb-2 block text-sm font-medium">Tipo de acesso</span><div className="app-input flex items-center gap-2 text-muted-foreground"><KeyRound className="h-4 w-4 text-primary" /> Chave liberada pelo administrador</div></div>
-                  <div><span className="mb-2 block text-sm font-medium">Status</span><div className="app-input flex items-center gap-2 text-emerald-300"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Acesso ativo</div></div>
+                  <div><span className="mb-2 block text-sm font-medium">Status</span><div className="app-input flex items-center gap-2 text-emerald-700 dark:text-emerald-300"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Acesso ativo</div></div>
                 </div>
               </section>
             )}
@@ -139,14 +142,33 @@ function Configuracoes() {
                   <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary/15 text-primary"><Monitor className="h-5 w-5" /></div>
                   <div><h2 className="section-title text-xl">Preferências</h2><p className="mt-1 text-xs text-muted-foreground">Personalize o comportamento visual da sua conta.</p></div>
                 </div>
-                <label className="block">
-                  <span className="mb-2 block text-sm font-medium">Tema da interface</span>
-                  <select value={theme} onChange={(event) => setTheme(event.target.value as Theme)} className="app-input">
-                    <option value="escuro">Escuro</option>
-                    <option value="sistema">Usar preferência do sistema</option>
-                  </select>
-                  <span className="mt-2 block text-xs text-muted-foreground">A Zunexi.ai mantém o visual premium escuro como experiência principal.</span>
-                </label>
+                <div>
+                  <span className="mb-3 block text-sm font-medium">Tema da interface</span>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <ThemeOption
+                      icon={Sun}
+                      title="Claro"
+                      description="Interface clara e limpa."
+                      selected={theme === "claro"}
+                      onClick={() => changeTheme("claro")}
+                    />
+                    <ThemeOption
+                      icon={Moon}
+                      title="Escuro"
+                      description="Visual premium original."
+                      selected={theme === "escuro"}
+                      onClick={() => changeTheme("escuro")}
+                    />
+                    <ThemeOption
+                      icon={Monitor}
+                      title="Sistema"
+                      description="Segue o tema do dispositivo."
+                      selected={theme === "sistema"}
+                      onClick={() => changeTheme("sistema")}
+                    />
+                  </div>
+                  <span className="mt-3 block text-xs text-muted-foreground">A mudança é aplicada na hora e fica salva neste dispositivo.</span>
+                </div>
               </section>
             )}
 
@@ -156,11 +178,11 @@ function Configuracoes() {
                   <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary/15 text-primary"><ShieldCheck className="h-5 w-5" /></div>
                   <div><h2 className="section-title text-xl">Segurança da sessão</h2><p className="mt-1 text-xs text-muted-foreground">Consulte seu acesso atual ou encerre a sessão neste dispositivo.</p></div>
                 </div>
-                <div className="rounded-xl border border-border bg-[#0a0e1a] p-4">
+                <div className="rounded-xl border border-border bg-secondary/45 p-4">
                   <div className="text-xs uppercase tracking-wider text-muted-foreground">Chave atual</div>
                   <div className="mt-2 font-mono text-sm tracking-wider">{maskedKey}</div>
                 </div>
-                <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/8 p-4 text-xs leading-relaxed text-amber-100/80">
+                <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/8 p-4 text-xs leading-relaxed text-amber-700 dark:text-amber-100/80">
                   Novas chaves continuam sendo criadas exclusivamente pelo administrador. Para trocar de acesso, encerre a sessão e entre com outra chave autorizada.
                 </div>
                 <button onClick={logout} className="secondary-button mt-4 w-full"><LogOut className="h-4 w-4" /> Encerrar sessão</button>
@@ -174,12 +196,12 @@ function Configuracoes() {
                   <div><h2 className="section-title text-xl">Notificações</h2><p className="mt-1 text-xs text-muted-foreground">Controle os avisos de conclusões, erros e salvamentos.</p></div>
                 </div>
 
-                <label className="flex items-center justify-between gap-4 rounded-xl border border-border bg-white/[0.02] p-4">
+                <label className="flex items-center justify-between gap-4 rounded-xl border border-border bg-card/55 p-4">
                   <div><div className="text-sm font-medium">Notificações do navegador</div><div className="mt-1 text-xs text-muted-foreground">Receba um aviso quando uma criação terminar, mesmo estando em outra aba.</div></div>
                   <input type="checkbox" checked={notificationsEnabled} onChange={(event) => setNotificationsEnabled(event.target.checked)} className="h-5 w-5 shrink-0 accent-purple-500" />
                 </label>
 
-                <div className="mt-4 flex flex-col gap-3 rounded-xl border border-border bg-[#0a0e1a] p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="mt-4 flex flex-col gap-3 rounded-xl border border-border bg-secondary/45 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="text-sm font-medium">Permissão do navegador</div>
                     <div className="mt-1 text-xs text-muted-foreground">
@@ -212,10 +234,30 @@ function SettingNav({ icon: Icon, label, active, onClick }: { icon: React.Compon
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium ${active ? "bg-gradient-to-r from-primary/25 to-accent/10 text-white" : "text-muted-foreground hover:bg-white/5 hover:text-white"}`}
+      className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium ${active ? "bg-gradient-to-r from-primary/25 to-accent/10 text-foreground" : "text-muted-foreground hover:bg-secondary/70 hover:text-foreground"}`}
     >
       <Icon className={`h-4 w-4 ${active ? "text-primary" : ""}`} />
       {label}
+    </button>
+  );
+}
+
+function ThemeOption({ icon: Icon, title, description, selected, onClick }: { icon: React.ComponentType<{ className?: string }>; title: string; description: string; selected: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      className={`group rounded-2xl border p-4 text-left transition ${selected ? "border-primary bg-primary/10 shadow-[0_12px_35px_rgba(109,75,255,0.10)]" : "border-border bg-card/50 hover:border-primary/35 hover:bg-secondary/60"}`}
+    >
+      <div className={`mb-3 grid h-10 w-10 place-items-center rounded-xl ${selected ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground group-hover:text-foreground"}`}>
+        <Icon className="h-5 w-5" />
+      </div>
+      <div className="text-sm font-semibold text-foreground">{title}</div>
+      <div className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</div>
+      <div className={`mt-3 text-[10px] font-semibold uppercase tracking-[0.16em] ${selected ? "text-primary" : "text-muted-foreground/70"}`}>
+        {selected ? "Selecionado" : "Selecionar"}
+      </div>
     </button>
   );
 }

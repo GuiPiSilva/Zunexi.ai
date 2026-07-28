@@ -87,7 +87,7 @@ function Biblioteca() {
           </div>
 
           <div className="flex flex-col gap-4 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-border bg-[#0a0e1a] px-3 py-2.5">
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-border bg-card/70 px-3 py-2.5">
               <Search className="h-4 w-4 text-muted-foreground" />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tab === "fontes" ? "Buscar fontes..." : "Buscar imagens..."} className="w-full bg-transparent text-sm outline-none" />
             </div>
