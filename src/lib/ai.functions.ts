@@ -176,8 +176,37 @@ function parseDataUrl(dataUrl: string): { mimeType: string; base64: string } {
   return { mimeType: match[1], base64: match[2] };
 }
 
+async function ensureImageStorageBucket(sb: ReturnType<typeof admin>): Promise<void> {
+  const { data: bucket, error: getError } = await sb.storage.getBucket(IMAGE_STORAGE_BUCKET);
+
+  if (bucket && !getError) return;
+
+  const notFound =
+    !bucket &&
+    (!getError ||
+      getError.message?.toLowerCase().includes("bucket not found") ||
+      getError.message?.toLowerCase().includes("not found"));
+
+  if (!notFound) {
+    throw new Error(`Falha ao verificar bucket do Supabase Storage: ${getError?.message || "erro desconhecido"}`);
+  }
+
+  const { error: createError } = await sb.storage.createBucket(IMAGE_STORAGE_BUCKET, {
+    public: true,
+    allowedMimeTypes: ["image/png", "image/jpeg", "image/webp"],
+  });
+
+  // Se duas gerações tentarem criar o bucket ao mesmo tempo, uma delas pode
+  // receber "already exists". Nesse caso, o bucket já está pronto e seguimos.
+  if (createError && !createError.message?.toLowerCase().includes("already exists")) {
+    throw new Error(`Falha ao criar bucket ${IMAGE_STORAGE_BUCKET}: ${createError.message}`);
+  }
+}
+
 async function uploadToSupabaseStorage(base64: string, mimeType: string, pathHint: string): Promise<string> {
   const sb = admin();
+  await ensureImageStorageBucket(sb);
+
   const ext = mimeType.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
   const path = `${pathHint}-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
   const bytes = Buffer.from(base64, "base64");
@@ -201,20 +230,28 @@ async function fetchAsBase64(url: string): Promise<{ mimeType: string; base64: s
   return { mimeType: contentType.split(";")[0], base64: buffer.toString("base64") };
 }
 
-function cloudflareSeed(value: string): number {
-  if (!value) return Math.floor(Math.random() * 2_147_483_647);
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
+function dimensionsForAspectRatio(aspectRatio: "1:1" | "4:5" | "9:16") {
+  // Dimensões dentro da faixa aceita pelo FLUX.2 e em múltiplos de 64,
+  // evitando rejeições do backend de inferência em formatos verticais.
+  if (aspectRatio === "4:5") return { width: 768, height: 960 };
+  if (aspectRatio === "9:16") return { width: 576, height: 1024 };
+  return { width: 1024, height: 1024 };
 }
 
-function dimensionsForAspectRatio(aspectRatio: "1:1" | "4:5" | "9:16") {
-  if (aspectRatio === "4:5") return { width: 1024, height: 1280 };
-  if (aspectRatio === "9:16") return { width: 720, height: 1280 };
-  return { width: 1024, height: 1024 };
+function cloudflareApiError(body: string): string {
+  try {
+    const json = JSON.parse(body) as {
+      errors?: { code?: number; message?: string }[];
+      messages?: { code?: number; message?: string }[];
+    };
+    const entries = [...(json.errors || []), ...(json.messages || [])]
+      .map((item) => `${item.code ? `[${item.code}] ` : ""}${item.message || ""}`.trim())
+      .filter(Boolean);
+    if (entries.length) return entries.join("; ").slice(0, 500);
+  } catch {
+    // A resposta pode não ser JSON; nesse caso usamos o texto bruto abaixo.
+  }
+  return body.trim().replace(/\s+/g, " ").slice(0, 500) || "sem detalhes adicionais";
 }
 
 function detectImageMimeType(base64: string): string {
@@ -230,7 +267,6 @@ async function callCloudflareImage(
   accountId: string,
   prompt: string,
   aspectRatio: "1:1" | "4:5" | "9:16",
-  seed: string,
   referenceImage?: { mimeType: string; base64: string },
 ): Promise<{ mimeType: string; base64: string }> {
   let lastError: Error | null = null;
@@ -246,7 +282,6 @@ async function callCloudflareImage(
       form.append("prompt", prompt);
       form.append("width", String(width));
       form.append("height", String(height));
-      form.append("seed", String(cloudflareSeed(seed)));
 
       if (referenceImage) {
         const bytes = new Uint8Array(Buffer.from(referenceImage.base64, "base64"));
@@ -263,25 +298,33 @@ async function callCloudflareImage(
 
       if (!response.ok) {
         const body = await response.text();
-        console.error("Cloudflare Workers AI error", response.status, `tentativa ${attempt}/${CLOUDFLARE_MAX_ATTEMPTS}`, body.slice(0, 700));
+        const detail = cloudflareApiError(body);
+        console.error(
+          "Cloudflare Workers AI error",
+          response.status,
+          `tentativa ${attempt}/${CLOUDFLARE_MAX_ATTEMPTS}`,
+          detail,
+        );
 
         if (response.status === 401 || response.status === 403) {
-          throw new Error("Token da Cloudflare inválido ou sem permissão para Workers AI.");
+          throw new Error(`Token/conta da Cloudflare sem acesso ao Workers AI: ${detail}`);
         }
         if (response.status === 429) {
-          lastError = new Error("Cota ou limite do Cloudflare Workers AI atingido no momento.");
+          lastError = new Error(`Cota ou limite do Cloudflare Workers AI atingido: ${detail}`);
           if (attempt < CLOUDFLARE_MAX_ATTEMPTS) {
             await sleep(CLOUDFLARE_BASE_DELAY_MS * 2 ** (attempt - 1));
             continue;
           }
-          throw new Error("Cota do Cloudflare Workers AI atingida. Tente novamente após a renovação da cota.");
+          throw lastError;
         }
         if (response.status >= 500 && attempt < CLOUDFLARE_MAX_ATTEMPTS) {
-          lastError = new Error(`Cloudflare Workers AI indisponível temporariamente (${response.status}).`);
+          lastError = new Error(`Cloudflare Workers AI indisponível temporariamente (${response.status}): ${detail}`);
           await sleep(CLOUDFLARE_BASE_DELAY_MS * attempt);
           continue;
         }
-        throw new Error(`Cloudflare Workers AI retornou um erro (${response.status}).`);
+        throw new Error(
+          `Cloudflare Workers AI rejeitou a requisição (${response.status}). Modelo: ${CLOUDFLARE_IMAGE_MODEL}. Detalhe: ${detail}`,
+        );
       }
 
       const responseType = response.headers.get("content-type") || "";
@@ -374,7 +417,7 @@ Unique variation seed: ${data.seed}.`;
 
     try {
       const referenceImage = data.referenceImageUrl ? await fetchAsBase64(data.referenceImageUrl) : undefined;
-      const { mimeType, base64 } = await callCloudflareImage(apiToken, accountId, fullPrompt, data.aspectRatio, data.seed, referenceImage);
+      const { mimeType, base64 } = await callCloudflareImage(apiToken, accountId, fullPrompt, data.aspectRatio, referenceImage);
       const url = await uploadToSupabaseStorage(base64, mimeType, "slide");
       return { dataUrl: `data:${mimeType};base64,${base64}`, url };
     } catch (error) {
@@ -397,7 +440,7 @@ export const testCloudflareConnection = createServerFn({ method: "POST" })
 
     const testPrompt = `Create a polished square Instagram advertising test card, 1:1, dark premium background with subtle electric blue and violet lighting, one futuristic abstract AI object as the visual hero, professional editorial composition, clean safe margins. Render exactly this short Portuguese text: "CLOUDFLARE OK". Do not add any other words, prices, logos, watermarks or contact details.`;
     try {
-      const { mimeType, base64 } = await callCloudflareImage(apiToken, accountId, testPrompt, "1:1", `test-${Date.now()}`);
+      const { mimeType, base64 } = await callCloudflareImage(apiToken, accountId, testPrompt, "1:1");
       return {
         ok: true,
         model: CLOUDFLARE_IMAGE_MODEL,
