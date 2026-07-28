@@ -6,7 +6,7 @@ import { AppShell } from "@/components/AppShell";
 import { addLibrary, loadFavFonts, loadLibrary, removeLibrary, toggleFavFont, type LibItem } from "@/lib/storage";
 
 export const Route = createFileRoute("/biblioteca")({
-  head: () => ({ meta: [{ title: "Biblioteca — InLabs.Ia Studios" }] }),
+  head: () => ({ meta: [{ title: "Biblioteca — Zunexi.ai" }] }),
   component: Biblioteca,
 });
 
