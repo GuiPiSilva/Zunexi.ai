@@ -149,7 +149,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-background text-foreground lg:flex">
       <aside className={`fixed inset-y-0 left-0 z-50 flex w-[264px] flex-col border-r border-sidebar-border bg-sidebar/95 shadow-2xl backdrop-blur-xl transition-transform lg:sticky lg:top-0 lg:h-screen ${open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
         <div className="flex h-[76px] items-center border-b border-sidebar-border px-4">
-          <img src={logoFull} alt="Zunexi.ai" className="brand-logo-full h-14 w-auto max-w-[225px] object-contain drop-shadow-[0_0_18px_rgba(99,102,241,.22)]" />
+          <img src={logoFull} alt="Zunexi.ai" className="brand-logo-full h-14 w-auto max-w-[225px] object-contain" />
         </div>
 
         <div className="px-4 pt-5">
