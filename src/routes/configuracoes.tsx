@@ -107,8 +107,8 @@ function Configuracoes() {
             {activeTab === "perfil" && (
               <section className="panel p-5 sm:p-6">
                 <div className="mb-6 flex items-center gap-3">
-                  <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-2xl border border-primary/25 bg-black p-2 shadow-[0_0_24px_rgba(139,92,246,0.15)]">
-                    <img src={logoIcon} alt="Zunexi.ai" className="h-full w-full object-contain" />
+                  <div className="brand-logo-tile grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-2xl border border-primary/25 p-2 shadow-[0_0_24px_rgba(139,92,246,0.15)]">
+                    <img src={logoIcon} alt="Zunexi.ai" className="brand-logo-icon h-full w-full object-contain" />
                   </div>
                   <div>
                     <h2 className="section-title text-xl">Informações do perfil</h2>
