@@ -199,38 +199,3 @@
 @media (min-width: 1024px) {
   .page-wrap { padding: 2rem 2.25rem 2.75rem; }
 }
-
-/* Zunexi Photoshop-style editor */
-.editor-option-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  height: 28px;
-  padding: 0 0.5rem;
-  border-radius: 3px;
-  color: #cfcfcf;
-  white-space: nowrap;
-}
-.editor-option-btn:hover { background: #343434; color: #fff; }
-.editor-option-btn:disabled { cursor: default; }
-.editor-route-action {
-  display: inline-flex;
-  height: 30px;
-  align-items: center;
-  gap: 0.35rem;
-  border-radius: 3px;
-  padding: 0 0.55rem;
-  color: #d0d0d0;
-  font-size: 11px;
-  white-space: nowrap;
-}
-.editor-route-action:hover { background: #363636; color: #fff; }
-.editor-menu-label {
-  display: inline-flex;
-  height: 26px;
-  align-items: center;
-  padding: 0 .42rem;
-  border-radius: 3px;
-  color: #c8c8c8;
-}
-.editor-menu-label:hover { background: #343434; color: #fff; }
