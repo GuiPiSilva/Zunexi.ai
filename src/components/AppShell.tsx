@@ -60,7 +60,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const notificationBox = useRef<HTMLDivElement | null>(null);
   const [ready, setReady] = useState(false);
   const [authed, setAuthed] = useState(false);
-  const [userName, setUserName] = useState("Usuário InLabs");
+  const [userName, setUserName] = useState("Usuário Zunexi.ai");
   const [open, setOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [notifications, setNotifications] = useState<InLabsNotification[]>([]);
