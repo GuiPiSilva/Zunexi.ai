@@ -142,11 +142,40 @@ Seed única: ${data.seed}-${Math.random().toString(36).slice(2)}`;
 // Endpoint padrão: FLUX.1-schnell, documentado pela NVIDIA para text-to-image.
 // ---------------------------------------------------------------------------
 
-const NVIDIA_IMAGE_MODEL = process.env.NVIDIA_IMAGE_MODEL || "black-forest-labs/flux.1-schnell";
-const NVIDIA_IMAGE_API_URL = process.env.NVIDIA_IMAGE_API_URL || "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-schnell";
-const NVIDIA_IMAGE_TIMEOUT_MS = Number(process.env.NVIDIA_IMAGE_TIMEOUT_MS || 120_000);
-const NVIDIA_MAX_ATTEMPTS = 3;
-const NVIDIA_BASE_DELAY_MS = 2_000;
+const NVIDIA_IMAGE_MODEL = process.env.NVIDIA_IMAGE_MODEL || "qwen/qwen-image";
+const NVIDIA_IMAGE_API_URL = (process.env.NVIDIA_IMAGE_API_URL || "").trim();
+const NVIDIA_IMAGE_TIMEOUT_MS = Number(process.env.NVIDIA_IMAGE_TIMEOUT_MS || 60_000);
+const NVIDIA_MAX_ATTEMPTS = 2;
+const NVIDIA_BASE_DELAY_MS = 1_500;
+
+// A NVIDIA Build usa integrate.api.nvidia.com para os modelos que possuem
+// Free Endpoint. Usamos um modelo de texto com Free Endpoint apenas para
+// validar a NVIDIA_API_KEY sem tentar gerar uma imagem pesada.
+const NVIDIA_KEY_TEST_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
+const NVIDIA_KEY_TEST_MODEL = "qwen/qwen3.5-397b-a17b";
+const NVIDIA_KEY_TEST_TIMEOUT_MS = 15_000;
+
+function configuredImageEndpoint(): string {
+  if (!NVIDIA_IMAGE_API_URL) {
+    throw new Error(
+      "NVIDIA_API_KEY detectada, mas NVIDIA_IMAGE_API_URL não está configurada. " +
+      "No NVIDIA Build, Qwen-Image e FLUX.1-schnell são modelos Downloadable, não Free Endpoint. " +
+      "Configure NVIDIA_IMAGE_API_URL somente depois de implantar um NIM/Partner Endpoint de imagem.",
+    );
+  }
+
+  // Este endereço foi usado anteriormente como se fosse um endpoint serverless
+  // público. O catálogo atual não oferece FLUX.1-schnell dessa forma. Falhamos
+  // imediatamente para não deixar a Function do Vercel presa até o timeout.
+  if (/^https:\/\/ai\.api\.nvidia\.com\/v1\/genai\/black-forest-labs\/flux\.1-schnell\/?$/i.test(NVIDIA_IMAGE_API_URL)) {
+    throw new Error(
+      "NVIDIA_IMAGE_API_URL aponta para o endereço antigo do FLUX.1-schnell. " +
+      "Esse modelo aparece como Downloadable no NVIDIA Build e precisa de um endpoint implantado.",
+    );
+  }
+
+  return NVIDIA_IMAGE_API_URL.replace(/\/$/, "");
+}
 const IMAGE_STORAGE_BUCKET = process.env.IMAGE_STORAGE_BUCKET || process.env.GEMINI_STORAGE_BUCKET || "generated-images";
 
 type ImageQuality = "fast" | "premium";
@@ -275,16 +304,18 @@ async function callNvidiaImage(
     const timeoutId = setTimeout(() => controller.abort(), NVIDIA_IMAGE_TIMEOUT_MS);
 
     try {
+      const imageEndpoint = configuredImageEndpoint();
+
       console.info("NVIDIA image request", {
         model: NVIDIA_IMAGE_MODEL,
-        endpoint: NVIDIA_IMAGE_API_URL,
+        endpoint: imageEndpoint,
         attempt,
         width,
         height,
         promptChars: requestPrompt.length,
       });
 
-      const response = await fetch(NVIDIA_IMAGE_API_URL, {
+      const response = await fetch(imageEndpoint, {
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -351,7 +382,7 @@ async function callNvidiaImage(
         throw new Error(`Sua NVIDIA API key não tem permissão para esse endpoint: ${detail}`);
       }
       if (/404|not found/i.test(detail)) {
-        throw new Error(`Endpoint NVIDIA não encontrado. Confira NVIDIA_IMAGE_API_URL: ${detail}`);
+        throw new Error(`Endpoint NVIDIA não encontrado. Confira NVIDIA_IMAGE_API_URL do NIM/Partner Endpoint: ${detail}`);
       }
 
       lastError = new Error(`Falha na NVIDIA API: ${detail}`);
@@ -489,20 +520,61 @@ export const testNvidiaConnection = createServerFn({ method: "POST" })
       return { ok: false, model, message: "NVIDIA_API_KEY não configurada no servidor." };
     }
 
-    const testPrompt = `Premium square AI technology campaign visual, deep black background, electric blue and violet luminous particles, one sculptural futuristic abstract object as hero, dramatic editorial lighting, realistic depth, elegant negative space. No text, letters, numbers, logos, watermark or UI.`;
+    // Valida a chave com um Free Endpoint leve. Isso evita gerar uma imagem só
+    // para testar a conexão e impede timeouts/payloads grandes no Vercel.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), NVIDIA_KEY_TEST_TIMEOUT_MS);
+
     try {
-      const { base64 } = await callNvidiaImage(apiToken, testPrompt, "1:1", `test-${Date.now()}`);
-      // O teste só confirma que a NVIDIA respondeu com bytes de imagem.
-      // Não serializamos a imagem em Base64 de volta ao navegador.
-      const bytes = Buffer.from(base64, "base64").length;
-      if (!bytes) throw new Error("A NVIDIA respondeu sem dados de imagem.");
+      const response = await fetch(NVIDIA_KEY_TEST_URL, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiToken}`,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: NVIDIA_KEY_TEST_MODEL,
+          messages: [{ role: "user", content: "Reply only OK" }],
+          max_tokens: 2,
+          temperature: 0,
+          stream: false,
+        }),
+      });
+
+      const raw = await response.text();
+      if (!response.ok) {
+        const detail = raw.replace(/\s+/g, " ").slice(0, 350);
+        return {
+          ok: false,
+          model,
+          message: `A NVIDIA respondeu ${response.status} ao validar a API key: ${detail || "sem detalhes"}`,
+        };
+      }
+
+      try {
+        configuredImageEndpoint();
+      } catch (error) {
+        const message = nvidiaErrorMessage(error);
+        return {
+          ok: false,
+          model,
+          message: `API key NVIDIA válida. Porém o gerador de imagem ainda não pode iniciar: ${message}`,
+        };
+      }
+
       return {
         ok: true,
         model,
-        message: `NVIDIA respondeu corretamente com ${model} (${Math.round(bytes / 1024)} KB gerados).`,
+        message: `API key NVIDIA válida e NVIDIA_IMAGE_API_URL configurada. Motor selecionado: ${model}.`,
       };
     } catch (error) {
-      const err = error as Error;
-      return { ok: false, model, message: err.message || "Falha desconhecida ao testar a NVIDIA API." };
+      const message = error instanceof Error && error.name === "AbortError"
+        ? "O teste da API key NVIDIA excedeu 15 segundos. Tente novamente."
+        : nvidiaErrorMessage(error);
+      return { ok: false, model, message };
+    } finally {
+      clearTimeout(timeoutId);
     }
   });
