@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -102,6 +102,17 @@ function NovoCarrossel() {
   const [progress, setProgress] = useState(0);
   const [savedProjectId, setSavedProjectId] = useState<string | null>(null);
   const [form, setForm] = useState<CarouselForm>(DEFAULT_FORM);
+  const cancelledJobsRef = useRef<Set<string>>(new Set());
+  const activeUiJobIdRef = useRef<string | null>(null);
+
+  function setActiveJob(jobId: string | null) {
+    activeUiJobIdRef.current = jobId;
+    setCurrentJobId(jobId);
+  }
+
+  function wasCancelled(jobId: string) {
+    return cancelledJobsRef.current.has(jobId);
+  }
 
   useEffect(() => {
     const key = getAccessKey();
@@ -146,7 +157,7 @@ function NovoCarrossel() {
       const latest = getPendingCreationJob("carrossel");
       if (!latest) return;
 
-      setCurrentJobId(latest.id);
+      setActiveJob(latest.id);
       setProgress(latest.progress);
       if (latest.result) setResult(latest.result as CarrosselOut);
       if (latest.projectId) setSavedProjectId(latest.projectId);
@@ -187,7 +198,7 @@ function NovoCarrossel() {
       let job = getCreationJob(initialJob.id, initialJob.ownerScope) || initialJob;
       const payload = job.payload as CarouselJobPayload;
 
-      setCurrentJobId(job.id);
+      setActiveJob(job.id);
       setStep(2);
       setBusy(true);
       setProgress(Math.max(10, job.progress));
@@ -209,6 +220,8 @@ function NovoCarrossel() {
           window.dispatchEvent(new CustomEvent("inlabs:credits-changed"));
         }
 
+        if (wasCancelled(job.id)) return;
+
         job = updateCreationJob(job.id, {
           result: output,
           status: "review",
@@ -220,17 +233,18 @@ function NovoCarrossel() {
         setStep(2);
         toast.success("Roteiro pronto. Revise os slides antes de criar as imagens.");
       } catch (error) {
+        if (wasCancelled(job.id)) return;
         window.dispatchEvent(new CustomEvent("inlabs:credits-changed"));
         const message = (error as Error).message || "Erro ao gerar o roteiro.";
         updateCreationJob(job.id, { status: "failed", error: message }, job.ownerScope);
         setStep(1);
         toast.error(message);
       } finally {
-        setBusy(false);
+        if (activeUiJobIdRef.current === job.id) setBusy(false);
       }
     });
 
-    if (!started) {
+    if (!started && activeUiJobIdRef.current === initialJob.id) {
       const current = getCreationJob(initialJob.id, initialJob.ownerScope);
       setBusy(current?.status === "queued" || current?.status === "running");
     }
@@ -249,7 +263,7 @@ function NovoCarrossel() {
         return;
       }
 
-      setCurrentJobId(job.id);
+      setActiveJob(job.id);
       setResult(output);
       setStep(3);
       setBusy(true);
@@ -264,6 +278,7 @@ function NovoCarrossel() {
         }
 
         for (let index = 0; index < output.slides.length; index += 1) {
+          if (wasCancelled(job.id)) return;
           const slide = output.slides[index];
           const existing = persistedAssets[String(slide.numero)];
           if (!existing) {
@@ -285,10 +300,12 @@ function NovoCarrossel() {
                   style: `${payload.form.estilo}; tom ${payload.form.tom}`,
                   imageQuality: payload.form.imageQuality || "premium",
                 } });
+                if (wasCancelled(job.id)) return;
                 break;
               } catch (error) {
                 lastImageError = error;
                 console.error(`Tentativa ${attempt} falhou no slide ${slide.numero}`, error);
+                if (wasCancelled(job.id)) return;
                 if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 1500));
               }
             }
@@ -310,6 +327,8 @@ function NovoCarrossel() {
           setProgress(nextProgress);
         }
 
+        if (wasCancelled(job.id)) return;
+
         let projectId = job.projectId;
         let finalPreviews: Record<number, string> | undefined;
         if (!projectId) {
@@ -322,7 +341,9 @@ function NovoCarrossel() {
             palette: payload.form.paleta,
             brand: payload.form.empresa,
             ownerScope: job.ownerScope,
+            isCancelled: () => wasCancelled(job.id),
           });
+          if (wasCancelled(job.id)) return;
           projectId = savedProject.projectId;
           finalPreviews = savedProject.previews;
         }
@@ -347,17 +368,18 @@ function NovoCarrossel() {
         }, job.ownerScope);
         toast.success("Imagens prontas com texto. Seu carrossel já pode ser visualizado e baixado.");
       } catch (error) {
+        if (wasCancelled(job.id)) return;
         window.dispatchEvent(new CustomEvent("inlabs:credits-changed"));
         const message = (error as Error).message || "Erro ao gerar as imagens do carrossel.";
         updateCreationJob(job.id, { status: "failed", error: message }, job.ownerScope);
         addNotification({ title: "Falha na criação", message, href: "/carrossel", kind: "error" }, job.ownerScope);
         toast.error(message);
       } finally {
-        setBusy(false);
+        if (activeUiJobIdRef.current === job.id) setBusy(false);
       }
     });
 
-    if (!started) {
+    if (!started && activeUiJobIdRef.current === initialJob.id) {
       const active = getCreationJob(initialJob.id, initialJob.ownerScope);
       setBusy(active?.status === "queued" || active?.status === "running");
     }
@@ -409,7 +431,7 @@ function NovoCarrossel() {
         details,
         accessKey,
       });
-      setCurrentJobId(job.id);
+      setActiveJob(job.id);
       await executeScriptJob(job);
     } catch (error) {
       const message = (error as Error).message || "Erro ao preparar o carrossel.";
@@ -442,6 +464,7 @@ function NovoCarrossel() {
     setBusy(true);
     try {
       for (const slide of result.slides) {
+        if (wasCancelled(current.id)) return;
         await save({ data: {
           generationId: result.id,
           slideNumero: slide.numero,
@@ -449,7 +472,9 @@ function NovoCarrossel() {
           texto: slide.texto,
           accessKey,
         } });
+        if (wasCancelled(current.id)) return;
       }
+      if (wasCancelled(current.id)) return;
       const updated = updateCreationJob(current.id, {
         result,
         status: "running",
@@ -460,9 +485,33 @@ function NovoCarrossel() {
       setProgress(25);
       await executeImageJob(updated);
     } catch (error) {
+      if (wasCancelled(current.id)) return;
       setBusy(false);
       toast.error((error as Error).message || "Não foi possível salvar o roteiro antes de gerar as imagens.");
     }
+  }
+
+  function cancelCreation() {
+    const jobId = activeUiJobIdRef.current || currentJobId;
+    if (jobId) {
+      cancelledJobsRef.current.add(jobId);
+      const job = getCreationJob(jobId);
+      if (job && (job.status === "queued" || job.status === "running" || job.status === "review")) {
+        updateCreationJob(job.id, {
+          status: "failed",
+          error: "Criação cancelada pelo usuário.",
+        }, job.ownerScope);
+      }
+    }
+
+    setActiveJob(null);
+    setBusy(false);
+    setStep(1);
+    setResult(null);
+    setAutoImages({});
+    setProgress(0);
+    setSavedProjectId(null);
+    toast.success("Criação cancelada. Você já pode criar outro carrossel.");
   }
 
   function resetFlow() {
@@ -473,7 +522,7 @@ function NovoCarrossel() {
       }
     }
     setStep(1);
-    setCurrentJobId(null);
+    setActiveJob(null);
     setBusy(false);
     setResult(null);
     setAutoImages({});
@@ -620,6 +669,7 @@ function NovoCarrossel() {
             onBack={() => setStep(1)}
             onContinue={() => setStep(3)}
             onSlideChange={updateGeneratedSlide}
+            onCancel={cancelCreation}
           />
         )}
 
@@ -631,6 +681,7 @@ function NovoCarrossel() {
             progress={progress}
             onBack={() => setStep(2)}
             onGenerate={startImageGeneration}
+            onCancel={cancelCreation}
           />
         )}
 
@@ -656,6 +707,7 @@ async function saveCarouselProject({
   palette,
   brand,
   ownerScope,
+  isCancelled,
 }: {
   output: CarrosselOut;
   assets: Record<number, { dataUrl?: string; url?: string }>;
@@ -665,6 +717,7 @@ async function saveCarouselProject({
   palette: string;
   brand?: string;
   ownerScope?: string;
+  isCancelled?: () => boolean;
 }): Promise<{ projectId: string; previews: Record<number, string> }> {
   const project = newProject("carrossel", name.trim() || "Novo carrossel", {
     theme: caption,
@@ -740,6 +793,7 @@ async function saveCarouselProject({
     };
   }));
 
+  if (isCancelled?.()) throw new Error("Criação cancelada pelo usuário.");
   upsertProject(project, ownerScope);
   return { projectId: project.id, previews };
 }
@@ -838,6 +892,7 @@ function ScriptStage({
   onBack,
   onContinue,
   onSlideChange,
+  onCancel,
 }: {
   data: CarrosselOut | null;
   busy: boolean;
@@ -845,6 +900,7 @@ function ScriptStage({
   onBack: () => void;
   onContinue: () => void;
   onSlideChange: (index: number, field: "titulo" | "texto", value: string) => void;
+  onCancel: () => void;
 }) {
   if (busy || !data) {
     return (
@@ -857,6 +913,7 @@ function ScriptStage({
             <p className="mt-2 text-sm text-muted-foreground">A Groq está estruturando os títulos, textos, legenda e direção visual de cada slide.</p>
             <div className="mt-5 flex items-center justify-between text-xs text-muted-foreground"><span>Gerando estrutura...</span><span>{Math.max(10, progress)}%</span></div>
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-secondary"><div className="h-full gradient-brand transition-all duration-500" style={{ width: `${Math.max(10, progress)}%` }} /></div>
+            <button type="button" onClick={onCancel} className="secondary-button mt-5 border-red-500/30 text-red-300 hover:bg-red-500/10 hover:text-red-200"><XCircle className="h-4 w-4" /> Cancelar criação</button>
           </div>
         </div>
       </div>
@@ -919,6 +976,7 @@ function ImagesStage({
   progress,
   onBack,
   onGenerate,
+  onCancel,
 }: {
   data: CarrosselOut | null;
   images: Record<number, string>;
@@ -926,6 +984,7 @@ function ImagesStage({
   progress: number;
   onBack: () => void;
   onGenerate: () => void;
+  onCancel: () => void;
 }) {
   if (!data) {
     return <div className="panel p-6 text-sm text-muted-foreground">Gere o roteiro antes de criar as imagens.</div>;
@@ -943,7 +1002,9 @@ function ImagesStage({
             <h2 className="section-title text-2xl">{busy ? "Gerando as artes do carrossel" : generated ? "Continue a geração das imagens" : "Pronto para criar as imagens"}</h2>
             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Cada slide será criado individualmente pela NVIDIA Build API usando FLUX.1-schnell. Você pode sair desta página; a criação é retomada ao voltar.</p>
           </div>
-          {!busy && (
+          {busy ? (
+            <button type="button" onClick={onCancel} className="secondary-button shrink-0 border-red-500/30 text-red-300 hover:bg-red-500/10 hover:text-red-200"><XCircle className="h-4 w-4" /> Cancelar criação</button>
+          ) : (
             <button type="button" onClick={onGenerate} className="primary-button shrink-0"><Sparkles className="h-4 w-4" /> {generated ? "Continuar geração" : `Gerar ${total} imagens`}</button>
           )}
         </div>
