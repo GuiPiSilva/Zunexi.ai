@@ -223,10 +223,9 @@ function compactImagePrompt(prompt: string): string {
   return `${head}\n\n[brief compacted]\n\n${tail}`;
 }
 
-function dimensionsForAspectRatio(aspectRatio: "1:1" | "4:5" | "9:16") {
-  // Resoluções suportadas pelo endpoint FLUX.1-schnell da NVIDIA.
-  if (aspectRatio === "4:5") return { width: 896, height: 1152 };
-  if (aspectRatio === "9:16") return { width: 768, height: 1344 };
+function dimensionsForAspectRatio(_aspectRatio: "1:1" | "4:5" | "9:16") {
+  // O endpoint hospedado FLUX.1-schnell documentado pela NVIDIA aceita 1024x1024.
+  // O recorte/proporção final (1:1, 4:5, 9:16) é feito pela composição do Zunexi.
   return { width: 1024, height: 1024 };
 }
 
@@ -432,7 +431,7 @@ function creativeProfile(data: z.infer<typeof ImageInput>) {
 
 export const generateImage = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => ImageInput.parse(d))
-  .handler(async ({ data }): Promise<{ dataUrl: string; url: string }> => {
+  .handler(async ({ data }): Promise<{ url: string }> => {
     const apiToken = process.env.NVIDIA_API_KEY;
     if (!apiToken) throw new Error("NVIDIA_API_KEY não configurada no servidor.");
 
@@ -471,7 +470,9 @@ Unique variation seed: ${data.seed}.`;
     try {
       const { mimeType, base64 } = await callNvidiaImage(apiToken, fullPrompt, data.aspectRatio, data.seed);
       const url = await uploadToSupabaseStorage(base64, mimeType, "slide");
-      return { dataUrl: `data:${mimeType};base64,${base64}`, url };
+      // Não devolva Base64 pela função do Vercel: respostas grandes podem ultrapassar
+      // o limite de payload. O arquivo já está salvo no Supabase; devolvemos só a URL.
+      return { url };
     } catch (error) {
       const err = error as Error;
       if (err.message) throw err;
@@ -481,7 +482,7 @@ Unique variation seed: ${data.seed}.`;
 
 export const testNvidiaConnection = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ imageQuality: z.enum(["fast", "premium"]).optional().default("premium") }).parse(d ?? {}))
-  .handler(async ({ data }): Promise<{ ok: boolean; message: string; model: string; dataUrl?: string }> => {
+  .handler(async ({ data }): Promise<{ ok: boolean; message: string; model: string }> => {
     const apiToken = process.env.NVIDIA_API_KEY;
     const model = imageModelFor(data.imageQuality);
     if (!apiToken) {
@@ -490,12 +491,15 @@ export const testNvidiaConnection = createServerFn({ method: "POST" })
 
     const testPrompt = `Premium square AI technology campaign visual, deep black background, electric blue and violet luminous particles, one sculptural futuristic abstract object as hero, dramatic editorial lighting, realistic depth, elegant negative space. No text, letters, numbers, logos, watermark or UI.`;
     try {
-      const { mimeType, base64 } = await callNvidiaImage(apiToken, testPrompt, "1:1", `test-${Date.now()}`);
+      const { base64 } = await callNvidiaImage(apiToken, testPrompt, "1:1", `test-${Date.now()}`);
+      // O teste só confirma que a NVIDIA respondeu com bytes de imagem.
+      // Não serializamos a imagem em Base64 de volta ao navegador.
+      const bytes = Buffer.from(base64, "base64").length;
+      if (!bytes) throw new Error("A NVIDIA respondeu sem dados de imagem.");
       return {
         ok: true,
         model,
-        message: `NVIDIA Build API conectada e gerando imagens com ${model}.`,
-        dataUrl: `data:${mimeType};base64,${base64}`,
+        message: `NVIDIA respondeu corretamente com ${model} (${Math.round(bytes / 1024)} KB gerados).`,
       };
     } catch (error) {
       const err = error as Error;
