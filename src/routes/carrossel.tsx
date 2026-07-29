@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
-import { generateImage, testHuggingFaceConnection } from "@/lib/ai.functions";
+import { generateImage, testNvidiaConnection } from "@/lib/ai.functions";
 import { generateInstagramContent, testGroqConnection, updateSlide, type CarrosselOut } from "@/lib/groq.functions";
 import { getAccessKey } from "@/lib/session";
 import { newProject, upsertProject } from "@/lib/storage";
@@ -87,7 +87,7 @@ function NovoCarrossel() {
   const save = useServerFn(updateSlide);
   const test = useServerFn(testGroqConnection);
   const generateImageFn = useServerFn(generateImage);
-  const testHuggingFace = useServerFn(testHuggingFaceConnection);
+  const testNvidia = useServerFn(testNvidiaConnection);
 
   const [accessKey, setAccessKey] = useState<string | null>(null);
   const [step, setStep] = useState<CarouselStep>(1);
@@ -521,11 +521,11 @@ function NovoCarrossel() {
     setImageEngineTesting(true);
     setImageEngineTestResult(null);
     try {
-      const response = await testHuggingFace({ data: { imageQuality: form.imageQuality } });
+      const response = await testNvidia({ data: { imageQuality: form.imageQuality } });
       setImageEngineTestResult(response);
-      response.ok ? toast.success("Hugging Face conectado e funcionando.") : toast.error(response.message);
+      response.ok ? toast.success("NVIDIA Build API conectada e funcionando.") : toast.error(response.message);
     } catch (error) {
-      const message = (error as Error).message || "Falha ao testar o Hugging Face.";
+      const message = (error as Error).message || "Falha ao testar a NVIDIA API.";
       setImageEngineTestResult({ ok: false, message });
       toast.error(message);
     } finally {
@@ -567,7 +567,7 @@ function NovoCarrossel() {
                   <Field label="Quantidade de slides"><select value={form.quantidadeSlides} onChange={(e) => setForm({ ...form, quantidadeSlides: Number(e.target.value) })} className="app-input">{Array.from({ length: 20 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value} slides</option>)}</select></Field>
                   <Field label="Estilo visual"><select value={form.estilo} onChange={(e) => setForm({ ...form, estilo: e.target.value })} className="app-input"><option>publicidade premium</option><option>food commercial</option><option>cinematográfico</option><option>luxury campaign</option><option>editorial</option><option>minimalista e premium</option><option>tech campaign</option><option>3D publicitário</option><option>corporativo</option><option>vibrante</option></select></Field>
                   <Field label="Paleta de cores"><input value={form.paleta} onChange={(e) => setForm({ ...form, paleta: e.target.value })} className="app-input" /></Field>
-                  <Field label="Motor de imagem"><div className="app-input flex items-center">Qwen/Qwen-Image</div></Field>
+                  <Field label="Motor de imagem"><div className="app-input flex items-center">FLUX.1-schnell · NVIDIA Build</div></Field>
                 </div>
 
                 <Field label="CTA — chamada para ação"><input value={form.cta} onChange={(e) => setForm({ ...form, cta: e.target.value })} placeholder="Ex.: Experimente grátis a Zunexi.ai" className="app-input" /></Field>
@@ -577,7 +577,7 @@ function NovoCarrossel() {
                   <div className="rounded-xl border border-border bg-white/[0.02] p-4">
                     <div className="text-sm font-medium">Temporariamente desativada</div>
                     <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                      Nesta versão o Qwen-Image é usado apenas para gerar o visual a partir do prompt. O upload de referência volta quando ativarmos um modelo/endpoint compatível com edição de imagem.
+                      Nesta versão a NVIDIA Build API gera o visual a partir do prompt. O upload de referência continua desativado até ativarmos um endpoint compatível com edição de imagem.
                     </p>
                   </div>
                 </Field>
@@ -603,11 +603,11 @@ function NovoCarrossel() {
               </div>
 
               <div className="panel p-5">
-                <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Teste Hugging Face</h2><p className="mt-1 text-xs text-muted-foreground">Valida o HF_TOKEN e o modelo Qwen/Qwen-Image.</p></div><ImageIcon className="h-5 w-5 text-primary" /></div>
-                <button type="button" onClick={runImageEngineTest} disabled={imageEngineTesting} className="secondary-button w-full disabled:opacity-60">{imageEngineTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />} {imageEngineTesting ? "Testando..." : "Testar Hugging Face"}</button>
-                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">O teste gera uma imagem curta para validar o HF_TOKEN e a disponibilidade do Qwen-Image.</p>
+                <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Teste NVIDIA Build API</h2><p className="mt-1 text-xs text-muted-foreground">Valida a NVIDIA_API_KEY e o endpoint de geração de imagem.</p></div><ImageIcon className="h-5 w-5 text-primary" /></div>
+                <button type="button" onClick={runImageEngineTest} disabled={imageEngineTesting} className="secondary-button w-full disabled:opacity-60">{imageEngineTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />} {imageEngineTesting ? "Testando..." : "Testar NVIDIA API"}</button>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">O teste gera uma imagem curta para validar a NVIDIA_API_KEY e o endpoint hospedado da NVIDIA.</p>
                 {imageEngineTestResult && <div className={`mt-3 rounded-xl border p-3 text-xs ${imageEngineTestResult.ok ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-200" : "border-red-500/25 bg-red-500/8 text-red-200"}`}><div className="flex items-start gap-2">{imageEngineTestResult.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{imageEngineTestResult.message}</span></div>{imageEngineTestResult.model && <div className="mt-2 opacity-80">Modelo: {imageEngineTestResult.model}</div>}</div>}
-                {imageEngineTestResult?.dataUrl && <img src={imageEngineTestResult.dataUrl} alt="Imagem do teste Hugging Face" className="mt-3 aspect-square w-full rounded-xl border border-border object-cover" />}
+                {imageEngineTestResult?.dataUrl && <img src={imageEngineTestResult.dataUrl} alt="Imagem do teste NVIDIA" className="mt-3 aspect-square w-full rounded-xl border border-border object-cover" />}
               </div>
             </aside>
           </div>
@@ -942,7 +942,7 @@ function ImagesStage({
           <div>
             <div className="eyebrow mb-2">Etapa 3 de 4 · imagens</div>
             <h2 className="section-title text-2xl">{busy ? "Gerando as artes do carrossel" : generated ? "Continue a geração das imagens" : "Pronto para criar as imagens"}</h2>
-            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Cada slide será criado individualmente pelo Qwen/Qwen-Image via Hugging Face. Você pode sair desta página; a criação é retomada ao voltar.</p>
+            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Cada slide será criado individualmente pela NVIDIA Build API usando FLUX.1-schnell. Você pode sair desta página; a criação é retomada ao voltar.</p>
           </div>
           {!busy && (
             <button type="button" onClick={onGenerate} className="primary-button shrink-0"><Sparkles className="h-4 w-4" /> {generated ? "Continuar geração" : `Gerar ${total} imagens`}</button>
