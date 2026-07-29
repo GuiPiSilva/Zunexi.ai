@@ -96,7 +96,7 @@ function NovoCarrossel() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [imageEngineTesting, setImageEngineTesting] = useState(false);
-  const [imageEngineTestResult, setImageEngineTestResult] = useState<{ ok: boolean; message: string; model?: string; dataUrl?: string } | null>(null);
+  const [imageEngineTestResult, setImageEngineTestResult] = useState<{ ok: boolean; message: string; model?: string } | null>(null);
   const [result, setResult] = useState<CarrosselOut | null>(null);
   const [autoImages, setAutoImages] = useState<Record<number, string>>({});
   const [progress, setProgress] = useState(0);
@@ -299,8 +299,8 @@ function NovoCarrossel() {
             }
 
             persistedAssets[String(slide.numero)] = { url: image.url };
-            projectAssets[slide.numero] = { dataUrl: image.dataUrl, url: image.url };
-            setAutoImages((current) => ({ ...current, [slide.numero]: image.dataUrl }));
+            projectAssets[slide.numero] = { url: image.url };
+            setAutoImages((current) => ({ ...current, [slide.numero]: image.url }));
           } else {
             projectAssets[slide.numero] = { url: existing.url };
           }
@@ -605,9 +605,8 @@ function NovoCarrossel() {
               <div className="panel p-5">
                 <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Teste NVIDIA Build API</h2><p className="mt-1 text-xs text-muted-foreground">Valida a NVIDIA_API_KEY e o endpoint de geração de imagem.</p></div><ImageIcon className="h-5 w-5 text-primary" /></div>
                 <button type="button" onClick={runImageEngineTest} disabled={imageEngineTesting} className="secondary-button w-full disabled:opacity-60">{imageEngineTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />} {imageEngineTesting ? "Testando..." : "Testar NVIDIA API"}</button>
-                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">O teste gera uma imagem curta para validar a NVIDIA_API_KEY e o endpoint hospedado da NVIDIA.</p>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">O teste faz uma geração pequena no servidor e devolve somente o status, evitando enviar Base64 pesado pelo Vercel.</p>
                 {imageEngineTestResult && <div className={`mt-3 rounded-xl border p-3 text-xs ${imageEngineTestResult.ok ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-200" : "border-red-500/25 bg-red-500/8 text-red-200"}`}><div className="flex items-start gap-2">{imageEngineTestResult.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{imageEngineTestResult.message}</span></div>{imageEngineTestResult.model && <div className="mt-2 opacity-80">Modelo: {imageEngineTestResult.model}</div>}</div>}
-                {imageEngineTestResult?.dataUrl && <img src={imageEngineTestResult.dataUrl} alt="Imagem do teste NVIDIA" className="mt-3 aspect-square w-full rounded-xl border border-border object-cover" />}
               </div>
             </aside>
           </div>
