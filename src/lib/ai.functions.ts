@@ -148,11 +148,10 @@ const NVIDIA_IMAGE_TIMEOUT_MS = Number(process.env.NVIDIA_IMAGE_TIMEOUT_MS || 60
 const NVIDIA_MAX_ATTEMPTS = 2;
 const NVIDIA_BASE_DELAY_MS = 1_500;
 
-// A NVIDIA Build usa integrate.api.nvidia.com para os modelos que possuem
-// Free Endpoint. Usamos um modelo de texto com Free Endpoint apenas para
-// validar a NVIDIA_API_KEY sem tentar gerar uma imagem pesada.
-const NVIDIA_KEY_TEST_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
-const NVIDIA_KEY_TEST_MODEL = "qwen/qwen3.5-397b-a17b";
+// Validação da NVIDIA_API_KEY sem depender de um modelo específico.
+// A API hospedada da NVIDIA expõe GET /v1/models; isso evita que o teste
+// quebre quando um modelo de texto é descontinuado.
+const NVIDIA_KEY_TEST_URL = "https://integrate.api.nvidia.com/v1/models";
 const NVIDIA_KEY_TEST_TIMEOUT_MS = 15_000;
 
 function configuredImageEndpoint(): string {
@@ -520,27 +519,19 @@ export const testNvidiaConnection = createServerFn({ method: "POST" })
       return { ok: false, model, message: "NVIDIA_API_KEY não configurada no servidor." };
     }
 
-    // Valida a chave com um Free Endpoint leve. Isso evita gerar uma imagem só
-    // para testar a conexão e impede timeouts/payloads grandes no Vercel.
+    // Valida a chave listando os modelos hospedados disponíveis.
+    // Não fazemos inferência e não dependemos de nenhum modelo individual.
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), NVIDIA_KEY_TEST_TIMEOUT_MS);
 
     try {
       const response = await fetch(NVIDIA_KEY_TEST_URL, {
-        method: "POST",
+        method: "GET",
         headers: {
           Accept: "application/json",
-          "Content-Type": "application/json",
           Authorization: `Bearer ${apiToken}`,
         },
         signal: controller.signal,
-        body: JSON.stringify({
-          model: NVIDIA_KEY_TEST_MODEL,
-          messages: [{ role: "user", content: "Reply only OK" }],
-          max_tokens: 2,
-          temperature: 0,
-          stream: false,
-        }),
       });
 
       const raw = await response.text();
@@ -553,6 +544,14 @@ export const testNvidiaConnection = createServerFn({ method: "POST" })
         };
       }
 
+      let hostedModelCount: number | null = null;
+      try {
+        const parsed = JSON.parse(raw) as { data?: unknown[] };
+        if (Array.isArray(parsed.data)) hostedModelCount = parsed.data.length;
+      } catch {
+        // A chave já foi validada pelo status 2xx; a contagem é apenas informativa.
+      }
+
       try {
         configuredImageEndpoint();
       } catch (error) {
@@ -560,14 +559,14 @@ export const testNvidiaConnection = createServerFn({ method: "POST" })
         return {
           ok: false,
           model,
-          message: `API key NVIDIA válida. Porém o gerador de imagem ainda não pode iniciar: ${message}`,
+          message: `API key NVIDIA válida${hostedModelCount !== null ? ` (${hostedModelCount} modelos hospedados visíveis)` : ""}. Porém o gerador de imagem ainda não pode iniciar: ${message}`,
         };
       }
 
       return {
         ok: true,
         model,
-        message: `API key NVIDIA válida e NVIDIA_IMAGE_API_URL configurada. Motor selecionado: ${model}.`,
+        message: `API key NVIDIA válida${hostedModelCount !== null ? ` (${hostedModelCount} modelos hospedados visíveis)` : ""} e NVIDIA_IMAGE_API_URL configurada. Motor selecionado: ${model}.`,
       };
     } catch (error) {
       const message = error instanceof Error && error.name === "AbortError"
