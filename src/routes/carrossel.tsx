@@ -652,9 +652,9 @@ function NovoCarrossel() {
               </div>
 
               <div className="panel p-5">
-                <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Teste NVIDIA Build API</h2><p className="mt-1 text-xs text-muted-foreground">Valida a NVIDIA_API_KEY e o endpoint de geração de imagem.</p></div><ImageIcon className="h-5 w-5 text-primary" /></div>
+                <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Teste NVIDIA Build API</h2><p className="mt-1 text-xs text-muted-foreground">Valida a NVIDIA_API_KEY sem iniciar uma geração pesada e informa se o endpoint de imagem está configurado.</p></div><ImageIcon className="h-5 w-5 text-primary" /></div>
                 <button type="button" onClick={runImageEngineTest} disabled={imageEngineTesting} className="secondary-button w-full disabled:opacity-60">{imageEngineTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />} {imageEngineTesting ? "Testando..." : "Testar NVIDIA API"}</button>
-                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">O teste faz uma geração pequena no servidor e devolve somente o status, evitando enviar Base64 pesado pelo Vercel.</p>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">O teste usa um Free Endpoint leve apenas para validar a chave. Qwen-Image/FLUX precisam de um NIM ou Partner Endpoint implantado para gerar imagens.</p>
                 {imageEngineTestResult && <div className={`mt-3 rounded-xl border p-3 text-xs ${imageEngineTestResult.ok ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-200" : "border-red-500/25 bg-red-500/8 text-red-200"}`}><div className="flex items-start gap-2">{imageEngineTestResult.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{imageEngineTestResult.message}</span></div>{imageEngineTestResult.model && <div className="mt-2 opacity-80">Modelo: {imageEngineTestResult.model}</div>}</div>}
               </div>
             </aside>
