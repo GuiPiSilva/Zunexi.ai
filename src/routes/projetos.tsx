@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
-import { deleteProject, duplicateProject, loadProjects, subscribeProjects, type Project } from "@/lib/storage";
+import { deleteProject, duplicateProject, loadProjects, subscribeProjects, upsertProject, type Project } from "@/lib/storage";
 
 export const Route = createFileRoute("/projetos")({
   head: () => ({ meta: [{ title: "Meus projetos — Zunexi.ai" }] }),
@@ -110,11 +110,11 @@ function MeusProjetos() {
 
                 <div className="p-4">
                   <h2 className="truncate font-semibold">{project.name}</h2>
-                  <p className="mt-1 text-xs text-muted-foreground">Editado em {new Date(project.updatedAt).toLocaleDateString("pt-BR")} · {project.slides.length} {project.slides.length === 1 ? "página" : "páginas"}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Atualizado em {new Date(project.updatedAt).toLocaleDateString("pt-BR")} · {project.slides.length} {project.slides.length === 1 ? "página" : "páginas"}</p>
                   <div className="mt-4 grid grid-cols-4 gap-2 border-t border-border pt-4">
                     <ProjectAction label="Abrir" icon={ExternalLink} onClick={() => nav({ to: "/editor/$id", params: { id: project.id } })} />
                     <ProjectAction label="Duplicar" icon={Copy} onClick={() => { if (duplicateProject(project.id)) { toast.success("Projeto duplicado."); refresh(); } }} />
-                    <ProjectAction label="Renomear" icon={Pencil} onClick={() => nav({ to: "/editor/$id", params: { id: project.id } })} />
+                    <ProjectAction label="Renomear" icon={Pencil} onClick={() => { const nextName = prompt("Novo nome do projeto:", project.name)?.trim(); if (nextName && nextName !== project.name) { upsertProject({ ...project, name: nextName }); toast.success("Projeto renomeado."); refresh(); } }} />
                     <ProjectAction danger label="Excluir" icon={Trash2} onClick={() => { if (confirm(`Excluir “${project.name}”?`)) { deleteProject(project.id); refresh(); toast.success("Projeto excluído."); } }} />
                   </div>
                 </div>

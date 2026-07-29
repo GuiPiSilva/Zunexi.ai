@@ -11,7 +11,6 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Toaster } from "sonner";
 
 import appCss from "../styles.css?url";
-import { reportLovableError } from "../lib/lovable-error-reporting";
 import { subscribeTheme, type ThemePreference } from "../lib/theme";
 
 const THEME_INIT_SCRIPT = `(() => {
@@ -57,9 +56,6 @@ function isDynamicImportError(error: Error) {
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   const router = useRouter();
   const chunkLoadError = isDynamicImportError(error);
-  useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
-  }, [error]);
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
@@ -91,9 +87,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Zunexi.ai— Estúdio criativo de conteúdo para Instagram" },
-      { name: "description", content: "Crie carrosséis e cartazes para Instagram com editor visual e IA, com layouts sempre diferentes." },
+      { name: "description", content: "Crie carrosséis e cartazes para Instagram com IA, texto aplicado e layouts sempre diferentes." },
       { property: "og:title", content: "Zunexi.ai" },
-      { property: "og:description", content: "Editor visual + IA para conteúdo de Instagram." },
+      { property: "og:description", content: "IA para criar artes prontas para Instagram." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],

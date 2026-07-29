@@ -1,33 +1,15 @@
 import { createFileRoute, Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  ArrowLeft,
-  Check,
-  Copy,
-  Download,
-  FolderHeart,
-  Images,
-  Plus,
-  Save,
-  Sparkles,
-  Layers3,
-  Trash2,
-} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Copy, Download, Images, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
-import { Editor, type EditorHandle } from "@/components/Editor";
-import {
-  addLibrary,
-  duplicateProject,
-  getProject,
-  upsertProject,
-  type Project,
-  type Slide,
-} from "@/lib/storage";
+import { renderElementsThumbnail } from "@/lib/fabric-elements";
+import { duplicateProject, getProject, type Project } from "@/lib/storage";
+import type { ElementDesc } from "@/lib/layouts";
 
 export const Route = createFileRoute("/editor/$id")({
-  head: () => ({ meta: [{ title: "Editor visual — Zunexi.ai" }] }),
-  component: EditorPage,
+  head: () => ({ meta: [{ title: "Arte pronta — Zunexi.ai" }] }),
+  component: ProjectPreviewPage,
 });
 
 function safeFileName(value: string) {
@@ -36,7 +18,7 @@ function safeFileName(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-zA-Z0-9-_]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .toLowerCase() || "projeto";
+    .toLowerCase() || "zunexi";
 }
 
 function downloadDataUrl(dataUrl: string, filename: string) {
@@ -46,13 +28,34 @@ function downloadDataUrl(dataUrl: string, filename: string) {
   anchor.click();
 }
 
-function EditorPage() {
+type GeneratedCanvas = {
+  elements?: ElementDesc[];
+  background?: string;
+};
+
+async function renderFinalSlide(slide: Project["slides"][number]) {
+  const canvasData = (slide.canvas || {}) as GeneratedCanvas;
+  if (Array.isArray(canvasData.elements) && canvasData.elements.length > 0) {
+    return renderElementsThumbnail({
+      elements: canvasData.elements,
+      background: canvasData.background || "#050505",
+      width: slide.width,
+      height: slide.height,
+      maxDimension: Math.max(slide.width, slide.height),
+      format: "png",
+      quality: 1,
+    });
+  }
+  return slide.thumb;
+}
+
+function ProjectPreviewPage() {
   const { id } = useParams({ from: "/editor/$id" });
   const nav = useNavigate();
-  const editorRef = useRef<EditorHandle>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [active, setActive] = useState(0);
-  const [saved, setSaved] = useState(true);
+  const [preview, setPreview] = useState<string | undefined>();
+  const [rendering, setRendering] = useState(false);
   const [exportingAll, setExportingAll] = useState(false);
 
   useEffect(() => {
@@ -66,285 +69,146 @@ function EditorPage() {
   }, [id, nav]);
 
   const slide = project?.slides[active];
-  const editorKey = useMemo(() => `${id}-${active}`, [active, id]);
+  const canvasData = useMemo(() => (slide?.canvas || {}) as GeneratedCanvas, [slide]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function renderFinal() {
+      if (!slide) return;
+      setRendering(true);
+      try {
+        const image = await renderFinalSlide(slide);
+        if (!cancelled) setPreview(image || slide.thumb);
+      } catch (error) {
+        console.error("Falha ao montar arte final", error);
+        if (!cancelled) setPreview(slide.thumb);
+      } finally {
+        if (!cancelled) setRendering(false);
+      }
+    }
+    void renderFinal();
+    return () => { cancelled = true; };
+  }, [canvasData, slide]);
 
   if (!project || !slide) {
     return (
       <AppShell>
         <div className="grid min-h-[60vh] place-items-center text-sm text-muted-foreground">
-          Carregando editor...
+          <Loader2 className="h-5 w-5 animate-spin" />
         </div>
       </AppShell>
     );
   }
 
-  function commit(next: Project) {
-    setProject(next);
-    upsertProject(next);
-    setSaved(true);
-  }
-
-  function updateSlide(canvas: unknown, thumb: string) {
-    const slides = project.slides.slice();
-    slides[active] = { ...slides[active], canvas, thumb };
-    setSaved(false);
-    commit({ ...project, slides });
-  }
-
-  function addSlide() {
-    const base: Slide = {
-      id: crypto.randomUUID(),
-      width: slide.width,
-      height: slide.height,
-      canvas: { elements: [], background: "#111424" },
-    };
-    const next = { ...project, slides: [...project.slides, base] };
-    commit(next);
-    setActive(next.slides.length - 1);
-  }
-
-  function duplicateSlide() {
-    const copy: Slide = {
-      ...slide,
-      id: crypto.randomUUID(),
-      canvas: JSON.parse(JSON.stringify(slide.canvas)),
-    };
-    const slides = [...project.slides];
-    slides.splice(active + 1, 0, copy);
-    commit({ ...project, slides });
-    setActive(active + 1);
-    toast.success("Página duplicada.");
-  }
-
-  function deleteSlide() {
-    if (project.slides.length <= 1) {
-      toast.error("O projeto precisa ter pelo menos uma página.");
+  function downloadCurrent() {
+    const source = preview || slide.thumb;
+    if (!source) {
+      toast.error("A arte ainda não ficou pronta para download.");
       return;
     }
-    const slides = project.slides.filter((_, index) => index !== active);
-    commit({ ...project, slides });
-    setActive(Math.max(0, active - 1));
-    toast.success("Página excluída.");
+    downloadDataUrl(source, `${safeFileName(project.name)}-${String(active + 1).padStart(2, "0")}.png`);
   }
 
-  function exportCurrent(multiplier = 1) {
-    const filename = `${safeFileName(project.name)}-${String(active + 1).padStart(2, "0")}.png`;
-    const result = editorRef.current?.exportPng(filename, multiplier);
-    if (!result) toast.error("Não foi possível exportar esta página.");
-  }
-
-  async function exportCurrentPsd() {
-    const filename = `${safeFileName(project.name)}-${String(active + 1).padStart(2, "0")}.psd`;
-    try {
-      const result = await editorRef.current?.exportPsd(filename);
-      if (!result) toast.error("Não foi possível exportar o PSD desta página.");
-      else toast.success("PSD gerado com as camadas do editor.");
-    } catch (error) {
-      console.error("Falha ao exportar PSD", error);
-      toast.error("Não foi possível gerar o PSD.");
-    }
-  }
-
-  async function exportAll() {
-    if (exportingAll) return;
+  async function downloadAll() {
+    if (project.slides.length < 2 || exportingAll) return;
     setExportingAll(true);
-    toast.info("Baixando todas as páginas...");
-
     try {
+      let exported = 0;
       for (let index = 0; index < project.slides.length; index += 1) {
         const item = project.slides[index];
-        if (!item.thumb) continue;
-        downloadDataUrl(
-          item.thumb,
-          `${safeFileName(project.name)}-${String(index + 1).padStart(2, "0")}.png`,
-        );
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        const source = await renderFinalSlide(item);
+        if (!source) continue;
+        downloadDataUrl(source, `${safeFileName(project.name)}-${String(index + 1).padStart(2, "0")}.png`);
+        exported += 1;
+        await new Promise((resolve) => setTimeout(resolve, 180));
       }
-      toast.success("Download das páginas iniciado.");
+      if (exported === project.slides.length) toast.success(`${exported} artes preparadas para download.`);
+      else toast.warning(`${exported} de ${project.slides.length} artes puderam ser preparadas.`);
+    } catch (error) {
+      console.error("Falha ao exportar carrossel", error);
+      toast.error("Não foi possível preparar todas as artes para download.");
     } finally {
       setExportingAll(false);
     }
   }
 
-  function saveToLibrary() {
-    const dataUrl = editorRef.current?.getDataUrl(1) || slide.thumb;
-    if (!dataUrl) {
-      toast.error("Não foi possível salvar esta arte na biblioteca.");
-      return;
-    }
-    addLibrary({
-      id: crypto.randomUUID(),
-      url: dataUrl,
-      name: `${project.name} — página ${active + 1}`,
-      addedAt: Date.now(),
-    });
-    toast.success("Arte salva na biblioteca.");
-  }
-
-  function duplicateWholeProject() {
+  async function duplicateWholeProject() {
     const copy = duplicateProject(project.id);
     if (!copy) {
       toast.error("Não foi possível duplicar o projeto.");
       return;
     }
-    toast.success("Nova versão criada.");
+    toast.success("Projeto duplicado.");
     nav({ to: "/editor/$id", params: { id: copy.id } });
-  }
-
-  async function copyCaption() {
-    const caption = project.meta?.theme?.trim();
-    if (!caption) {
-      toast.error("Este projeto ainda não possui uma legenda salva.");
-      return;
-    }
-    await navigator.clipboard.writeText(caption);
-    toast.success("Legenda copiada.");
   }
 
   return (
     <AppShell>
-      <div className="flex h-[calc(100dvh-76px)] min-h-0 flex-col overflow-hidden bg-[#1b1b1b]">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-[#343434] bg-[#202020] px-2 sm:px-3">
-          <Link
-            to="/projetos"
-            title="Voltar aos projetos"
-            className="grid h-8 w-8 place-items-center rounded-[3px] text-[#bdbdbd] hover:bg-[#353535] hover:text-white"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-
-          <div className="min-w-0 flex-1 border-l border-[#3b3b3b] pl-3">
-            <div className="text-[9px] uppercase tracking-[.17em] text-[#8f8f8f]">{project.type}</div>
-            <input
-              value={project.name}
-              onChange={(event) => {
-                setSaved(false);
-                setProject({ ...project, name: event.target.value });
-              }}
-              onBlur={() => commit(project)}
-              className="w-full truncate bg-transparent text-[12px] font-semibold text-[#f1f1f1] outline-none sm:text-[13px]"
-            />
+      <div className="mx-auto w-full max-w-7xl space-y-5 p-4 sm:p-6">
+        <section className="panel flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <Link to="/projetos" className="secondary-button px-3" title="Voltar aos projetos">
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+            <div className="min-w-0">
+              <div className="eyebrow">Arte final · editor temporariamente desativado</div>
+              <h1 className="truncate text-lg font-semibold sm:text-xl">{project.name}</h1>
+              <p className="mt-1 text-xs text-muted-foreground">
+                O texto já está aplicado à composição. Aqui você apenas visualiza e baixa a arte final.
+              </p>
+            </div>
           </div>
-
-          <div className="hidden items-center gap-1.5 px-2 text-[10px] text-[#a8a8a8] lg:flex">
-            {saved ? <><Check className="h-3 w-3 text-emerald-400" /> Salvo</> : <><Save className="h-3 w-3" /> Salvando...</>}
-          </div>
-          <button onClick={() => commit(project)} className="editor-route-action inline-flex" title="Salvar projeto">
-            <Save className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Salvar</span>
-          </button>
-          <button onClick={() => exportCurrent(2)} className="inline-flex h-8 items-center gap-1.5 rounded-[3px] bg-[#2b78c5] px-3 text-[11px] font-semibold text-white hover:bg-[#3589da]">
-            <Download className="h-3.5 w-3.5" /> Exportar HD
-          </button>
-        </header>
-
-        <section className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-[#343434] bg-[#252525] px-2 text-[10px] text-[#c1c1c1]">
-          <div className="mr-2 hidden items-center gap-1 md:flex">
-            <span className="editor-menu-label">Arquivo</span>
-            <span className="editor-menu-label">Editar</span>
-            <span className="editor-menu-label">Imagem</span>
-            <span className="editor-menu-label">Camada</span>
-            <span className="editor-menu-label">Texto</span>
-            <span className="editor-menu-label">Selecionar</span>
-            <span className="editor-menu-label">Visualizar</span>
-          </div>
-          <div className="hidden h-5 w-px bg-[#3b3b3b] md:block" />
-          <button onClick={() => exportCurrent(1)} className="editor-route-action"><Download className="h-3.5 w-3.5" /> PNG</button>
-          <button onClick={() => void exportCurrentPsd()} className="editor-route-action"><Layers3 className="h-3.5 w-3.5" /> PSD</button>
-          {project.type === "carrossel" && (
-            <button onClick={exportAll} disabled={exportingAll} className="editor-route-action disabled:opacity-45">
-              <Images className="h-3.5 w-3.5" /> {exportingAll ? "Baixando..." : "Todas"}
+          <div className="flex gap-2">
+            <button type="button" onClick={duplicateWholeProject} className="secondary-button">
+              <Copy className="h-4 w-4" /> Duplicar
             </button>
-          )}
-          <button onClick={duplicateWholeProject} className="editor-route-action hidden sm:inline-flex"><Sparkles className="h-3.5 w-3.5" /> Nova versão</button>
-          <button onClick={saveToLibrary} className="editor-route-action"><FolderHeart className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Biblioteca</span></button>
-          <button onClick={copyCaption} className="editor-route-action hidden sm:inline-flex"><Copy className="h-3.5 w-3.5" /> Legenda</button>
+            {project.slides.length > 1 && (
+              <button type="button" onClick={downloadAll} disabled={exportingAll} className="secondary-button disabled:opacity-60">
+                {exportingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <Images className="h-4 w-4" />}
+                {exportingAll ? "Preparando..." : "Baixar todas"}
+              </button>
+            )}
+            <button type="button" onClick={downloadCurrent} disabled={rendering} className="primary-button disabled:opacity-60">
+              {rendering ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {rendering ? "Preparando..." : "Baixar PNG"}
+            </button>
+          </div>
         </section>
 
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          {project.type === "carrossel" && (
-            <aside className="hidden w-36 shrink-0 flex-col border-r border-[#343434] bg-[#232323] md:flex">
-              <div className="flex items-center justify-between border-b border-[#343434] px-3 py-2.5">
-                <span className="text-xs font-semibold">Páginas</span>
-                <button onClick={addSlide} className="rounded-lg p-1.5 text-muted-foreground hover:bg-white/5 hover:text-white">
-                  <Plus className="h-4 w-4" />
-                </button>
+        <div className="grid gap-5 lg:grid-cols-[150px_minmax(0,1fr)]">
+          {project.slides.length > 1 && (
+            <aside className="panel p-3">
+              <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+                <Images className="h-4 w-4" /> Páginas
               </div>
-
-              <div className="flex-1 space-y-2 overflow-y-auto p-2">
+              <div className="grid grid-cols-3 gap-2 lg:grid-cols-1">
                 {project.slides.map((item, index) => (
                   <button
                     key={item.id}
+                    type="button"
                     onClick={() => setActive(index)}
-                    className={`relative aspect-square w-full overflow-hidden rounded-xl border-2 bg-secondary ${
-                      active === index
-                        ? "border-primary shadow-[0_0_0_3px_rgba(139,92,246,.12)]"
-                        : "border-transparent hover:border-border"
-                    }`}
+                    className={`relative overflow-hidden rounded-lg border-2 bg-secondary ${active === index ? "border-primary" : "border-transparent hover:border-border"}`}
                   >
-                    {item.thumb ? (
-                      <img src={item.thumb} alt={`Página ${index + 1}`} className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="grid h-full place-items-center text-xs text-muted-foreground">
-                        {String(index + 1).padStart(2, "0")}
-                      </div>
-                    )}
-                    <span className="absolute bottom-1 left-1 rounded bg-black/65 px-1.5 py-0.5 text-[9px] text-white">
-                      {String(index + 1).padStart(2, "0")}
-                    </span>
+                    {item.thumb ? <img src={item.thumb} alt={`Página ${index + 1}`} className="aspect-square w-full object-cover" /> : <div className="grid aspect-square place-items-center text-xs">{index + 1}</div>}
+                    <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] text-white">{index + 1}</span>
                   </button>
                 ))}
-                <button onClick={addSlide} className="grid aspect-square w-full place-items-center rounded-xl border border-dashed border-border text-muted-foreground hover:border-primary hover:text-primary">
-                  <Plus className="h-5 w-5" />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 border-t border-[#343434] p-2">
-                <button onClick={duplicateSlide} title="Duplicar página" className="secondary-button px-2 py-2">
-                  <Copy className="h-4 w-4" />
-                </button>
-                <button onClick={deleteSlide} title="Excluir página" className="inline-flex items-center justify-center rounded-xl border border-destructive/25 bg-destructive/8 p-2 text-destructive hover:bg-destructive/15">
-                  <Trash2 className="h-4 w-4" />
-                </button>
               </div>
             </aside>
           )}
 
-          <div className="h-full min-h-0 min-w-0 flex-1 overflow-hidden">
-            <Editor
-              ref={editorRef}
-              key={editorKey}
-              width={slide.width}
-              height={slide.height}
-              initial={slide.canvas as never}
-              onChange={updateSlide}
-            />
-          </div>
+          <section className="panel min-w-0 overflow-hidden p-3 sm:p-5">
+            <div className="mx-auto flex min-h-[55vh] max-w-4xl items-center justify-center rounded-xl bg-[#111] p-3 sm:p-6">
+              {rendering && !preview ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /> Montando arte final...</div>
+              ) : preview ? (
+                <img src={preview} alt={`Arte ${active + 1}`} className="max-h-[75vh] max-w-full rounded-lg object-contain shadow-2xl" />
+              ) : (
+                <div className="text-sm text-muted-foreground">Prévia indisponível.</div>
+              )}
+            </div>
+          </section>
         </div>
-
-        {project.type === "carrossel" && (
-          <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-t border-[#343434] bg-[#232323] p-2 md:hidden">
-            <button onClick={duplicateSlide} title="Duplicar página" className="grid h-14 w-10 shrink-0 place-items-center rounded-md border border-[#444] text-[#ddd]"><Copy className="h-4 w-4" /></button>
-            {project.slides.map((item, index) => (
-              <button
-                key={item.id}
-                onClick={() => setActive(index)}
-                className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border-2 bg-secondary ${
-                  active === index ? "border-primary" : "border-transparent"
-                }`}
-              >
-                {item.thumb ? (
-                  <img src={item.thumb} alt={`Página ${index + 1}`} className="h-full w-full object-cover" />
-                ) : (
-                  <span className="grid h-full place-items-center text-xs text-muted-foreground">{index + 1}</span>
-                )}
-              </button>
-            ))}
-            <button onClick={addSlide} className="grid h-14 w-14 shrink-0 place-items-center rounded-lg border border-dashed border-[#555] text-[#ddd]">
-              <Plus className="h-4 w-4" />
-            </button>
-            <button onClick={deleteSlide} title="Excluir página" className="grid h-14 w-10 shrink-0 place-items-center rounded-md border border-red-500/30 text-red-400"><Trash2 className="h-4 w-4" /></button>
-          </div>
-        )}
       </div>
     </AppShell>
   );

@@ -14,15 +14,13 @@ import {
   Plug,
   Sparkles,
   Target,
-  Upload,
   Users,
   Wand2,
-  X,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
-import { generateImage, testCloudflareConnection, uploadReferenceImage } from "@/lib/ai.functions";
+import { generateImage, testHuggingFaceConnection } from "@/lib/ai.functions";
 import { generateInstagramContent, testGroqConnection, updateSlide, type CarrosselOut } from "@/lib/groq.functions";
 import { getAccessKey } from "@/lib/session";
 import { newProject, upsertProject } from "@/lib/storage";
@@ -80,8 +78,6 @@ const DEFAULT_FORM: CarouselForm = {
 type CarouselJobPayload = {
   form: CarouselForm;
   details: string;
-  referenceImageUrl?: string;
-  referenceName?: string;
   accessKey: string;
 };
 
@@ -91,8 +87,7 @@ function NovoCarrossel() {
   const save = useServerFn(updateSlide);
   const test = useServerFn(testGroqConnection);
   const generateImageFn = useServerFn(generateImage);
-  const uploadReferenceImageFn = useServerFn(uploadReferenceImage);
-  const testCloudflare = useServerFn(testCloudflareConnection);
+  const testHuggingFace = useServerFn(testHuggingFaceConnection);
 
   const [accessKey, setAccessKey] = useState<string | null>(null);
   const [step, setStep] = useState<CarouselStep>(1);
@@ -100,13 +95,12 @@ function NovoCarrossel() {
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [cloudflareTesting, setCloudflareTesting] = useState(false);
-  const [cloudflareTestResult, setCloudflareTestResult] = useState<{ ok: boolean; message: string; model?: string; dataUrl?: string } | null>(null);
+  const [imageEngineTesting, setImageEngineTesting] = useState(false);
+  const [imageEngineTestResult, setImageEngineTestResult] = useState<{ ok: boolean; message: string; model?: string; dataUrl?: string } | null>(null);
   const [result, setResult] = useState<CarrosselOut | null>(null);
   const [autoImages, setAutoImages] = useState<Record<number, string>>({});
   const [progress, setProgress] = useState(0);
   const [savedProjectId, setSavedProjectId] = useState<string | null>(null);
-  const [referenceImage, setReferenceImage] = useState<{ dataUrl: string; name: string } | null>(null);
   const [form, setForm] = useState<CarouselForm>(DEFAULT_FORM);
 
   useEffect(() => {
@@ -289,7 +283,6 @@ function NovoCarrossel() {
                   brand: payload.form.empresa,
                   palette: payload.form.paleta,
                   style: `${payload.form.estilo}; tom ${payload.form.tom}`,
-                  referenceImageUrl: payload.referenceImageUrl,
                   imageQuality: payload.form.imageQuality || "premium",
                 } });
                 break;
@@ -318,8 +311,9 @@ function NovoCarrossel() {
         }
 
         let projectId = job.projectId;
+        let finalPreviews: Record<number, string> | undefined;
         if (!projectId) {
-          projectId = await saveCarouselProject({
+          const savedProject = await saveCarouselProject({
             output,
             assets: projectAssets,
             name: output.titulo || payload.form.tema,
@@ -327,9 +321,10 @@ function NovoCarrossel() {
             style: payload.form.estilo,
             palette: payload.form.paleta,
             brand: payload.form.empresa,
-            reference: payload.referenceName,
             ownerScope: job.ownerScope,
           });
+          projectId = savedProject.projectId;
+          finalPreviews = savedProject.previews;
         }
 
         if (!projectId) throw new Error("Não foi possível salvar o projeto.");
@@ -341,15 +336,16 @@ function NovoCarrossel() {
           result: output,
         }, job.ownerScope);
         setSavedProjectId(projectId);
+        if (finalPreviews) setAutoImages(finalPreviews);
         setProgress(100);
         setStep(4);
         addNotification({
           title: "Carrossel concluído",
-          message: `“${output.titulo || payload.form.tema}” está pronto para edição.`,
+          message: `“${output.titulo || payload.form.tema}” está pronto para visualizar e baixar.`,
           href: `/editor/${projectId}`,
           kind: "success",
         }, job.ownerScope);
-        toast.success("Imagens prontas. Seu carrossel já pode ser aberto no editor.");
+        toast.success("Imagens prontas com texto. Seu carrossel já pode ser visualizado e baixado.");
       } catch (error) {
         window.dispatchEvent(new CustomEvent("inlabs:credits-changed"));
         const message = (error as Error).message || "Erro ao gerar as imagens do carrossel.";
@@ -365,49 +361,6 @@ function NovoCarrossel() {
       const active = getCreationJob(initialJob.id, initialJob.ownerScope);
       setBusy(active?.status === "queued" || active?.status === "running");
     }
-  }
-
-  function handleReferenceImage(file?: File) {
-    if (!file) return;
-    if (!file.type.match(/^image\/(png|jpeg|webp)$/)) {
-      toast.error("Envie uma imagem PNG, JPG ou WebP.");
-      return;
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error("A imagem deve ter no máximo 10 MB.");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onerror = () => toast.error("Não foi possível ler a imagem.");
-    reader.onload = () => {
-      const originalDataUrl = String(reader.result);
-      const image = new Image();
-      image.onerror = () => toast.error("Não foi possível preparar a imagem de referência.");
-      image.onload = () => {
-        const maxSide = 500;
-        const scale = Math.min(1, maxSide / image.naturalWidth, maxSide / image.naturalHeight);
-        if (scale >= 1) {
-          setReferenceImage({ dataUrl: originalDataUrl, name: file.name });
-          return;
-        }
-
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          toast.error("Não foi possível preparar a imagem de referência.");
-          return;
-        }
-        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-        const outputType = file.type === "image/png" ? "image/png" : "image/jpeg";
-        const dataUrl = canvas.toDataURL(outputType, 0.92);
-        setReferenceImage({ dataUrl, name: file.name });
-      };
-      image.src = originalDataUrl;
-    };
-    reader.readAsDataURL(file);
   }
 
   async function submit(e: React.FormEvent) {
@@ -451,18 +404,9 @@ function NovoCarrossel() {
     ].filter(Boolean).join("\n");
 
     try {
-      let referenceImageUrl: string | undefined;
-      if (referenceImage) {
-        setProgress(8);
-        const uploaded = await uploadReferenceImageFn({ data: { dataUrl: referenceImage.dataUrl, fileName: referenceImage.name } });
-        referenceImageUrl = uploaded.url;
-      }
-
       const job = createCreationJob("carrossel", {
         form: { ...form },
         details,
-        referenceImageUrl,
-        referenceName: referenceImage?.name,
         accessKey,
       });
       setCurrentJobId(job.id);
@@ -535,7 +479,6 @@ function NovoCarrossel() {
     setAutoImages({});
     setProgress(0);
     setSavedProjectId(null);
-    setReferenceImage(null);
     setForm(DEFAULT_FORM);
   }
 
@@ -573,20 +516,20 @@ function NovoCarrossel() {
     }
   }
 
-  async function runCloudflareTest() {
-    if (cloudflareTesting) return;
-    setCloudflareTesting(true);
-    setCloudflareTestResult(null);
+  async function runImageEngineTest() {
+    if (imageEngineTesting) return;
+    setImageEngineTesting(true);
+    setImageEngineTestResult(null);
     try {
-      const response = await testCloudflare({ data: { imageQuality: form.imageQuality } });
-      setCloudflareTestResult(response);
-      response.ok ? toast.success("Cloudflare Workers AI conectado e funcionando.") : toast.error(response.message);
+      const response = await testHuggingFace({ data: { imageQuality: form.imageQuality } });
+      setImageEngineTestResult(response);
+      response.ok ? toast.success("Hugging Face conectado e funcionando.") : toast.error(response.message);
     } catch (error) {
-      const message = (error as Error).message || "Falha ao testar o Cloudflare Workers AI.";
-      setCloudflareTestResult({ ok: false, message });
+      const message = (error as Error).message || "Falha ao testar o Hugging Face.";
+      setImageEngineTestResult({ ok: false, message });
       toast.error(message);
     } finally {
-      setCloudflareTesting(false);
+      setImageEngineTesting(false);
     }
   }
 
@@ -597,7 +540,7 @@ function NovoCarrossel() {
       <div className="page-wrap space-y-7">
         <section>
           <h1 className="section-title text-3xl sm:text-4xl">Criar carrossel</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Crie o roteiro, revise o conteúdo, gere as imagens e finalize tudo no editor.</p>
+          <p className="mt-2 text-sm text-muted-foreground">Crie o roteiro, revise o conteúdo e gere artes finais com o texto já aplicado.</p>
         </section>
 
         <Stepper step={step} unlockedStep={unlockedStep} busy={busy} onChange={goToStep} />
@@ -624,30 +567,18 @@ function NovoCarrossel() {
                   <Field label="Quantidade de slides"><select value={form.quantidadeSlides} onChange={(e) => setForm({ ...form, quantidadeSlides: Number(e.target.value) })} className="app-input">{Array.from({ length: 20 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value} slides</option>)}</select></Field>
                   <Field label="Estilo visual"><select value={form.estilo} onChange={(e) => setForm({ ...form, estilo: e.target.value })} className="app-input"><option>publicidade premium</option><option>food commercial</option><option>cinematográfico</option><option>luxury campaign</option><option>editorial</option><option>minimalista e premium</option><option>tech campaign</option><option>3D publicitário</option><option>corporativo</option><option>vibrante</option></select></Field>
                   <Field label="Paleta de cores"><input value={form.paleta} onChange={(e) => setForm({ ...form, paleta: e.target.value })} className="app-input" /></Field>
-                  <Field label="Qualidade da imagem"><select value={form.imageQuality} onChange={(e) => setForm({ ...form, imageQuality: e.target.value as "fast" | "premium" })} className="app-input"><option value="premium">Premium — FLUX Klein 9B</option><option value="fast">Rápida — FLUX Klein 4B</option></select></Field>
+                  <Field label="Motor de imagem"><div className="app-input flex items-center">NVIDIA Qwen-Image-Flash</div></Field>
                 </div>
 
                 <Field label="CTA — chamada para ação"><input value={form.cta} onChange={(e) => setForm({ ...form, cta: e.target.value })} placeholder="Ex.: Experimente grátis a Zunexi.ai" className="app-input" /></Field>
                 <Field label="Informações adicionais"><textarea value={form.informacoesAdicionais} onChange={(e) => setForm({ ...form, informacoesAdicionais: e.target.value })} rows={4} maxLength={3000} placeholder="Inclua restrições, diferenciais e informações que não podem faltar." className="app-input resize-y" /></Field>
 
                 <Field label="Imagem de referência">
-                  <div className="rounded-xl border border-dashed border-border bg-white/[0.02] p-4">
-                    {referenceImage ? (
-                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                        <img src={referenceImage.dataUrl} alt="Imagem de referência" className="h-28 w-28 rounded-xl border border-border object-cover" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium">{referenceImage.name}</div>
-                          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">A IA usará esta imagem como referência visual nos slides do carrossel.</p>
-                          <button type="button" onClick={() => setReferenceImage(null)} className="secondary-button mt-3"><X className="h-4 w-4" /> Remover imagem</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <label className="flex cursor-pointer flex-col items-center justify-center gap-3 py-5 text-center">
-                        <div className="grid h-12 w-12 place-items-center rounded-xl bg-primary/12 text-primary"><Upload className="h-5 w-5" /></div>
-                        <div><div className="text-sm font-medium">Enviar imagem da marca ou produto</div><div className="mt-1 text-xs text-muted-foreground">PNG, JPG ou WebP, até 10 MB</div></div>
-                        <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => { handleReferenceImage(e.target.files?.[0]); e.currentTarget.value = ""; }} />
-                      </label>
-                    )}
+                  <div className="rounded-xl border border-border bg-white/[0.02] p-4">
+                    <div className="text-sm font-medium">Temporariamente desativada</div>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      Nesta versão o Qwen-Image-Flash é usado apenas para gerar o visual a partir do prompt. O upload de referência volta quando ativarmos um modelo/endpoint compatível com edição de imagem.
+                    </p>
                   </div>
                 </Field>
               </div>
@@ -672,11 +603,11 @@ function NovoCarrossel() {
               </div>
 
               <div className="panel p-5">
-                <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Teste Cloudflare Workers AI</h2><p className="mt-1 text-xs text-muted-foreground">Valida o token, a conta e o modelo de imagem.</p></div><ImageIcon className="h-5 w-5 text-primary" /></div>
-                <button type="button" onClick={runCloudflareTest} disabled={cloudflareTesting} className="secondary-button w-full disabled:opacity-60">{cloudflareTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />} {cloudflareTesting ? "Testando..." : "Testar Cloudflare"}</button>
-                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">O teste usa o modo selecionado acima. Premium prioriza qualidade e consome mais da cota do Workers AI.</p>
-                {cloudflareTestResult && <div className={`mt-3 rounded-xl border p-3 text-xs ${cloudflareTestResult.ok ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-200" : "border-red-500/25 bg-red-500/8 text-red-200"}`}><div className="flex items-start gap-2">{cloudflareTestResult.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{cloudflareTestResult.message}</span></div>{cloudflareTestResult.model && <div className="mt-2 opacity-80">Modelo: {cloudflareTestResult.model}</div>}</div>}
-                {cloudflareTestResult?.dataUrl && <img src={cloudflareTestResult.dataUrl} alt="Imagem do teste Cloudflare Workers AI" className="mt-3 aspect-square w-full rounded-xl border border-border object-cover" />}
+                <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Teste Hugging Face</h2><p className="mt-1 text-xs text-muted-foreground">Valida o HF_TOKEN e o modelo NVIDIA Qwen-Image-Flash.</p></div><ImageIcon className="h-5 w-5 text-primary" /></div>
+                <button type="button" onClick={runImageEngineTest} disabled={imageEngineTesting} className="secondary-button w-full disabled:opacity-60">{imageEngineTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />} {imageEngineTesting ? "Testando..." : "Testar Hugging Face"}</button>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">O teste gera uma imagem curta para validar o HF_TOKEN e a disponibilidade do Qwen-Image-Flash.</p>
+                {imageEngineTestResult && <div className={`mt-3 rounded-xl border p-3 text-xs ${imageEngineTestResult.ok ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-200" : "border-red-500/25 bg-red-500/8 text-red-200"}`}><div className="flex items-start gap-2">{imageEngineTestResult.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{imageEngineTestResult.message}</span></div>{imageEngineTestResult.model && <div className="mt-2 opacity-80">Modelo: {imageEngineTestResult.model}</div>}</div>}
+                {imageEngineTestResult?.dataUrl && <img src={imageEngineTestResult.dataUrl} alt="Imagem do teste Hugging Face" className="mt-3 aspect-square w-full rounded-xl border border-border object-cover" />}
               </div>
             </aside>
           </div>
@@ -705,7 +636,7 @@ function NovoCarrossel() {
         )}
 
         {step === 4 && (
-          <EditorStage
+          <FinalStage
             data={result}
             images={autoImages}
             projectId={savedProjectId}
@@ -725,7 +656,6 @@ async function saveCarouselProject({
   style,
   palette,
   brand,
-  reference,
   ownerScope,
 }: {
   output: CarrosselOut;
@@ -735,18 +665,18 @@ async function saveCarouselProject({
   style: string;
   palette: string;
   brand?: string;
-  reference?: string;
   ownerScope?: string;
-}): Promise<string> {
+}): Promise<{ projectId: string; previews: Record<number, string> }> {
   const project = newProject("carrossel", name.trim() || "Novo carrossel", {
     theme: caption,
     style,
     ratio: "1080x1080",
-    reference,
   });
 
   const resolvedPalette = paletteFromDescription(palette);
   const fonts = fontPairFromStyle(style);
+
+  const previews: Record<number, string> = {};
 
   project.slides = await Promise.all(output.slides.map(async (slide, index) => {
     const asset = assets[slide.numero];
@@ -778,13 +708,25 @@ async function saveCarouselProject({
       });
     }
 
-    const thumb = await renderElementsThumbnail({
-      elements,
-      background: resolvedPalette[0],
-      width: 1080,
-      height: 1080,
-      maxDimension: 420,
-    });
+    const [thumb, preview] = await Promise.all([
+      renderElementsThumbnail({
+        elements,
+        background: resolvedPalette[0],
+        width: 1080,
+        height: 1080,
+        maxDimension: 420,
+      }),
+      renderElementsThumbnail({
+        elements,
+        background: resolvedPalette[0],
+        width: 1080,
+        height: 1080,
+        maxDimension: 900,
+        format: "jpeg",
+        quality: 0.9,
+      }),
+    ]);
+    if (preview) previews[slide.numero] = preview;
 
     return {
       id: crypto.randomUUID(),
@@ -800,7 +742,7 @@ async function saveCarouselProject({
   }));
 
   upsertProject(project, ownerScope);
-  return project.id;
+  return { projectId: project.id, previews };
 }
 
 function resizeImageDataUrl(dataUrl: string, maxDimension: number, quality: number): Promise<string> {
@@ -849,7 +791,7 @@ function Stepper({
     { n: 1, title: "Informações", sub: "Conte sobre o conteúdo" },
     { n: 2, title: "Roteiro", sub: "Revise a estrutura" },
     { n: 3, title: "Imagens", sub: "Geração visual" },
-    { n: 4, title: "Editor", sub: "Personalize e finalize" },
+    { n: 4, title: "Final", sub: "Visualize e baixe" },
   ];
 
   return (
@@ -952,7 +894,7 @@ function ScriptStage({
                 <div className="text-xs uppercase tracking-[0.15em] text-primary">Slide {String(slide.numero).padStart(2, "0")}</div>
                 <div className="mt-1 text-xs capitalize text-muted-foreground">{slide.tipo}</div>
               </div>
-              <span className="rounded-full border border-border px-2.5 py-1 text-[10px] uppercase tracking-[.12em] text-muted-foreground">Editável</span>
+              <span className="rounded-full border border-border px-2.5 py-1 text-[10px] uppercase tracking-[.12em] text-muted-foreground">Revisável</span>
             </div>
             <div className="space-y-4 p-5">
               <Field label="Título"><input value={slide.titulo} maxLength={300} onChange={(event) => onSlideChange(index, "titulo", event.target.value)} className="app-input" /></Field>
@@ -1000,7 +942,7 @@ function ImagesStage({
           <div>
             <div className="eyebrow mb-2">Etapa 3 de 4 · imagens</div>
             <h2 className="section-title text-2xl">{busy ? "Gerando as artes do carrossel" : generated ? "Continue a geração das imagens" : "Pronto para criar as imagens"}</h2>
-            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Cada slide será criado individualmente pela Cloudflare Workers AI. Você pode sair desta página; a criação é retomada ao voltar.</p>
+            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Cada slide será criado individualmente pelo NVIDIA Qwen-Image-Flash via Hugging Face. Você pode sair desta página; a criação é retomada ao voltar.</p>
           </div>
           {!busy && (
             <button type="button" onClick={onGenerate} className="primary-button shrink-0"><Sparkles className="h-4 w-4" /> {generated ? "Continuar geração" : `Gerar ${total} imagens`}</button>
@@ -1041,14 +983,14 @@ function ImagesStage({
       {!busy && (
         <div className="panel flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
           <button type="button" onClick={onBack} className="secondary-button"><ArrowLeft className="h-4 w-4" /> Voltar ao roteiro</button>
-          <div className="text-xs text-muted-foreground">Ao terminar, o projeto será salvo automaticamente e liberado no editor.</div>
+          <div className="text-xs text-muted-foreground">Ao terminar, o projeto será salvo automaticamente com o texto já aplicado à arte.</div>
         </div>
       )}
     </section>
   );
 }
 
-function EditorStage({
+function FinalStage({
   data,
   images,
   projectId,
@@ -1063,12 +1005,12 @@ function EditorStage({
     <section className="space-y-5">
       <div className="panel overflow-hidden p-6 text-center sm:p-10">
         <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300"><CheckCircle2 className="h-8 w-8" /></div>
-        <div className="eyebrow mb-2 mt-6">Etapa 4 de 4 · editor</div>
+        <div className="eyebrow mb-2 mt-6">Etapa 4 de 4 · finalização</div>
         <h2 className="section-title text-3xl">Seu carrossel está pronto</h2>
-        <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">As imagens foram salvas em um projeto individual. Abra o editor para mover elementos, adicionar textos, imagens e finalizar a arte.</p>
+        <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">As imagens foram finalizadas com o texto aplicado pela Zunexi e salvas no projeto. O editor visual está temporariamente desativado para evitar deslocamentos de elementos.</p>
 
         <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
-          {projectId && <Link to="/editor/$id" params={{ id: projectId }} className="primary-button"><Sparkles className="h-4 w-4" /> Abrir no editor</Link>}
+          {projectId && <Link to="/editor/$id" params={{ id: projectId }} className="primary-button"><Sparkles className="h-4 w-4" /> Ver artes prontas</Link>}
           <Link to="/projetos" className="secondary-button">Meus projetos</Link>
           <button type="button" onClick={onNew} className="secondary-button">Criar outro carrossel</button>
         </div>
