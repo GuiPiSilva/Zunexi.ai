@@ -118,7 +118,7 @@ PADRÃO DE QUALIDADE VISUAL:
 - A referência de qualidade é CARTAZ PUBLICITÁRIO: tipografia visualmente dominante, produto/personagem grande, textura, contraste, selos, divisores e informação organizada. Como a tipografia será adicionada pela Zunexi, o promptImagem deve reservar zonas para essa hierarquia sem desenhar letras.
 - Use arquétipos por nicho: FOOD/DELIVERY = preto/carvão texturizado + âmbar/laranja + fumaça/brasa + produto enorme; TECH/AI = preto profundo + azul/violeta/magenta + ondas/halftone/dots luminosos; IGREJA/FÉ = editorial clássico/vintage, marfim/pergaminho, vinho/dourado, ilustração simbólica e ornamentação elegante; outros nichos = key visual publicitário forte equivalente.
 - NÃO faça todos os slides com o mesmo grid. Varie entre: hero gigante + título lateral; produto + preço/oferta; cardápio/lista em blocos; composição central editorial; close-up com CTA; vários produtos organizados em zonas.
-- O layout, tipografia, textos, formas, selos e elementos gráficos serão montados depois pela Zunexi como camadas editáveis; o promptImagem descreve somente a fotografia/ilustração principal.
+- O layout, tipografia, textos, formas, selos e elementos gráficos serão montados depois pela Zunexi e achatados na arte final; o promptImagem descreve somente a fotografia/ilustração principal.
 - O produto, serviço ou assunto do cliente deve ser o herói. Evite cenas genéricas de escritório, restaurante, cidade ou pessoas sorrindo sem função narrativa.
 - Quando o tema for comida, descreva fotografia gastronômica de campanha: produto dominante, textura real, luz controlada, profundidade, cor natural dos ingredientes e enquadramento apetitoso. Não use filtro laranja/bege global.
 - Quando for tecnologia, pense em key visual de lançamento: materiais precisos, luz escultural, composição limpa e sofisticada; evite hologramas e circuitos clichês sem motivo.
@@ -143,7 +143,7 @@ REGRAS DO promptImagem:
 - Gere SOMENTE o visual principal do slide: hero subject, environment, camera, lens, lighting, materials, depth, color treatment and composition.
 - Cada promptImagem deve indicar claramente: (1) o que é o herói, (2) onde ele está no quadro, (3) tipo de luz, (4) distância/ângulo de câmera, (5) textura/material e (6) estética de campanha.
 - NÃO peça texto, tipografia, letras, números, logotipo, preço, telefone, watermark, UI, moldura ou palavras na imagem.
-- Considere que título e texto serão adicionados depois como camadas editáveis. Deixe negative space natural, sem criar cartão vazio ou painel artificial.
+- Considere que título e texto serão adicionados depois pela Zunexi antes da exportação final. Deixe negative space natural, sem criar cartão vazio ou painel artificial.
 - Peça natural local colors e controlled brand-color accents; proíba global monochrome color cast quando a paleta for intensa.
 - Evite “stock photo”, “generic modern interior”, “generic smiling person”, composições centralizadas sem intenção, mãos deformadas, objetos duplicados e fundos poluídos.
 - Em alimentação/produto físico, o produto deve ocupar visualmente cerca de 35–55% da cena quando fizer sentido, com detalhes de campanha e não uma visão distante do ambiente.
@@ -162,7 +162,7 @@ Paleta: ${palette}
 CTA fornecido: ${requestedCta || "nenhum CTA específico"}
 Informações adicionais completas: ${data.informacoesAdicionais || "nenhuma"}
 
-Faça os slides funcionarem como uma campanha contínua. O promptImagem de cada slide deve gerar apenas o visual fotográfico/ilustrado principal, sem texto, deixando a composição preparada para a Zunexi aplicar o layout editável depois. Não invente dados ausentes.
+Faça os slides funcionarem como uma campanha contínua. O promptImagem de cada slide deve gerar apenas o visual fotográfico/ilustrado principal, sem texto, deixando a composição preparada para a Zunexi aplicar o texto e finalizar a arte depois. Não invente dados ausentes.
 ${denseContentMode ? "MODELO DE CONTEÚDO DENSO: o texto de cada slide pode ser mais completo, com blocos, listas, preços, sabores, itens e descrições quando isso fizer sentido para o pedido." : "MODELO DE CONTEÚDO PADRÃO: faça textos mais bem trabalhados, com mais substância e clareza, porém ainda enxutos e fáceis de ler."}
 Semente de variação: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
 

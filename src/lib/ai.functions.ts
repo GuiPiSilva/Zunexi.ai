@@ -117,7 +117,7 @@ REGRAS:
 - title: chamada principal curta e impactante em português.
 - body: organize somente as informações reais fornecidas pelo usuário de forma clara e bem escrita; inclua data, horário e local apenas quando existirem. Quando o pedido indicar cardápio, lista, catálogo, sabores, preços ou itens detalhados, o body pode ser mais completo, com quebras de linha, seções e itens no estilo "## Seção" e "**Item — preço**".
 - imagePrompt: em inglês, descreva SOMENTE o visual principal do cartaz: fotografia ou ilustração coerente com o evento, cenário, assunto, iluminação, textura, profundidade, enquadramento e direção de arte.
-- NÃO peça texto, tipografia, letras, números, logotipo, preço, telefone, watermark, moldura ou UI dentro da imagem. A Zunexi adicionará todas as informações como camadas editáveis depois.
+- NÃO peça texto, tipografia, letras, números, logotipo, preço, telefone, watermark, moldura ou UI dentro da imagem. A Zunexi adicionará todas as informações depois e achatará a composição na arte final.
 - O visual deve parecer produzido para uma campanha de agência, com composição forte e áreas de respiro naturais para receber o layout.
 - Não invente preço, telefone, endereço, atrações, datas, logotipo ou qualquer informação que não foi enviada.
 - Adapte a direção visual ao tipo do evento: igreja deve ser elegante e inspiradora; música deve ser energética; palestra deve ser sofisticada; promoção deve ser comercial e clara.`;
@@ -135,34 +135,26 @@ Seed única: ${data.seed}-${Math.random().toString(36).slice(2)}`;
 
 
 // ---------------------------------------------------------------------------
-// IMAGEM — Cloudflare Workers AI via REST API oficial.
-// O modo rápido usa FLUX.2 Klein 4B e o modo premium usa FLUX.2 Klein 9B.
-// Ambos aceitam multipart/form-data e imagem de referência. O visual gerado
-// não contém tipografia: a composição final é montada pelo editor em camadas.
+// IMAGEM — Hugging Face / NVIDIA Qwen-Image-Flash.
+//
+// O modelo gera somente o visual-base. O texto final continua sendo aplicado
+// pela Zunexi no navegador para evitar erros de ortografia e manter o layout
+// previsível. Se o checkpoint ainda não estiver servido pelo provider
+// hf-inference, configure HUGGINGFACE_IMAGE_ENDPOINT com um Inference Endpoint
+// dedicado que aceite o payload padrão de text-to-image do Hugging Face.
 // ---------------------------------------------------------------------------
 
-const CLOUDFLARE_IMAGE_MODELS = {
-  fast: process.env.CLOUDFLARE_IMAGE_MODEL_FAST || process.env.CLOUDFLARE_IMAGE_MODEL || "@cf/black-forest-labs/flux-2-klein-4b",
-  premium: process.env.CLOUDFLARE_IMAGE_MODEL_PREMIUM || "@cf/black-forest-labs/flux-2-klein-9b",
-} as const;
-
-type ImageQuality = keyof typeof CLOUDFLARE_IMAGE_MODELS;
-
-function imageModelFor(quality: ImageQuality) {
-  return CLOUDFLARE_IMAGE_MODELS[quality] || CLOUDFLARE_IMAGE_MODELS.premium;
-}
-
-const CLOUDFLARE_IMAGE_TIMEOUT_MS = 120_000;
+const HUGGINGFACE_IMAGE_MODEL = process.env.HUGGINGFACE_IMAGE_MODEL || "nvidia/Qwen-Image-Flash";
+const HUGGINGFACE_IMAGE_TIMEOUT_MS = 120_000;
+const HUGGINGFACE_MAX_ATTEMPTS = 3;
+const HUGGINGFACE_BASE_DELAY_MS = 2_000;
 const IMAGE_STORAGE_BUCKET = process.env.IMAGE_STORAGE_BUCKET || process.env.GEMINI_STORAGE_BUCKET || "generated-images";
-const CLOUDFLARE_MAX_ATTEMPTS = 3;
-const CLOUDFLARE_BASE_DELAY_MS = 2_500;
-const CLOUDFLARE_4B_OUTPUT_NEURONS_PER_TILE = 26.05;
-const CLOUDFLARE_4B_INPUT_NEURONS_PER_TILE = 5.37;
-const CLOUDFLARE_9B_FIRST_MP_NEURONS = 1363.64;
-const CLOUDFLARE_9B_SUBSEQUENT_MP_NEURONS = 181.82;
-const CLOUDFLARE_9B_INPUT_MP_NEURONS = 181.82;
 
-type CloudflareUsageSource = "generation" | "test";
+type ImageQuality = "fast" | "premium";
+
+function imageModelFor(_quality: ImageQuality = "premium") {
+  return HUGGINGFACE_IMAGE_MODEL;
+}
 
 const ImageInput = z.object({
   prompt: z.string().min(1),
@@ -176,7 +168,8 @@ const ImageInput = z.object({
   palette: z.string().optional().default(""),
   style: z.string().optional().default(""),
   aspectRatio: z.enum(["1:1", "4:5", "9:16"]).optional().default("1:1"),
-  referenceImageUrl: z.string().url().optional(),
+  // Mantido por compatibilidade com projetos/jobs antigos. Qwen-Image-Flash
+  // usa o mesmo checkpoint em ambos os valores.
   imageQuality: z.enum(["fast", "premium"]).optional().default("premium"),
 });
 
@@ -212,18 +205,7 @@ async function uploadToSupabaseStorage(base64: string, mimeType: string, pathHin
   return data.publicUrl;
 }
 
-async function fetchAsBase64(url: string): Promise<{ mimeType: string; base64: string }> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Não foi possível baixar a imagem de referência (${response.status}).`);
-  const contentType = response.headers.get("content-type") || "image/png";
-  const buffer = Buffer.from(await response.arrayBuffer());
-  return { mimeType: contentType.split(";")[0], base64: buffer.toString("base64") };
-}
-
-function cloudflareSeed(value: string): number {
-  // Mantém a seed no intervalo positivo de 31 bits. O hash FNV convertido com
-  // >>> 0 pode chegar a 4.294.967.295; alguns backends/modelos interpretam a
-  // seed como inteiro assinado e rejeitam esses valores com HTTP 400.
+function imageSeed(value: string): number {
   if (!value) return Math.floor(Math.random() * 2_147_483_647);
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -233,30 +215,7 @@ function cloudflareSeed(value: string): number {
   return (hash >>> 0) & 0x7fffffff;
 }
 
-function cloudflareErrorDetail(body: string): string {
-  if (!body) return "requisição inválida";
-  try {
-    const parsed = JSON.parse(body) as {
-      errors?: Array<{ code?: number | string; message?: string }>;
-      error?: string | { message?: string };
-      message?: string;
-    };
-    const errors = parsed.errors
-      ?.map((item) => [item.code ? `código ${item.code}` : "", item.message || ""].filter(Boolean).join(": "))
-      .filter(Boolean);
-    if (errors?.length) return errors.join("; ");
-    if (typeof parsed.error === "string" && parsed.error) return parsed.error;
-    if (parsed.error && typeof parsed.error === "object" && parsed.error.message) return parsed.error.message;
-    if (parsed.message) return parsed.message;
-  } catch {
-    // O corpo pode não ser JSON. Nesse caso retornamos um trecho seguro abaixo.
-  }
-  return body.replace(/\s+/g, " ").trim().slice(0, 320) || "requisição inválida";
-}
-
 function compactImagePrompt(prompt: string): string {
-  // Evita que um prompt excepcionalmente grande derrube apenas um slide.
-  // Mantém o início (briefing principal) e o fim (restrições/direção de arte).
   const normalized = prompt.replace(/\r/g, "").trim();
   const maxChars = 6_000;
   if (normalized.length <= maxChars) return normalized;
@@ -271,184 +230,118 @@ function dimensionsForAspectRatio(aspectRatio: "1:1" | "4:5" | "9:16") {
   return { width: 1024, height: 1024 };
 }
 
-function tileCount(width: number, height: number) {
-  return Math.max(1, Math.ceil(width / 512) * Math.ceil(height / 512));
+function huggingFaceEndpoint() {
+  const custom = process.env.HUGGINGFACE_IMAGE_ENDPOINT?.trim();
+  if (custom) return custom.replace(/\/$/, "");
+  return `https://router.huggingface.co/hf-inference/models/${HUGGINGFACE_IMAGE_MODEL}`;
 }
 
-function estimateCloudflareNeurons(width: number, height: number, hasReference: boolean, quality: ImageQuality) {
-  const model = imageModelFor(quality);
-  const megapixels = (width * height) / (1024 * 1024);
-
-  if (model.includes("flux-2-klein-9b")) {
-    const outputNeurons = CLOUDFLARE_9B_FIRST_MP_NEURONS + Math.max(0, megapixels - 1) * CLOUDFLARE_9B_SUBSEQUENT_MP_NEURONS;
-    const inputNeurons = hasReference ? 0.25 * CLOUDFLARE_9B_INPUT_MP_NEURONS : 0;
-    return {
-      outputTiles: tileCount(width, height),
-      inputTiles: hasReference ? 1 : 0,
-      estimatedNeurons: Math.round((outputNeurons + inputNeurons) * 100) / 100,
-    };
-  }
-
-  const outputTiles = tileCount(width, height);
-  const inputTiles = hasReference ? 1 : 0;
-  const estimatedNeurons =
-    outputTiles * CLOUDFLARE_4B_OUTPUT_NEURONS_PER_TILE +
-    inputTiles * CLOUDFLARE_4B_INPUT_NEURONS_PER_TILE;
-  return {
-    outputTiles,
-    inputTiles,
-    estimatedNeurons: Math.round(estimatedNeurons * 100) / 100,
-  };
-}
-
-async function recordCloudflareUsage(args: {
-  width: number;
-  height: number;
-  hasReference: boolean;
-  source: CloudflareUsageSource;
-  quality: ImageQuality;
-}) {
-  const model = imageModelFor(args.quality);
-  const estimate = estimateCloudflareNeurons(args.width, args.height, args.hasReference, args.quality);
+function huggingFaceErrorDetail(body: string): string {
+  if (!body) return "resposta vazia";
   try {
-    const { error } = await admin().from("cloudflare_ai_usage").insert({
-      model,
-      source: args.source,
-      width: args.width,
-      height: args.height,
-      has_reference: args.hasReference,
-      output_tiles: estimate.outputTiles,
-      input_tiles: estimate.inputTiles,
-      estimated_neurons: estimate.estimatedNeurons,
-    });
-    if (error) console.warn("Não foi possível registrar uso da Cloudflare no Supabase:", error.message);
-  } catch (error) {
-    console.warn("Falha não crítica ao registrar uso da Cloudflare:", error);
+    const parsed = JSON.parse(body) as {
+      error?: string | { message?: string };
+      message?: string;
+      estimated_time?: number;
+    };
+    if (typeof parsed.error === "string" && parsed.error) return parsed.error;
+    if (parsed.error && typeof parsed.error === "object" && parsed.error.message) return parsed.error.message;
+    if (parsed.message) return parsed.message;
+    if (parsed.estimated_time) return `modelo inicializando; estimativa ${Math.ceil(parsed.estimated_time)}s`;
+  } catch {
+    // Pode ser texto simples; retornamos um trecho seguro abaixo.
   }
+  return body.replace(/\s+/g, " ").trim().slice(0, 320) || "erro desconhecido";
 }
 
-function detectImageMimeType(base64: string): string {
-  const bytes = Buffer.from(base64.slice(0, 64), "base64");
-  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
-  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
-  if (bytes.slice(0, 4).toString("ascii") === "RIFF" && bytes.slice(8, 12).toString("ascii") === "WEBP") return "image/webp";
-  return "image/jpeg";
-}
-
-async function callCloudflareImage(
-  apiToken: string,
-  accountId: string,
+async function callHuggingFaceImage(
+  token: string,
   prompt: string,
   aspectRatio: "1:1" | "4:5" | "9:16",
   seed: string,
-  referenceImage?: { mimeType: string; base64: string },
-  source: CloudflareUsageSource = "generation",
-  quality: ImageQuality = "premium",
 ): Promise<{ mimeType: string; base64: string }> {
-  let lastError: Error | null = null;
+  const endpoint = huggingFaceEndpoint();
   const { width, height } = dimensionsForAspectRatio(aspectRatio);
-  const model = imageModelFor(quality);
-  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`;
+  let lastError: Error | null = null;
   let requestPrompt = compactImagePrompt(prompt);
-  let sendSeed = true;
 
-  for (let attempt = 1; attempt <= CLOUDFLARE_MAX_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= HUGGINGFACE_MAX_ATTEMPTS; attempt += 1) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), CLOUDFLARE_IMAGE_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), HUGGINGFACE_IMAGE_TIMEOUT_MS);
 
     try {
-      const form = new FormData();
-      form.append("prompt", requestPrompt);
-      form.append("width", String(width));
-      form.append("height", String(height));
-      if (sendSeed) form.append("seed", String(cloudflareSeed(seed)));
-
-      if (referenceImage) {
-        const bytes = new Uint8Array(Buffer.from(referenceImage.base64, "base64"));
-        const ext = referenceImage.mimeType.includes("jpeg") ? "jpg" : referenceImage.mimeType.split("/")[1] || "png";
-        form.append("input_image_0", new Blob([bytes], { type: referenceImage.mimeType }), `reference.${ext}`);
-      }
-
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: { Authorization: `Bearer ${apiToken}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Accept: "image/*, application/json",
+          "x-wait-for-model": "true",
+        },
         signal: controller.signal,
-        body: form,
+        body: JSON.stringify({
+          inputs: requestPrompt,
+          parameters: {
+            width,
+            height,
+            // Qwen-Image-Flash foi destilado para quatro passos.
+            num_inference_steps: 4,
+            seed: imageSeed(seed),
+          },
+        }),
       });
 
       if (!response.ok) {
         const body = await response.text();
-        console.error("Cloudflare Workers AI error", response.status, `tentativa ${attempt}/${CLOUDFLARE_MAX_ATTEMPTS}`, body.slice(0, 700));
-
-        const detail = cloudflareErrorDetail(body);
-
-        if (response.status === 400) {
-          // 1ª recuperação: repete sem seed. Isso cobre rejeições de seed por
-          // diferenças de implementação entre modelos sem perder o modo premium.
-          if (attempt === 1 && sendSeed) {
-            sendSeed = false;
-            lastError = new Error(`Cloudflare rejeitou a primeira tentativa: ${detail}`);
-            await sleep(600);
-            continue;
-          }
-
-          // 2ª recuperação: reduz um briefing muito extenso antes de desistir.
-          if (attempt < CLOUDFLARE_MAX_ATTEMPTS && requestPrompt.length > 3_500) {
-            requestPrompt = requestPrompt.slice(0, 3_500);
-            lastError = new Error(`Cloudflare rejeitou a solicitação: ${detail}`);
-            await sleep(600);
-            continue;
-          }
-
-          throw new Error(`Cloudflare rejeitou a imagem (400): ${detail}`);
-        }
+        const detail = huggingFaceErrorDetail(body);
+        console.error("Hugging Face image error", response.status, `tentativa ${attempt}/${HUGGINGFACE_MAX_ATTEMPTS}`, detail);
 
         if (response.status === 401 || response.status === 403) {
-          throw new Error(`Cloudflare recusou a autenticação/permissão (${response.status}): ${detail}`);
+          throw new Error(`Hugging Face recusou o token/permissão (${response.status}): ${detail}`);
         }
-        if (response.status === 429) {
-          lastError = new Error("Cota ou limite do Cloudflare Workers AI atingido no momento.");
-          if (attempt < CLOUDFLARE_MAX_ATTEMPTS) {
-            await sleep(CLOUDFLARE_BASE_DELAY_MS * 2 ** (attempt - 1));
-            continue;
-          }
-          throw new Error("Cota do Cloudflare Workers AI atingida. Tente novamente após a renovação da cota.");
+        if (response.status === 404 || response.status === 410) {
+          throw new Error(
+            `O modelo ${HUGGINGFACE_IMAGE_MODEL} não está disponível nesta rota do Hugging Face. ` +
+            `Configure HUGGINGFACE_IMAGE_ENDPOINT com um Inference Endpoint do Qwen-Image-Flash. Detalhe: ${detail}`,
+          );
         }
-        if (response.status >= 500 && attempt < CLOUDFLARE_MAX_ATTEMPTS) {
-          lastError = new Error(`Cloudflare Workers AI indisponível temporariamente (${response.status}).`);
-          await sleep(CLOUDFLARE_BASE_DELAY_MS * attempt);
+        if (response.status === 400 && attempt < HUGGINGFACE_MAX_ATTEMPTS && requestPrompt.length > 3_500) {
+          requestPrompt = requestPrompt.slice(0, 3_500);
+          lastError = new Error(`Hugging Face rejeitou o briefing: ${detail}`);
+          await sleep(500);
           continue;
         }
-        throw new Error(`Cloudflare Workers AI retornou um erro (${response.status}).`);
+        if ((response.status === 429 || response.status >= 500) && attempt < HUGGINGFACE_MAX_ATTEMPTS) {
+          lastError = new Error(`Hugging Face indisponível/limitado (${response.status}): ${detail}`);
+          await sleep(HUGGINGFACE_BASE_DELAY_MS * attempt);
+          continue;
+        }
+        throw new Error(`Hugging Face retornou erro ${response.status}: ${detail}`);
       }
 
-      const responseType = response.headers.get("content-type") || "";
+      const responseType = (response.headers.get("content-type") || "").split(";")[0];
       if (responseType.startsWith("image/")) {
         const buffer = Buffer.from(await response.arrayBuffer());
-        await recordCloudflareUsage({ width, height, hasReference: Boolean(referenceImage), source, quality });
-        return { mimeType: responseType.split(";")[0], base64: buffer.toString("base64") };
+        return { mimeType: responseType, base64: buffer.toString("base64") };
       }
 
-      const json = (await response.json()) as {
-        success?: boolean;
-        result?: { image?: string };
-        image?: string;
-        errors?: { message?: string }[];
-      };
-      const base64 = json.result?.image || json.image;
-      if (!base64) {
-        const apiMessage = json.errors?.map((item) => item.message).filter(Boolean).join("; ");
-        throw new Error(apiMessage || "O Cloudflare Workers AI não retornou uma imagem.");
+      const body = Buffer.from(await response.arrayBuffer());
+      const text = body.toString("utf8");
+      try {
+        const parsed = JSON.parse(text) as { image?: string; generated_image?: string; error?: string };
+        const base64 = parsed.image || parsed.generated_image;
+        if (base64) return { mimeType: "image/png", base64 };
+        if (parsed.error) throw new Error(parsed.error);
+      } catch (error) {
+        if (error instanceof Error && error.message !== "Unexpected end of JSON input") throw error;
       }
-
-      await recordCloudflareUsage({ width, height, hasReference: Boolean(referenceImage), source, quality });
-      return { mimeType: detectImageMimeType(base64), base64 };
+      throw new Error(`O Hugging Face não retornou bytes de imagem válidos. Resposta: ${text.slice(0, 220)}`);
     } catch (error) {
       const err = error as Error;
       if (err.name === "AbortError") {
-        lastError = new Error("Tempo esgotado ao gerar imagem no Cloudflare Workers AI.");
-        if (attempt < CLOUDFLARE_MAX_ATTEMPTS) {
-          await sleep(CLOUDFLARE_BASE_DELAY_MS);
+        lastError = new Error("Tempo esgotado ao gerar imagem no Hugging Face.");
+        if (attempt < HUGGINGFACE_MAX_ATTEMPTS) {
+          await sleep(HUGGINGFACE_BASE_DELAY_MS);
           continue;
         }
         throw lastError;
@@ -459,7 +352,7 @@ async function callCloudflareImage(
     }
   }
 
-  throw lastError ?? new Error("Falha ao gerar imagem no Cloudflare Workers AI após múltiplas tentativas.");
+  throw lastError ?? new Error("Falha ao gerar imagem no Hugging Face após múltiplas tentativas.");
 }
 
 export const uploadReferenceImage = createServerFn({ method: "POST" })
@@ -510,7 +403,7 @@ function creativeProfile(data: z.infer<typeof ImageInput>) {
 
   return `PREMIUM POSTER CAMPAIGN DIRECTION:
 - Compose like a finished advertising key visual: one dominant hero subject, dramatic contrast, deliberate negative space, layered depth, texture and strong lighting.
-- The final composition will receive oversized editable typography, badges, prices, separators and supporting copy, so design clear visual zones for them.
+- The final composition will receive oversized typography, badges, prices, separators and supporting copy before export, so design clear visual zones for them.
 - Avoid generic centered stock-photo composition and bland minimalist white panels.
 - Use the requested palette as controlled art-direction accents while preserving believable local colors and materials.`;
 }
@@ -518,12 +411,10 @@ function creativeProfile(data: z.infer<typeof ImageInput>) {
 export const generateImage = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => ImageInput.parse(d))
   .handler(async ({ data }): Promise<{ dataUrl: string; url: string }> => {
-    const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-    if (!apiToken) throw new Error("CLOUDFLARE_API_TOKEN não configurado no servidor.");
-    if (!accountId) throw new Error("CLOUDFLARE_ACCOUNT_ID não configurado no servidor.");
+    const apiToken = process.env.HF_TOKEN || process.env.HUGGINGFACE_API_TOKEN;
+    if (!apiToken) throw new Error("HF_TOKEN não configurado no servidor.");
 
-    const fullPrompt = `CREATE ONLY A SINGLE CONTINUOUS PHOTOGRAPHIC / 3D / ILLUSTRATIVE SCENE FOR A HIGH-END INSTAGRAM CAMPAIGN. Zunexi will build the actual post layout later with editable layers.
+    const fullPrompt = `CREATE ONLY A SINGLE CONTINUOUS PHOTOGRAPHIC / 3D / ILLUSTRATIVE SCENE FOR A HIGH-END INSTAGRAM CAMPAIGN. Zunexi will apply the final Portuguese copy afterward and flatten everything into the finished image.
 
 ABSOLUTE FORMAT RULES:
 - This output is NOT the finished Instagram post and NOT a graphic-design template.
@@ -552,16 +443,11 @@ ART-DIRECTION STANDARD:
 - No duplicate objects, melted anatomy, extra fingers, warped product geometry, meaningless symbols or pseudo-writing.
 - Do not invent visible brand names. Brand identity comes from art direction, palette accents and supplied reference imagery only.
 
-${data.referenceImageUrl ? `REFERENCE IMAGE:
-- Input image 0 is the primary identity/product reference.
-- Preserve recognizable product shape, packaging, logo geometry/colors and key visual characteristics when present.
-- Integrate it naturally into the campaign scene instead of loosely imitating it.` : ""}
 
 Unique variation seed: ${data.seed}.`;
 
     try {
-      const referenceImage = data.referenceImageUrl ? await fetchAsBase64(data.referenceImageUrl) : undefined;
-      const { mimeType, base64 } = await callCloudflareImage(apiToken, accountId, fullPrompt, data.aspectRatio, data.seed, referenceImage, "generation", data.imageQuality);
+      const { mimeType, base64 } = await callHuggingFaceImage(apiToken, fullPrompt, data.aspectRatio, data.seed);
       const url = await uploadToSupabaseStorage(base64, mimeType, "slide");
       return { dataUrl: `data:${mimeType};base64,${base64}`, url };
     } catch (error) {
@@ -571,30 +457,26 @@ Unique variation seed: ${data.seed}.`;
     }
   });
 
-export const testCloudflareConnection = createServerFn({ method: "POST" })
+export const testHuggingFaceConnection = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ imageQuality: z.enum(["fast", "premium"]).optional().default("premium") }).parse(d ?? {}))
   .handler(async ({ data }): Promise<{ ok: boolean; message: string; model: string; dataUrl?: string }> => {
-    const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+    const apiToken = process.env.HF_TOKEN || process.env.HUGGINGFACE_API_TOKEN;
+    const model = imageModelFor(data.imageQuality);
     if (!apiToken) {
-      return { ok: false, model: imageModelFor(data.imageQuality), message: "CLOUDFLARE_API_TOKEN não configurado no servidor." };
-    }
-    if (!accountId) {
-      return { ok: false, model: imageModelFor(data.imageQuality), message: "CLOUDFLARE_ACCOUNT_ID não configurado no servidor." };
+      return { ok: false, model, message: "HF_TOKEN não configurado no servidor." };
     }
 
-    const model = imageModelFor(data.imageQuality);
-    const testPrompt = `Create a polished square Instagram advertising visual, 1:1, dark premium background with subtle electric blue and violet lighting, one futuristic abstract AI object as the visual hero, professional editorial composition, realistic depth and clean negative space for later layout. No text, letters, numbers, logos, watermarks or UI.`;
+    const testPrompt = `Premium square AI technology campaign visual, deep black background, electric blue and violet luminous particles, one sculptural futuristic abstract object as hero, dramatic editorial lighting, realistic depth, elegant negative space. No text, letters, numbers, logos, watermark or UI.`;
     try {
-      const { mimeType, base64 } = await callCloudflareImage(apiToken, accountId, testPrompt, "1:1", `test-${Date.now()}`, undefined, "test", data.imageQuality);
+      const { mimeType, base64 } = await callHuggingFaceImage(apiToken, testPrompt, "1:1", `test-${Date.now()}`);
       return {
         ok: true,
         model,
-        message: `Cloudflare Workers AI conectado e gerando imagens corretamente (${model}).`,
+        message: `Hugging Face conectado e gerando imagens com ${model}.`,
         dataUrl: `data:${mimeType};base64,${base64}`,
       };
     } catch (error) {
       const err = error as Error;
-      return { ok: false, model: imageModelFor(data.imageQuality), message: err.message || "Falha desconhecida ao testar o Cloudflare Workers AI." };
+      return { ok: false, model, message: err.message || "Falha desconhecida ao testar o Hugging Face." };
     }
   });

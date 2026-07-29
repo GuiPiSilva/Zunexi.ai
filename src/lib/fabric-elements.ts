@@ -120,6 +120,8 @@ export async function renderElementsThumbnail(args: {
   width: number;
   height: number;
   maxDimension?: number;
+  format?: "jpeg" | "png";
+  quality?: number;
 }) {
   if (typeof document === "undefined") return undefined;
   const element = document.createElement("canvas");
@@ -135,7 +137,11 @@ export async function renderElementsThumbnail(args: {
     canvas.renderAll();
     const maxDimension = Math.max(160, args.maxDimension ?? 420);
     const multiplier = Math.min(1, maxDimension / Math.max(args.width, args.height));
-    return canvas.toDataURL({ format: "jpeg", quality: 0.78, multiplier });
+    return canvas.toDataURL({
+      format: args.format ?? "jpeg",
+      quality: args.quality ?? 0.78,
+      multiplier,
+    });
   } catch (error) {
     console.warn("Não foi possível gerar a miniatura fiel do layout:", error);
     return undefined;
