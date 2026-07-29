@@ -1,0 +1,8 @@
+Apague estes arquivos/pastas do repositório para remover qualquer vínculo remanescente com Lovable:
+
+AGENTS.md
+src/integrations/lovable/
+src/lib/lovable-error-reporting.ts
+bun.lock
+
+Depois, faça um novo deploy no Vercel. Sem bun.lock/package-lock.json, o Vercel instalará as dependências a partir do package.json.
