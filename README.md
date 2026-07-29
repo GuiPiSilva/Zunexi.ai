@@ -23,9 +23,8 @@ Principais variáveis usadas pelo projeto:
 
 ```env
 HF_TOKEN=hf_...
-HUGGINGFACE_IMAGE_MODEL=nvidia/Qwen-Image-Flash
-# Opcional, para um Inference Endpoint dedicado:
-HUGGINGFACE_IMAGE_ENDPOINT=https://seu-endpoint.endpoints.huggingface.cloud
+HUGGINGFACE_IMAGE_MODEL=Qwen/Qwen-Image
+# Compatibilidade: HF_IMAGE_MODEL também é aceito, mas prefira HUGGINGFACE_IMAGE_MODEL.
 ```
 
 As variáveis do Supabase e Groq devem continuar configuradas conforme o ambiente atual do projeto.
