@@ -2,11 +2,6 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { admin, consumeAccessCredit, requireAccessKey } from "@/lib/access.functions";
 
-// ---------------------------------------------------------------------------
-// TEXTO — Groq, exclusivamente via API REST oficial (chat completions,
-// formato compatível com OpenAI). Nunca usar Gemini/Google aqui.
-// ---------------------------------------------------------------------------
-
 const GROQ_TEXT_TIMEOUT_MS = 45_000;
 
 interface SlideOut {
@@ -135,52 +130,26 @@ Seed única: ${data.seed}-${Math.random().toString(36).slice(2)}`;
 
 
 // ---------------------------------------------------------------------------
-// IMAGEM — NVIDIA Build / NVIDIA NIM API hospedada.
+// IMAGEM — Together AI (serverless).
 //
-// Não carrega modelo no Vercel e não depende de Lightning/Hugging Face.
-// O backend do Vercel chama diretamente a API da NVIDIA usando NVIDIA_API_KEY.
-// Endpoint padrão: FLUX.1-schnell, documentado pela NVIDIA para text-to-image.
+// O backend do Vercel chama diretamente a API da Together usando TOGETHER_API_KEY.
+// Não existe Lightning, servidor GPU próprio ou endpoint dedicado.
+// Modelo padrão: Qwen/Qwen-Image-2.0.
 // ---------------------------------------------------------------------------
 
-const NVIDIA_IMAGE_MODEL = process.env.NVIDIA_IMAGE_MODEL || "qwen/qwen-image";
-const NVIDIA_IMAGE_API_URL = (process.env.NVIDIA_IMAGE_API_URL || "").trim();
-const NVIDIA_IMAGE_TIMEOUT_MS = Number(process.env.NVIDIA_IMAGE_TIMEOUT_MS || 60_000);
-const NVIDIA_MAX_ATTEMPTS = 2;
-const NVIDIA_BASE_DELAY_MS = 1_500;
-
-// Validação da NVIDIA_API_KEY sem depender de um modelo específico.
-// A API hospedada da NVIDIA expõe GET /v1/models; isso evita que o teste
-// quebre quando um modelo de texto é descontinuado.
-const NVIDIA_KEY_TEST_URL = "https://integrate.api.nvidia.com/v1/models";
-const NVIDIA_KEY_TEST_TIMEOUT_MS = 15_000;
-
-function configuredImageEndpoint(): string {
-  if (!NVIDIA_IMAGE_API_URL) {
-    throw new Error(
-      "NVIDIA_API_KEY detectada, mas NVIDIA_IMAGE_API_URL não está configurada. " +
-      "No NVIDIA Build, Qwen-Image e FLUX.1-schnell são modelos Downloadable, não Free Endpoint. " +
-      "Configure NVIDIA_IMAGE_API_URL somente depois de implantar um NIM/Partner Endpoint de imagem.",
-    );
-  }
-
-  // Este endereço foi usado anteriormente como se fosse um endpoint serverless
-  // público. O catálogo atual não oferece FLUX.1-schnell dessa forma. Falhamos
-  // imediatamente para não deixar a Function do Vercel presa até o timeout.
-  if (/^https:\/\/ai\.api\.nvidia\.com\/v1\/genai\/black-forest-labs\/flux\.1-schnell\/?$/i.test(NVIDIA_IMAGE_API_URL)) {
-    throw new Error(
-      "NVIDIA_IMAGE_API_URL aponta para o endereço antigo do FLUX.1-schnell. " +
-      "Esse modelo aparece como Downloadable no NVIDIA Build e precisa de um endpoint implantado.",
-    );
-  }
-
-  return NVIDIA_IMAGE_API_URL.replace(/\/$/, "");
-}
+const TOGETHER_IMAGE_MODEL = process.env.TOGETHER_IMAGE_MODEL || "Qwen/Qwen-Image-2.0";
+const TOGETHER_IMAGE_API_URL = "https://api.together.xyz/v1/images/generations";
+const TOGETHER_MODELS_URL = "https://api.together.xyz/v1/models";
+const TOGETHER_IMAGE_TIMEOUT_MS = Number(process.env.TOGETHER_IMAGE_TIMEOUT_MS || 120_000);
+const TOGETHER_KEY_TEST_TIMEOUT_MS = 15_000;
+const TOGETHER_MAX_ATTEMPTS = 2;
+const TOGETHER_BASE_DELAY_MS = 1_500;
 const IMAGE_STORAGE_BUCKET = process.env.IMAGE_STORAGE_BUCKET || process.env.GEMINI_STORAGE_BUCKET || "generated-images";
 
 type ImageQuality = "fast" | "premium";
 
 function imageModelFor(_quality: ImageQuality = "premium") {
-  return NVIDIA_IMAGE_MODEL;
+  return TOGETHER_IMAGE_MODEL;
 }
 
 const ImageInput = z.object({
@@ -195,7 +164,6 @@ const ImageInput = z.object({
   palette: z.string().optional().default(""),
   style: z.string().optional().default(""),
   aspectRatio: z.enum(["1:1", "4:5", "9:16"]).optional().default("1:1"),
-  // Mantido por compatibilidade com projetos/jobs antigos.
   imageQuality: z.enum(["fast", "premium"]).optional().default("premium"),
 });
 
@@ -214,11 +182,10 @@ function parseDataUrl(dataUrl: string): { mimeType: string; base64: string } {
   return { mimeType: match[1], base64: match[2] };
 }
 
-async function uploadToSupabaseStorage(base64: string, mimeType: string, pathHint: string): Promise<string> {
+async function uploadBytesToSupabaseStorage(bytes: Buffer, mimeType: string, pathHint: string): Promise<string> {
   const sb = admin();
-  const ext = mimeType.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
+  const ext = mimeType.includes("png") ? "png" : mimeType.includes("webp") ? "webp" : "jpg";
   const path = `${pathHint}-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-  const bytes = Buffer.from(base64, "base64");
 
   const { error } = await sb.storage.from(IMAGE_STORAGE_BUCKET).upload(path, bytes, {
     contentType: mimeType,
@@ -229,6 +196,10 @@ async function uploadToSupabaseStorage(base64: string, mimeType: string, pathHin
   const { data } = sb.storage.from(IMAGE_STORAGE_BUCKET).getPublicUrl(path);
   if (!data?.publicUrl) throw new Error("Não foi possível obter a URL pública da imagem.");
   return data.publicUrl;
+}
+
+async function uploadToSupabaseStorage(base64: string, mimeType: string, pathHint: string): Promise<string> {
+  return uploadBytesToSupabaseStorage(Buffer.from(base64, "base64"), mimeType, pathHint);
 }
 
 function imageSeed(value: string): number {
@@ -243,21 +214,20 @@ function imageSeed(value: string): number {
 
 function compactImagePrompt(prompt: string): string {
   const normalized = prompt.replace(/\r/g, "").trim();
-  // A NVIDIA documenta prompt de até 10.000 caracteres para o endpoint usado.
-  const maxChars = 9_500;
+  const maxChars = 7_500;
   if (normalized.length <= maxChars) return normalized;
-  const head = normalized.slice(0, 5_800);
-  const tail = normalized.slice(-3_500);
+  const head = normalized.slice(0, 4_800);
+  const tail = normalized.slice(-2_500);
   return `${head}\n\n[brief compacted]\n\n${tail}`;
 }
 
-function dimensionsForAspectRatio(_aspectRatio: "1:1" | "4:5" | "9:16") {
-  // O endpoint hospedado FLUX.1-schnell documentado pela NVIDIA aceita 1024x1024.
-  // O recorte/proporção final (1:1, 4:5, 9:16) é feito pela composição do Zunexi.
+function dimensionsForAspectRatio(aspectRatio: "1:1" | "4:5" | "9:16") {
+  if (aspectRatio === "4:5") return { width: 1024, height: 1280 };
+  if (aspectRatio === "9:16") return { width: 720, height: 1280 };
   return { width: 1024, height: 1024 };
 }
 
-function nvidiaErrorMessage(error: unknown): string {
+function togetherErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "string" && error.trim()) return error.trim();
   try {
@@ -267,54 +237,45 @@ function nvidiaErrorMessage(error: unknown): string {
   }
 }
 
-type NvidiaImageResponse = {
-  artifacts?: Array<{ base64?: string; mime_type?: string; mimeType?: string }>;
-  data?: Array<{ b64_json?: string; base64?: string }>;
-  image?: string;
-  base64?: string;
-  detail?: unknown;
+type TogetherImageResponse = {
+  id?: string;
+  model?: string;
+  data?: Array<{ index?: number; url?: string; b64_json?: string }>;
+  error?: { message?: string; type?: string; code?: string | number };
   message?: string;
 };
 
-function extractNvidiaImage(json: NvidiaImageResponse): { mimeType: string; base64: string } {
-  const artifact = json.artifacts?.[0];
-  const base64 = artifact?.base64 || json.data?.[0]?.b64_json || json.data?.[0]?.base64 || json.image || json.base64;
-  if (!base64 || typeof base64 !== "string") {
-    throw new Error("A NVIDIA respondeu sem a imagem em base64.");
+async function fetchTogetherImageBytes(url: string): Promise<{ mimeType: string; bytes: Buffer }> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 45_000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Não foi possível baixar a imagem gerada pela Together (${response.status}).`);
+    const mimeType = response.headers.get("content-type")?.split(";")[0] || "image/jpeg";
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (!bytes.length) throw new Error("A Together retornou uma imagem vazia.");
+    return { mimeType, bytes };
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const cleaned = base64.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
-  const mimeType = artifact?.mime_type || artifact?.mimeType || "image/jpeg";
-  return { mimeType, base64: cleaned };
 }
 
-async function callNvidiaImage(
+async function callTogetherImage(
   token: string,
   prompt: string,
   aspectRatio: "1:1" | "4:5" | "9:16",
   seed: string,
-): Promise<{ mimeType: string; base64: string }> {
+): Promise<{ mimeType: string; bytes: Buffer }> {
   const { width, height } = dimensionsForAspectRatio(aspectRatio);
   let lastError: Error | null = null;
   let requestPrompt = compactImagePrompt(prompt);
 
-  for (let attempt = 1; attempt <= NVIDIA_MAX_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= TOGETHER_MAX_ATTEMPTS; attempt += 1) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), NVIDIA_IMAGE_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), TOGETHER_IMAGE_TIMEOUT_MS);
 
     try {
-      const imageEndpoint = configuredImageEndpoint();
-
-      console.info("NVIDIA image request", {
-        model: NVIDIA_IMAGE_MODEL,
-        endpoint: imageEndpoint,
-        attempt,
-        width,
-        height,
-        promptChars: requestPrompt.length,
-      });
-
-      const response = await fetch(imageEndpoint, {
+      const response = await fetch(TOGETHER_IMAGE_API_URL, {
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -323,87 +284,75 @@ async function callNvidiaImage(
         },
         signal: controller.signal,
         body: JSON.stringify({
+          model: TOGETHER_IMAGE_MODEL,
           prompt: requestPrompt,
-          height,
           width,
-          cfg_scale: 0,
-          mode: "base",
-          samples: 1,
+          height,
+          steps: 28,
+          n: 1,
           seed: imageSeed(seed),
-          steps: 4,
+          response_format: "url",
+          output_format: "jpeg",
         }),
       });
 
       const raw = await response.text();
-      let json: NvidiaImageResponse = {};
+      let json: TogetherImageResponse = {};
       try {
-        json = raw ? JSON.parse(raw) as NvidiaImageResponse : {};
+        json = raw ? JSON.parse(raw) as TogetherImageResponse : {};
       } catch {
-        throw new Error(`Resposta inválida da NVIDIA (${response.status}): ${raw.slice(0, 500)}`);
+        throw new Error(`Resposta inválida da Together (${response.status}): ${raw.slice(0, 500)}`);
       }
 
       if (!response.ok) {
-        const detail = typeof json.detail === "string"
-          ? json.detail
-          : json.message || (json.detail ? JSON.stringify(json.detail) : raw.slice(0, 500));
-        throw new Error(`NVIDIA API ${response.status}: ${detail || "erro sem detalhes"}`);
+        const detail = json.error?.message || json.message || raw.slice(0, 500);
+        throw new Error(`Together API ${response.status}: ${detail || "erro sem detalhes"}`);
       }
 
-      const image = extractNvidiaImage(json);
-      const bytes = Buffer.from(image.base64, "base64");
-      if (!bytes.length) throw new Error("A NVIDIA retornou uma imagem vazia.");
+      const first = json.data?.[0];
+      if (first?.url) return fetchTogetherImageBytes(first.url);
+      if (first?.b64_json) {
+        const bytes = Buffer.from(first.b64_json, "base64");
+        if (!bytes.length) throw new Error("A Together retornou uma imagem vazia.");
+        return { mimeType: "image/jpeg", bytes };
+      }
 
-      console.info("NVIDIA image success", {
-        model: NVIDIA_IMAGE_MODEL,
-        attempt,
-        mimeType: image.mimeType,
-        bytes: bytes.length,
-      });
-      return image;
+      throw new Error("A Together respondeu sem URL ou base64 da imagem.");
     } catch (error) {
       const detail = error instanceof Error && error.name === "AbortError"
-        ? `Tempo esgotado ao gerar imagem na NVIDIA após ${Math.round(NVIDIA_IMAGE_TIMEOUT_MS / 1000)}s.`
-        : nvidiaErrorMessage(error);
-
-      console.error("NVIDIA image failure", {
-        model: NVIDIA_IMAGE_MODEL,
-        attempt,
-        detail,
-      });
+        ? `Tempo esgotado ao gerar imagem na Together após ${Math.round(TOGETHER_IMAGE_TIMEOUT_MS / 1000)}s.`
+        : togetherErrorMessage(error);
 
       if (/401|unauthori|invalid.*key|authentication/i.test(detail)) {
-        throw new Error(`NVIDIA recusou a API key. Confira NVIDIA_API_KEY no Vercel. ${detail}`);
+        throw new Error(`Together recusou a API key. Confira TOGETHER_API_KEY no Vercel. ${detail}`);
       }
-      if (/402|payment|required|credit|quota|billing/i.test(detail)) {
-        throw new Error(`A NVIDIA recusou a solicitação por limite/crédito: ${detail}`);
+      if (/402|payment|required|credit|quota|billing|balance/i.test(detail)) {
+        throw new Error(`A Together recusou a solicitação por saldo/crédito: ${detail}`);
       }
       if (/403|forbidden|permission/i.test(detail)) {
-        throw new Error(`Sua NVIDIA API key não tem permissão para esse endpoint: ${detail}`);
+        throw new Error(`Sua TOGETHER_API_KEY não tem permissão para o modelo selecionado: ${detail}`);
       }
-      if (/404|not found/i.test(detail)) {
-        throw new Error(`Endpoint NVIDIA não encontrado. Confira NVIDIA_IMAGE_API_URL do NIM/Partner Endpoint: ${detail}`);
+      if (/404|not found|model.*not/i.test(detail)) {
+        throw new Error(`Modelo Together não encontrado: ${TOGETHER_IMAGE_MODEL}. ${detail}`);
       }
 
-      lastError = new Error(`Falha na NVIDIA API: ${detail}`);
-
-      if (attempt < NVIDIA_MAX_ATTEMPTS && /429|rate|timeout|tempo esgotado|5\d\d|fetch failed|network|socket/i.test(detail)) {
-        await sleep(NVIDIA_BASE_DELAY_MS * attempt);
+      lastError = new Error(`Falha na Together API: ${detail}`);
+      if (attempt < TOGETHER_MAX_ATTEMPTS && /429|rate|timeout|tempo esgotado|5\d\d|fetch failed|network|socket/i.test(detail)) {
+        await sleep(TOGETHER_BASE_DELAY_MS * attempt);
         continue;
       }
-
-      if (attempt < NVIDIA_MAX_ATTEMPTS && requestPrompt.length > 4_500) {
+      if (attempt < TOGETHER_MAX_ATTEMPTS && requestPrompt.length > 4_500) {
         requestPrompt = requestPrompt.slice(0, 4_500);
         await sleep(500);
         continue;
       }
-
       throw lastError;
     } finally {
       clearTimeout(timeoutId);
     }
   }
 
-  throw lastError ?? new Error("Falha ao gerar imagem na NVIDIA após múltiplas tentativas.");
+  throw lastError ?? new Error("Falha ao gerar imagem na Together após múltiplas tentativas.");
 }
 
 export const uploadReferenceImage = createServerFn({ method: "POST" })
@@ -462,8 +411,8 @@ function creativeProfile(data: z.infer<typeof ImageInput>) {
 export const generateImage = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => ImageInput.parse(d))
   .handler(async ({ data }): Promise<{ url: string }> => {
-    const apiToken = process.env.NVIDIA_API_KEY;
-    if (!apiToken) throw new Error("NVIDIA_API_KEY não configurada no servidor.");
+    const apiToken = process.env.TOGETHER_API_KEY;
+    if (!apiToken) throw new Error("TOGETHER_API_KEY não configurada no servidor.");
 
     const fullPrompt = `CREATE ONLY A SINGLE CONTINUOUS PHOTOGRAPHIC / 3D / ILLUSTRATIVE SCENE FOR A HIGH-END INSTAGRAM CAMPAIGN. Zunexi will apply the final Portuguese copy afterward and flatten everything into the finished image.
 
@@ -498,8 +447,8 @@ ART-DIRECTION STANDARD:
 Unique variation seed: ${data.seed}.`;
 
     try {
-      const { mimeType, base64 } = await callNvidiaImage(apiToken, fullPrompt, data.aspectRatio, data.seed);
-      const url = await uploadToSupabaseStorage(base64, mimeType, "slide");
+      const { mimeType, bytes } = await callTogetherImage(apiToken, fullPrompt, data.aspectRatio, data.seed);
+      const url = await uploadBytesToSupabaseStorage(bytes, mimeType, "slide");
       // Não devolva Base64 pela função do Vercel: respostas grandes podem ultrapassar
       // o limite de payload. O arquivo já está salvo no Supabase; devolvemos só a URL.
       return { url };
@@ -510,68 +459,49 @@ Unique variation seed: ${data.seed}.`;
     }
   });
 
-export const testNvidiaConnection = createServerFn({ method: "POST" })
+export const testTogetherConnection = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ imageQuality: z.enum(["fast", "premium"]).optional().default("premium") }).parse(d ?? {}))
   .handler(async ({ data }): Promise<{ ok: boolean; message: string; model: string }> => {
-    const apiToken = process.env.NVIDIA_API_KEY;
+    const apiToken = process.env.TOGETHER_API_KEY;
     const model = imageModelFor(data.imageQuality);
-    if (!apiToken) {
-      return { ok: false, model, message: "NVIDIA_API_KEY não configurada no servidor." };
-    }
+    if (!apiToken) return { ok: false, model, message: "TOGETHER_API_KEY não configurada no servidor." };
 
-    // Valida a chave listando os modelos hospedados disponíveis.
-    // Não fazemos inferência e não dependemos de nenhum modelo individual.
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), NVIDIA_KEY_TEST_TIMEOUT_MS);
-
+    const timeoutId = setTimeout(() => controller.abort(), TOGETHER_KEY_TEST_TIMEOUT_MS);
     try {
-      const response = await fetch(NVIDIA_KEY_TEST_URL, {
+      const response = await fetch(TOGETHER_MODELS_URL, {
         method: "GET",
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${apiToken}`,
-        },
+        headers: { Accept: "application/json", Authorization: `Bearer ${apiToken}` },
         signal: controller.signal,
       });
 
       const raw = await response.text();
       if (!response.ok) {
         const detail = raw.replace(/\s+/g, " ").slice(0, 350);
-        return {
-          ok: false,
-          model,
-          message: `A NVIDIA respondeu ${response.status} ao validar a API key: ${detail || "sem detalhes"}`,
-        };
+        return { ok: false, model, message: `A Together respondeu ${response.status}: ${detail || "sem detalhes"}` };
       }
 
-      let hostedModelCount: number | null = null;
+      let models: Array<{ id?: string; type?: string }> = [];
       try {
-        const parsed = JSON.parse(raw) as { data?: unknown[] };
-        if (Array.isArray(parsed.data)) hostedModelCount = parsed.data.length;
+        const parsed = JSON.parse(raw) as Array<{ id?: string; type?: string }>;
+        if (Array.isArray(parsed)) models = parsed;
       } catch {
-        // A chave já foi validada pelo status 2xx; a contagem é apenas informativa.
+        return { ok: true, model, message: "API key Together válida. A autenticação respondeu com sucesso." };
       }
 
-      try {
-        configuredImageEndpoint();
-      } catch (error) {
-        const message = nvidiaErrorMessage(error);
-        return {
-          ok: false,
-          model,
-          message: `API key NVIDIA válida${hostedModelCount !== null ? ` (${hostedModelCount} modelos hospedados visíveis)` : ""}. Porém o gerador de imagem ainda não pode iniciar: ${message}`,
-        };
-      }
-
+      const selectedVisible = models.some((item) => item.id === model);
+      const imageModelCount = models.filter((item) => item.type === "image").length;
       return {
-        ok: true,
+        ok: selectedVisible,
         model,
-        message: `API key NVIDIA válida${hostedModelCount !== null ? ` (${hostedModelCount} modelos hospedados visíveis)` : ""} e NVIDIA_IMAGE_API_URL configurada. Motor selecionado: ${model}.`,
+        message: selectedVisible
+          ? `Together API conectada. Modelo ${model} disponível${imageModelCount ? `; ${imageModelCount} modelos de imagem visíveis` : ""}.`
+          : `API key Together válida, mas o modelo ${model} não apareceu na lista disponível para esta conta.`,
       };
     } catch (error) {
       const message = error instanceof Error && error.name === "AbortError"
-        ? "O teste da API key NVIDIA excedeu 15 segundos. Tente novamente."
-        : nvidiaErrorMessage(error);
+        ? "O teste da Together excedeu 15 segundos. Tente novamente."
+        : togetherErrorMessage(error);
       return { ok: false, model, message };
     } finally {
       clearTimeout(timeoutId);
