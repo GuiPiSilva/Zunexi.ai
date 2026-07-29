@@ -1,5 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { InferenceClient } from "@huggingface/inference";
 import { z } from "zod";
 import { admin, consumeAccessCredit, requireAccessKey } from "@/lib/access.functions";
 
@@ -136,24 +135,24 @@ Seed única: ${data.seed}-${Math.random().toString(36).slice(2)}`;
 
 
 // ---------------------------------------------------------------------------
-// IMAGEM — Hugging Face Inference Providers / Qwen-Image.
+// IMAGEM — NVIDIA Build / NVIDIA NIM API hospedada.
 //
-// O modelo gera somente o visual-base. O texto final continua sendo aplicado
-// pela Zunexi no navegador para evitar erros de ortografia e manter o layout
-// previsível. O SDK oficial escolhe automaticamente um Inference Provider
-// compatível com o modelo configurado.
+// Não carrega modelo no Vercel e não depende de Lightning/Hugging Face.
+// O backend do Vercel chama diretamente a API da NVIDIA usando NVIDIA_API_KEY.
+// Endpoint padrão: FLUX.1-schnell, documentado pela NVIDIA para text-to-image.
 // ---------------------------------------------------------------------------
 
-const HUGGINGFACE_IMAGE_MODEL = process.env.HUGGINGFACE_IMAGE_MODEL || process.env.HF_IMAGE_MODEL || "Qwen/Qwen-Image";
-const HUGGINGFACE_IMAGE_TIMEOUT_MS = 120_000;
-const HUGGINGFACE_MAX_ATTEMPTS = 3;
-const HUGGINGFACE_BASE_DELAY_MS = 2_000;
+const NVIDIA_IMAGE_MODEL = process.env.NVIDIA_IMAGE_MODEL || "black-forest-labs/flux.1-schnell";
+const NVIDIA_IMAGE_API_URL = process.env.NVIDIA_IMAGE_API_URL || "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-schnell";
+const NVIDIA_IMAGE_TIMEOUT_MS = Number(process.env.NVIDIA_IMAGE_TIMEOUT_MS || 120_000);
+const NVIDIA_MAX_ATTEMPTS = 3;
+const NVIDIA_BASE_DELAY_MS = 2_000;
 const IMAGE_STORAGE_BUCKET = process.env.IMAGE_STORAGE_BUCKET || process.env.GEMINI_STORAGE_BUCKET || "generated-images";
 
 type ImageQuality = "fast" | "premium";
 
 function imageModelFor(_quality: ImageQuality = "premium") {
-  return HUGGINGFACE_IMAGE_MODEL;
+  return NVIDIA_IMAGE_MODEL;
 }
 
 const ImageInput = z.object({
@@ -169,7 +168,6 @@ const ImageInput = z.object({
   style: z.string().optional().default(""),
   aspectRatio: z.enum(["1:1", "4:5", "9:16"]).optional().default("1:1"),
   // Mantido por compatibilidade com projetos/jobs antigos.
-  // O teste atual usa o mesmo modelo para ambos os valores.
   imageQuality: z.enum(["fast", "premium"]).optional().default("premium"),
 });
 
@@ -217,20 +215,22 @@ function imageSeed(value: string): number {
 
 function compactImagePrompt(prompt: string): string {
   const normalized = prompt.replace(/\r/g, "").trim();
-  const maxChars = 6_000;
+  // A NVIDIA documenta prompt de até 10.000 caracteres para o endpoint usado.
+  const maxChars = 9_500;
   if (normalized.length <= maxChars) return normalized;
-  const head = normalized.slice(0, 3_600);
-  const tail = normalized.slice(-2_200);
+  const head = normalized.slice(0, 5_800);
+  const tail = normalized.slice(-3_500);
   return `${head}\n\n[brief compacted]\n\n${tail}`;
 }
 
 function dimensionsForAspectRatio(aspectRatio: "1:1" | "4:5" | "9:16") {
-  if (aspectRatio === "4:5") return { width: 1024, height: 1280 };
-  if (aspectRatio === "9:16") return { width: 720, height: 1280 };
+  // Resoluções suportadas pelo endpoint FLUX.1-schnell da NVIDIA.
+  if (aspectRatio === "4:5") return { width: 896, height: 1152 };
+  if (aspectRatio === "9:16") return { width: 768, height: 1344 };
   return { width: 1024, height: 1024 };
 }
 
-function huggingFaceErrorMessage(error: unknown): string {
+function nvidiaErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "string" && error.trim()) return error.trim();
   try {
@@ -240,100 +240,141 @@ function huggingFaceErrorMessage(error: unknown): string {
   }
 }
 
-async function callHuggingFaceImage(
+type NvidiaImageResponse = {
+  artifacts?: Array<{ base64?: string; mime_type?: string; mimeType?: string }>;
+  data?: Array<{ b64_json?: string; base64?: string }>;
+  image?: string;
+  base64?: string;
+  detail?: unknown;
+  message?: string;
+};
+
+function extractNvidiaImage(json: NvidiaImageResponse): { mimeType: string; base64: string } {
+  const artifact = json.artifacts?.[0];
+  const base64 = artifact?.base64 || json.data?.[0]?.b64_json || json.data?.[0]?.base64 || json.image || json.base64;
+  if (!base64 || typeof base64 !== "string") {
+    throw new Error("A NVIDIA respondeu sem a imagem em base64.");
+  }
+
+  const cleaned = base64.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
+  const mimeType = artifact?.mime_type || artifact?.mimeType || "image/jpeg";
+  return { mimeType, base64: cleaned };
+}
+
+async function callNvidiaImage(
   token: string,
   prompt: string,
   aspectRatio: "1:1" | "4:5" | "9:16",
   seed: string,
 ): Promise<{ mimeType: string; base64: string }> {
   const { width, height } = dimensionsForAspectRatio(aspectRatio);
-  const client = new InferenceClient(token);
   let lastError: Error | null = null;
   let requestPrompt = compactImagePrompt(prompt);
 
-  for (let attempt = 1; attempt <= HUGGINGFACE_MAX_ATTEMPTS; attempt += 1) {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  for (let attempt = 1; attempt <= NVIDIA_MAX_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), NVIDIA_IMAGE_TIMEOUT_MS);
 
     try {
-      console.info("Hugging Face image request", {
-        model: HUGGINGFACE_IMAGE_MODEL,
+      console.info("NVIDIA image request", {
+        model: NVIDIA_IMAGE_MODEL,
+        endpoint: NVIDIA_IMAGE_API_URL,
         attempt,
         width,
         height,
         promptChars: requestPrompt.length,
       });
 
-      const imageBlob = await Promise.race([
-        client.textToImage({
-          model: HUGGINGFACE_IMAGE_MODEL,
-          inputs: requestPrompt,
-          parameters: {
-            width,
-            height,
-            seed: imageSeed(seed),
-          },
+      const response = await fetch(NVIDIA_IMAGE_API_URL, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          prompt: requestPrompt,
+          height,
+          width,
+          cfg_scale: 0,
+          mode: "base",
+          samples: 1,
+          seed: imageSeed(seed),
+          steps: 4,
         }),
-        new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(
-            () => reject(new Error(`Tempo esgotado ao gerar imagem no Hugging Face após ${HUGGINGFACE_IMAGE_TIMEOUT_MS / 1000}s.`)),
-            HUGGINGFACE_IMAGE_TIMEOUT_MS,
-          );
-        }),
-      ]);
-
-      const buffer = Buffer.from(await imageBlob.arrayBuffer());
-      if (!buffer.length) throw new Error("O Hugging Face retornou uma imagem vazia.");
-
-      const mimeType = imageBlob.type?.startsWith("image/") ? imageBlob.type : "image/png";
-      console.info("Hugging Face image success", {
-        model: HUGGINGFACE_IMAGE_MODEL,
-        attempt,
-        mimeType,
-        bytes: buffer.length,
       });
-      return { mimeType, base64: buffer.toString("base64") };
+
+      const raw = await response.text();
+      let json: NvidiaImageResponse = {};
+      try {
+        json = raw ? JSON.parse(raw) as NvidiaImageResponse : {};
+      } catch {
+        throw new Error(`Resposta inválida da NVIDIA (${response.status}): ${raw.slice(0, 500)}`);
+      }
+
+      if (!response.ok) {
+        const detail = typeof json.detail === "string"
+          ? json.detail
+          : json.message || (json.detail ? JSON.stringify(json.detail) : raw.slice(0, 500));
+        throw new Error(`NVIDIA API ${response.status}: ${detail || "erro sem detalhes"}`);
+      }
+
+      const image = extractNvidiaImage(json);
+      const bytes = Buffer.from(image.base64, "base64");
+      if (!bytes.length) throw new Error("A NVIDIA retornou uma imagem vazia.");
+
+      console.info("NVIDIA image success", {
+        model: NVIDIA_IMAGE_MODEL,
+        attempt,
+        mimeType: image.mimeType,
+        bytes: bytes.length,
+      });
+      return image;
     } catch (error) {
-      const detail = huggingFaceErrorMessage(error);
-      console.error("Hugging Face image failure", {
-        model: HUGGINGFACE_IMAGE_MODEL,
+      const detail = error instanceof Error && error.name === "AbortError"
+        ? `Tempo esgotado ao gerar imagem na NVIDIA após ${Math.round(NVIDIA_IMAGE_TIMEOUT_MS / 1000)}s.`
+        : nvidiaErrorMessage(error);
+
+      console.error("NVIDIA image failure", {
+        model: NVIDIA_IMAGE_MODEL,
         attempt,
         detail,
-        error,
       });
 
-      if (/401|unauthori|invalid.*token/i.test(detail)) {
-        throw new Error(`Hugging Face recusou o token: ${detail}`);
+      if (/401|unauthori|invalid.*key|authentication/i.test(detail)) {
+        throw new Error(`NVIDIA recusou a API key. Confira NVIDIA_API_KEY no Vercel. ${detail}`);
       }
       if (/402|payment|required|credit|quota|billing/i.test(detail)) {
-        throw new Error(`Hugging Face sem crédito/permissão de cobrança para o provider: ${detail}`);
+        throw new Error(`A NVIDIA recusou a solicitação por limite/crédito: ${detail}`);
       }
       if (/403|forbidden|permission/i.test(detail)) {
-        throw new Error(`Hugging Face recusou a permissão do token: ${detail}`);
+        throw new Error(`Sua NVIDIA API key não tem permissão para esse endpoint: ${detail}`);
       }
-      if (/404|not found|not.*supported|no provider|provider.*available/i.test(detail)) {
-        throw new Error(`O modelo ${HUGGINGFACE_IMAGE_MODEL} não está disponível por um Inference Provider compatível: ${detail}`);
+      if (/404|not found/i.test(detail)) {
+        throw new Error(`Endpoint NVIDIA não encontrado. Confira NVIDIA_IMAGE_API_URL: ${detail}`);
       }
 
-      lastError = new Error(`Falha no Hugging Face: ${detail}`);
+      lastError = new Error(`Falha na NVIDIA API: ${detail}`);
 
-      if (attempt < HUGGINGFACE_MAX_ATTEMPTS && /429|rate|timeout|timed out|5\d\d|fetch failed|network|socket/i.test(detail)) {
-        await sleep(HUGGINGFACE_BASE_DELAY_MS * attempt);
+      if (attempt < NVIDIA_MAX_ATTEMPTS && /429|rate|timeout|tempo esgotado|5\d\d|fetch failed|network|socket/i.test(detail)) {
+        await sleep(NVIDIA_BASE_DELAY_MS * attempt);
         continue;
       }
 
-      if (attempt < HUGGINGFACE_MAX_ATTEMPTS && requestPrompt.length > 3_500) {
-        requestPrompt = requestPrompt.slice(0, 3_500);
+      if (attempt < NVIDIA_MAX_ATTEMPTS && requestPrompt.length > 4_500) {
+        requestPrompt = requestPrompt.slice(0, 4_500);
         await sleep(500);
         continue;
       }
 
       throw lastError;
     } finally {
-      if (timeoutId) clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
     }
   }
 
-  throw lastError ?? new Error("Falha ao gerar imagem no Hugging Face após múltiplas tentativas.");
+  throw lastError ?? new Error("Falha ao gerar imagem na NVIDIA após múltiplas tentativas.");
 }
 
 export const uploadReferenceImage = createServerFn({ method: "POST" })
@@ -392,8 +433,8 @@ function creativeProfile(data: z.infer<typeof ImageInput>) {
 export const generateImage = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => ImageInput.parse(d))
   .handler(async ({ data }): Promise<{ dataUrl: string; url: string }> => {
-    const apiToken = process.env.HF_TOKEN || process.env.HUGGINGFACE_API_TOKEN;
-    if (!apiToken) throw new Error("HF_TOKEN não configurado no servidor.");
+    const apiToken = process.env.NVIDIA_API_KEY;
+    if (!apiToken) throw new Error("NVIDIA_API_KEY não configurada no servidor.");
 
     const fullPrompt = `CREATE ONLY A SINGLE CONTINUOUS PHOTOGRAPHIC / 3D / ILLUSTRATIVE SCENE FOR A HIGH-END INSTAGRAM CAMPAIGN. Zunexi will apply the final Portuguese copy afterward and flatten everything into the finished image.
 
@@ -428,7 +469,7 @@ ART-DIRECTION STANDARD:
 Unique variation seed: ${data.seed}.`;
 
     try {
-      const { mimeType, base64 } = await callHuggingFaceImage(apiToken, fullPrompt, data.aspectRatio, data.seed);
+      const { mimeType, base64 } = await callNvidiaImage(apiToken, fullPrompt, data.aspectRatio, data.seed);
       const url = await uploadToSupabaseStorage(base64, mimeType, "slide");
       return { dataUrl: `data:${mimeType};base64,${base64}`, url };
     } catch (error) {
@@ -438,26 +479,26 @@ Unique variation seed: ${data.seed}.`;
     }
   });
 
-export const testHuggingFaceConnection = createServerFn({ method: "POST" })
+export const testNvidiaConnection = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ imageQuality: z.enum(["fast", "premium"]).optional().default("premium") }).parse(d ?? {}))
   .handler(async ({ data }): Promise<{ ok: boolean; message: string; model: string; dataUrl?: string }> => {
-    const apiToken = process.env.HF_TOKEN || process.env.HUGGINGFACE_API_TOKEN;
+    const apiToken = process.env.NVIDIA_API_KEY;
     const model = imageModelFor(data.imageQuality);
     if (!apiToken) {
-      return { ok: false, model, message: "HF_TOKEN não configurado no servidor." };
+      return { ok: false, model, message: "NVIDIA_API_KEY não configurada no servidor." };
     }
 
     const testPrompt = `Premium square AI technology campaign visual, deep black background, electric blue and violet luminous particles, one sculptural futuristic abstract object as hero, dramatic editorial lighting, realistic depth, elegant negative space. No text, letters, numbers, logos, watermark or UI.`;
     try {
-      const { mimeType, base64 } = await callHuggingFaceImage(apiToken, testPrompt, "1:1", `test-${Date.now()}`);
+      const { mimeType, base64 } = await callNvidiaImage(apiToken, testPrompt, "1:1", `test-${Date.now()}`);
       return {
         ok: true,
         model,
-        message: `Hugging Face conectado e gerando imagens com ${model}.`,
+        message: `NVIDIA Build API conectada e gerando imagens com ${model}.`,
         dataUrl: `data:${mimeType};base64,${base64}`,
       };
     } catch (error) {
       const err = error as Error;
-      return { ok: false, model, message: err.message || "Falha desconhecida ao testar o Hugging Face." };
+      return { ok: false, model, message: err.message || "Falha desconhecida ao testar a NVIDIA API." };
     }
   });
