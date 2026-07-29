@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { InferenceClient } from "@huggingface/inference";
 import { z } from "zod";
 import { admin, consumeAccessCredit, requireAccessKey } from "@/lib/access.functions";
 
@@ -135,16 +136,15 @@ Seed única: ${data.seed}-${Math.random().toString(36).slice(2)}`;
 
 
 // ---------------------------------------------------------------------------
-// IMAGEM — Hugging Face / NVIDIA Qwen-Image-Flash.
+// IMAGEM — Hugging Face Inference Providers / Qwen-Image.
 //
 // O modelo gera somente o visual-base. O texto final continua sendo aplicado
 // pela Zunexi no navegador para evitar erros de ortografia e manter o layout
-// previsível. Se o checkpoint ainda não estiver servido pelo provider
-// hf-inference, configure HUGGINGFACE_IMAGE_ENDPOINT com um Inference Endpoint
-// dedicado que aceite o payload padrão de text-to-image do Hugging Face.
+// previsível. O SDK oficial escolhe automaticamente um Inference Provider
+// compatível com o modelo configurado.
 // ---------------------------------------------------------------------------
 
-const HUGGINGFACE_IMAGE_MODEL = process.env.HUGGINGFACE_IMAGE_MODEL || "nvidia/Qwen-Image-Flash";
+const HUGGINGFACE_IMAGE_MODEL = process.env.HUGGINGFACE_IMAGE_MODEL || process.env.HF_IMAGE_MODEL || "Qwen/Qwen-Image";
 const HUGGINGFACE_IMAGE_TIMEOUT_MS = 120_000;
 const HUGGINGFACE_MAX_ATTEMPTS = 3;
 const HUGGINGFACE_BASE_DELAY_MS = 2_000;
@@ -168,8 +168,8 @@ const ImageInput = z.object({
   palette: z.string().optional().default(""),
   style: z.string().optional().default(""),
   aspectRatio: z.enum(["1:1", "4:5", "9:16"]).optional().default("1:1"),
-  // Mantido por compatibilidade com projetos/jobs antigos. Qwen-Image-Flash
-  // usa o mesmo checkpoint em ambos os valores.
+  // Mantido por compatibilidade com projetos/jobs antigos.
+  // O teste atual usa o mesmo modelo para ambos os valores.
   imageQuality: z.enum(["fast", "premium"]).optional().default("premium"),
 });
 
@@ -230,28 +230,14 @@ function dimensionsForAspectRatio(aspectRatio: "1:1" | "4:5" | "9:16") {
   return { width: 1024, height: 1024 };
 }
 
-function huggingFaceEndpoint() {
-  const custom = process.env.HUGGINGFACE_IMAGE_ENDPOINT?.trim();
-  if (custom) return custom.replace(/\/$/, "");
-  return `https://router.huggingface.co/hf-inference/models/${HUGGINGFACE_IMAGE_MODEL}`;
-}
-
-function huggingFaceErrorDetail(body: string): string {
-  if (!body) return "resposta vazia";
+function huggingFaceErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error.trim();
   try {
-    const parsed = JSON.parse(body) as {
-      error?: string | { message?: string };
-      message?: string;
-      estimated_time?: number;
-    };
-    if (typeof parsed.error === "string" && parsed.error) return parsed.error;
-    if (parsed.error && typeof parsed.error === "object" && parsed.error.message) return parsed.error.message;
-    if (parsed.message) return parsed.message;
-    if (parsed.estimated_time) return `modelo inicializando; estimativa ${Math.ceil(parsed.estimated_time)}s`;
+    return JSON.stringify(error);
   } catch {
-    // Pode ser texto simples; retornamos um trecho seguro abaixo.
+    return String(error);
   }
-  return body.replace(/\s+/g, " ").trim().slice(0, 320) || "erro desconhecido";
 }
 
 async function callHuggingFaceImage(
@@ -260,95 +246,90 @@ async function callHuggingFaceImage(
   aspectRatio: "1:1" | "4:5" | "9:16",
   seed: string,
 ): Promise<{ mimeType: string; base64: string }> {
-  const endpoint = huggingFaceEndpoint();
   const { width, height } = dimensionsForAspectRatio(aspectRatio);
+  const client = new InferenceClient(token);
   let lastError: Error | null = null;
   let requestPrompt = compactImagePrompt(prompt);
 
   for (let attempt = 1; attempt <= HUGGINGFACE_MAX_ATTEMPTS; attempt += 1) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), HUGGINGFACE_IMAGE_TIMEOUT_MS);
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          Accept: "image/*, application/json",
-          "x-wait-for-model": "true",
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
+      console.info("Hugging Face image request", {
+        model: HUGGINGFACE_IMAGE_MODEL,
+        attempt,
+        width,
+        height,
+        promptChars: requestPrompt.length,
+      });
+
+      const imageBlob = await Promise.race([
+        client.textToImage({
+          model: HUGGINGFACE_IMAGE_MODEL,
           inputs: requestPrompt,
           parameters: {
             width,
             height,
-            // Qwen-Image-Flash foi destilado para quatro passos.
-            num_inference_steps: 4,
             seed: imageSeed(seed),
           },
         }),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(
+            () => reject(new Error(`Tempo esgotado ao gerar imagem no Hugging Face após ${HUGGINGFACE_IMAGE_TIMEOUT_MS / 1000}s.`)),
+            HUGGINGFACE_IMAGE_TIMEOUT_MS,
+          );
+        }),
+      ]);
+
+      const buffer = Buffer.from(await imageBlob.arrayBuffer());
+      if (!buffer.length) throw new Error("O Hugging Face retornou uma imagem vazia.");
+
+      const mimeType = imageBlob.type?.startsWith("image/") ? imageBlob.type : "image/png";
+      console.info("Hugging Face image success", {
+        model: HUGGINGFACE_IMAGE_MODEL,
+        attempt,
+        mimeType,
+        bytes: buffer.length,
+      });
+      return { mimeType, base64: buffer.toString("base64") };
+    } catch (error) {
+      const detail = huggingFaceErrorMessage(error);
+      console.error("Hugging Face image failure", {
+        model: HUGGINGFACE_IMAGE_MODEL,
+        attempt,
+        detail,
+        error,
       });
 
-      if (!response.ok) {
-        const body = await response.text();
-        const detail = huggingFaceErrorDetail(body);
-        console.error("Hugging Face image error", response.status, `tentativa ${attempt}/${HUGGINGFACE_MAX_ATTEMPTS}`, detail);
-
-        if (response.status === 401 || response.status === 403) {
-          throw new Error(`Hugging Face recusou o token/permissão (${response.status}): ${detail}`);
-        }
-        if (response.status === 404 || response.status === 410) {
-          throw new Error(
-            `O modelo ${HUGGINGFACE_IMAGE_MODEL} não está disponível nesta rota do Hugging Face. ` +
-            `Configure HUGGINGFACE_IMAGE_ENDPOINT com um Inference Endpoint do Qwen-Image-Flash. Detalhe: ${detail}`,
-          );
-        }
-        if (response.status === 400 && attempt < HUGGINGFACE_MAX_ATTEMPTS && requestPrompt.length > 3_500) {
-          requestPrompt = requestPrompt.slice(0, 3_500);
-          lastError = new Error(`Hugging Face rejeitou o briefing: ${detail}`);
-          await sleep(500);
-          continue;
-        }
-        if ((response.status === 429 || response.status >= 500) && attempt < HUGGINGFACE_MAX_ATTEMPTS) {
-          lastError = new Error(`Hugging Face indisponível/limitado (${response.status}): ${detail}`);
-          await sleep(HUGGINGFACE_BASE_DELAY_MS * attempt);
-          continue;
-        }
-        throw new Error(`Hugging Face retornou erro ${response.status}: ${detail}`);
+      if (/401|unauthori|invalid.*token/i.test(detail)) {
+        throw new Error(`Hugging Face recusou o token: ${detail}`);
+      }
+      if (/402|payment|required|credit|quota|billing/i.test(detail)) {
+        throw new Error(`Hugging Face sem crédito/permissão de cobrança para o provider: ${detail}`);
+      }
+      if (/403|forbidden|permission/i.test(detail)) {
+        throw new Error(`Hugging Face recusou a permissão do token: ${detail}`);
+      }
+      if (/404|not found|not.*supported|no provider|provider.*available/i.test(detail)) {
+        throw new Error(`O modelo ${HUGGINGFACE_IMAGE_MODEL} não está disponível por um Inference Provider compatível: ${detail}`);
       }
 
-      const responseType = (response.headers.get("content-type") || "").split(";")[0];
-      if (responseType.startsWith("image/")) {
-        const buffer = Buffer.from(await response.arrayBuffer());
-        return { mimeType: responseType, base64: buffer.toString("base64") };
+      lastError = new Error(`Falha no Hugging Face: ${detail}`);
+
+      if (attempt < HUGGINGFACE_MAX_ATTEMPTS && /429|rate|timeout|timed out|5\d\d|fetch failed|network|socket/i.test(detail)) {
+        await sleep(HUGGINGFACE_BASE_DELAY_MS * attempt);
+        continue;
       }
 
-      const body = Buffer.from(await response.arrayBuffer());
-      const text = body.toString("utf8");
-      try {
-        const parsed = JSON.parse(text) as { image?: string; generated_image?: string; error?: string };
-        const base64 = parsed.image || parsed.generated_image;
-        if (base64) return { mimeType: "image/png", base64 };
-        if (parsed.error) throw new Error(parsed.error);
-      } catch (error) {
-        if (error instanceof Error && error.message !== "Unexpected end of JSON input") throw error;
+      if (attempt < HUGGINGFACE_MAX_ATTEMPTS && requestPrompt.length > 3_500) {
+        requestPrompt = requestPrompt.slice(0, 3_500);
+        await sleep(500);
+        continue;
       }
-      throw new Error(`O Hugging Face não retornou bytes de imagem válidos. Resposta: ${text.slice(0, 220)}`);
-    } catch (error) {
-      const err = error as Error;
-      if (err.name === "AbortError") {
-        lastError = new Error("Tempo esgotado ao gerar imagem no Hugging Face.");
-        if (attempt < HUGGINGFACE_MAX_ATTEMPTS) {
-          await sleep(HUGGINGFACE_BASE_DELAY_MS);
-          continue;
-        }
-        throw lastError;
-      }
-      throw err;
+
+      throw lastError;
     } finally {
-      clearTimeout(timeout);
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
 
