@@ -121,7 +121,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   const pageTitle = useMemo(() => {
-    if (loc.pathname.startsWith("/editor/")) return "Editor visual";
+    if (loc.pathname.startsWith("/editor/")) return "Arte pronta";
     return PAGE_TITLES[loc.pathname] ?? "Zunexi.ai";
   }, [loc.pathname]);
 
