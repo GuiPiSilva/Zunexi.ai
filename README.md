@@ -19,12 +19,19 @@ npm run build
 
 Configure as chaves privadas no ambiente do servidor (por exemplo, no Vercel), nunca no repositório público.
 
-Principais variáveis usadas pelo projeto:
+### NVIDIA Build API — geração de imagens
+
+Crie uma chave em `https://build.nvidia.com/settings/api-keys` e configure no Vercel:
 
 ```env
-HF_TOKEN=hf_...
-HUGGINGFACE_IMAGE_MODEL=Qwen/Qwen-Image
-# Compatibilidade: HF_IMAGE_MODEL também é aceito, mas prefira HUGGINGFACE_IMAGE_MODEL.
+NVIDIA_API_KEY=nvapi-...
+NVIDIA_IMAGE_MODEL=black-forest-labs/flux.1-schnell
+NVIDIA_IMAGE_API_URL=https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-schnell
+NVIDIA_IMAGE_TIMEOUT_MS=120000
 ```
+
+A chamada é feita somente no backend do TanStack Start/Vercel. A `NVIDIA_API_KEY` não deve usar prefixo `VITE_` e não deve ser enviada ao navegador.
+
+Não é necessário Lightning AI nem servidor GPU próprio.
 
 As variáveis do Supabase e Groq devem continuar configuradas conforme o ambiente atual do projeto.
