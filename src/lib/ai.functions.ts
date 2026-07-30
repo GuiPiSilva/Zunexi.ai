@@ -132,7 +132,7 @@ Seed única: ${data.seed}-${Math.random().toString(36).slice(2)}`;
 // ---------------------------------------------------------------------------
 // IMAGEM — múltiplos provedores com fallback automático.
 //
-// Ordem padrão: Cloudflare Workers AI -> Gemini -> NVIDIA NIM/Partner endpoint.
+// Ordem padrão: Cloudflare Workers AI -> OpenRouter -> Gemini.
 // A ordem pode ser alterada no Vercel com IMAGE_PROVIDER_ORDER.
 // Nenhuma chave é enviada ao navegador; todas são lidas somente no servidor.
 // ---------------------------------------------------------------------------
@@ -148,14 +148,14 @@ const GEMINI_MODEL_PREMIUM = process.env.GEMINI_IMAGE_MODEL_PREMIUM || "gemini-3
 const GEMINI_IMAGE_API_URL = process.env.GEMINI_IMAGE_API_URL || "https://generativelanguage.googleapis.com/v1beta/interactions";
 const GEMINI_IMAGE_TIMEOUT_MS = Number(process.env.GEMINI_IMAGE_TIMEOUT_MS || 120_000);
 
-const NVIDIA_IMAGE_API_URL = process.env.NVIDIA_IMAGE_API_URL || "";
-const NVIDIA_IMAGE_MODEL = process.env.NVIDIA_IMAGE_MODEL || "qwen-image";
-const NVIDIA_IMAGE_TIMEOUT_MS = Number(process.env.NVIDIA_IMAGE_TIMEOUT_MS || 120_000);
+const OPENROUTER_IMAGE_API_URL = process.env.OPENROUTER_IMAGE_API_URL || "https://openrouter.ai/api/v1/images";
+const OPENROUTER_IMAGE_MODEL = process.env.OPENROUTER_IMAGE_MODEL || "black-forest-labs/flux.2-klein-4b";
+const OPENROUTER_IMAGE_TIMEOUT_MS = Number(process.env.OPENROUTER_IMAGE_TIMEOUT_MS || 120_000);
 
 const PROVIDER_TEST_TIMEOUT_MS = 15_000;
 
 type ImageQuality = "fast" | "premium";
-type ImageProvider = "cloudflare" | "gemini" | "nvidia";
+type ImageProvider = "cloudflare" | "openrouter" | "gemini";
 type GeneratedImage = { mimeType: string; bytes: Buffer; provider: ImageProvider; model: string };
 
 const ImageInput = z.object({
@@ -234,18 +234,18 @@ function providerErrorMessage(error: unknown): string {
 }
 
 function imageProviderOrder(): ImageProvider[] {
-  const allowed = new Set<ImageProvider>(["cloudflare", "gemini", "nvidia"]);
-  const raw = (process.env.IMAGE_PROVIDER_ORDER || "cloudflare,gemini,nvidia")
+  const allowed = new Set<ImageProvider>(["cloudflare", "openrouter", "gemini"]);
+  const raw = (process.env.IMAGE_PROVIDER_ORDER || "cloudflare,openrouter,gemini")
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter((item): item is ImageProvider => allowed.has(item as ImageProvider));
-  return [...new Set(raw.length ? raw : ["cloudflare", "gemini", "nvidia"])] as ImageProvider[];
+  return [...new Set(raw.length ? raw : ["cloudflare", "openrouter", "gemini"])] as ImageProvider[];
 }
 
 function providerConfigured(provider: ImageProvider) {
   if (provider === "cloudflare") return Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN);
-  if (provider === "gemini") return Boolean(process.env.GEMINI_API_KEY);
-  return Boolean(NVIDIA_IMAGE_API_URL && process.env.NVIDIA_API_KEY);
+  if (provider === "openrouter") return Boolean(process.env.OPENROUTER_API_KEY);
+  return Boolean(process.env.GEMINI_API_KEY);
 }
 
 function cloudflareModelFor(quality: ImageQuality) {
@@ -394,70 +394,53 @@ async function callGeminiImage(
   }
 }
 
-async function callNvidiaImage(
+async function callOpenRouterImage(
   prompt: string,
-  aspectRatio: "1:1" | "4:5" | "9:16",
   seed: string,
 ): Promise<GeneratedImage> {
-  const apiKey = process.env.NVIDIA_API_KEY;
-  if (!apiKey) throw new Error("NVIDIA não configurada: falta NVIDIA_API_KEY.");
-  if (!NVIDIA_IMAGE_API_URL) throw new Error("NVIDIA não configurada para imagens: falta NVIDIA_IMAGE_API_URL de um NIM/Partner Endpoint.");
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error("OpenRouter não configurado: falta OPENROUTER_API_KEY.");
 
-  const { width, height } = dimensionsForAspectRatio(aspectRatio);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), NVIDIA_IMAGE_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), OPENROUTER_IMAGE_TIMEOUT_MS);
   try {
-    const configuredFormat = (process.env.NVIDIA_IMAGE_API_FORMAT || "").trim().toLowerCase();
-    const apiFormat = configuredFormat || (NVIDIA_IMAGE_API_URL.includes("/v1/infer") ? "nim" : "openai");
-    const body = apiFormat === "nim"
-      ? {
-          prompt: compactImagePrompt(prompt),
-          seed: imageSeed(seed),
-        }
-      : {
-          model: NVIDIA_IMAGE_MODEL,
-          prompt: compactImagePrompt(prompt),
-          size: `${width}x${height}`,
-          response_format: "b64_json",
-          n: 1,
-        };
-
-    const response = await fetch(NVIDIA_IMAGE_API_URL, {
+    const response = await fetch(OPENROUTER_IMAGE_API_URL, {
       method: "POST",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
+        ...(process.env.OPENROUTER_HTTP_REFERER ? { "HTTP-Referer": process.env.OPENROUTER_HTTP_REFERER } : {}),
+        ...(process.env.OPENROUTER_APP_NAME ? { "X-Title": process.env.OPENROUTER_APP_NAME } : {}),
       },
       signal: controller.signal,
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        model: OPENROUTER_IMAGE_MODEL,
+        prompt: compactImagePrompt(prompt),
+        output_format: "png",
+        n: 1,
+        seed: imageSeed(seed),
+      }),
     });
-
-    const contentType = response.headers.get("content-type")?.split(";")[0] || "";
-    if (contentType.startsWith("image/")) {
-      if (!response.ok) throw new Error(`NVIDIA retornou ${response.status}.`);
-      const bytes = Buffer.from(await response.arrayBuffer());
-      if (!bytes.length) throw new Error("NVIDIA retornou uma imagem vazia.");
-      return { mimeType: contentType, bytes, provider: "nvidia", model: NVIDIA_IMAGE_MODEL };
-    }
 
     const raw = await response.text();
     let json: any = {};
     try { json = raw ? JSON.parse(raw) : {}; } catch {
-      throw new Error(`NVIDIA retornou uma resposta inválida (${response.status}): ${raw.slice(0, 400)}`);
+      throw new Error(`OpenRouter retornou uma resposta inválida (${response.status}): ${raw.slice(0, 400)}`);
     }
     if (!response.ok) {
-      const detail = json?.detail || json?.error?.message || json?.message || raw.slice(0, 500) || "erro sem detalhes";
-      throw new Error(`NVIDIA Image API ${response.status}: ${detail}`);
+      const detail = json?.error?.message || json?.message || raw.slice(0, 500) || "erro sem detalhes";
+      throw new Error(`OpenRouter Image API ${response.status}: ${detail}`);
     }
 
-    const encoded = json?.artifacts?.[0]?.base64 || json?.data?.[0]?.b64_json || json?.image || json?.result?.image;
-    if (!encoded) throw new Error("NVIDIA respondeu sem base64 da imagem.");
-    const decoded = decodeBase64Image(encoded, "image/jpeg");
-    return { ...decoded, provider: "nvidia", model: NVIDIA_IMAGE_MODEL };
+    const item = json?.data?.[0];
+    const encoded = item?.b64_json;
+    if (!encoded) throw new Error("OpenRouter respondeu sem b64_json da imagem.");
+    const decoded = decodeBase64Image(encoded, item?.media_type || "image/png");
+    return { ...decoded, provider: "openrouter", model: OPENROUTER_IMAGE_MODEL };
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(`NVIDIA excedeu ${Math.round(NVIDIA_IMAGE_TIMEOUT_MS / 1000)}s.`);
+      throw new Error(`OpenRouter excedeu ${Math.round(OPENROUTER_IMAGE_TIMEOUT_MS / 1000)}s.`);
     }
     throw error;
   } finally {
@@ -473,15 +456,15 @@ async function generateWithProviderFallback(
 ): Promise<GeneratedImage> {
   const configured = imageProviderOrder().filter(providerConfigured);
   if (!configured.length) {
-    throw new Error("Nenhum provedor de imagem está configurado no Vercel. Configure Cloudflare, Gemini ou NVIDIA NIM.");
+    throw new Error("Nenhum provedor de imagem está configurado no Vercel. Configure Cloudflare, OpenRouter ou Gemini.");
   }
 
   const failures: string[] = [];
   for (const provider of configured) {
     try {
       if (provider === "cloudflare") return await callCloudflareImage(prompt, aspectRatio, seed, quality);
-      if (provider === "gemini") return await callGeminiImage(prompt, aspectRatio, quality);
-      return await callNvidiaImage(prompt, aspectRatio, seed);
+      if (provider === "openrouter") return await callOpenRouterImage(prompt, seed);
+      return await callGeminiImage(prompt, aspectRatio, quality);
     } catch (error) {
       const detail = providerErrorMessage(error);
       console.error(`[image-provider:${provider}]`, detail);
@@ -634,25 +617,32 @@ async function testGeminiProvider(quality: ImageQuality): Promise<ProviderTestSt
   } finally { clearTimeout(timeoutId); }
 }
 
-async function testNvidiaProvider(): Promise<ProviderTestStatus> {
-  const apiKey = process.env.NVIDIA_API_KEY;
-  if (!apiKey) return { provider: "nvidia", configured: false, ok: false, model: NVIDIA_IMAGE_MODEL, message: "não configurada" };
+async function testOpenRouterProvider(): Promise<ProviderTestStatus> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return { provider: "openrouter", configured: false, ok: false, model: OPENROUTER_IMAGE_MODEL, message: "não configurada" };
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), PROVIDER_TEST_TIMEOUT_MS);
   try {
-    const response = await fetch("https://integrate.api.nvidia.com/v1/models", {
+    const response = await fetch("https://openrouter.ai/api/v1/images/models", {
       headers: { Accept: "application/json", Authorization: `Bearer ${apiKey}` },
       signal: controller.signal,
     });
     const raw = await response.text();
-    if (!response.ok) return { provider: "nvidia", configured: true, ok: false, model: NVIDIA_IMAGE_MODEL, message: `HTTP ${response.status}: ${raw.replace(/\s+/g, " ").slice(0, 220)}` };
-    if (!NVIDIA_IMAGE_API_URL) {
-      return { provider: "nvidia", configured: true, ok: false, model: NVIDIA_IMAGE_MODEL, message: "API key válida; falta NVIDIA_IMAGE_API_URL de um NIM/Partner Endpoint para gerar imagens" };
-    }
-    return { provider: "nvidia", configured: true, ok: true, model: NVIDIA_IMAGE_MODEL, message: "API key válida e endpoint de imagem configurado" };
+    let json: any = {};
+    try { json = raw ? JSON.parse(raw) : {}; } catch { /* diagnóstico abaixo */ }
+    if (!response.ok) return { provider: "openrouter", configured: true, ok: false, model: OPENROUTER_IMAGE_MODEL, message: `HTTP ${response.status}: ${raw.replace(/\s+/g, " ").slice(0, 220)}` };
+    const models = Array.isArray(json?.data) ? json.data : [];
+    const visible = models.some((item: any) => item?.id === OPENROUTER_IMAGE_MODEL);
+    return {
+      provider: "openrouter",
+      configured: true,
+      ok: visible,
+      model: OPENROUTER_IMAGE_MODEL,
+      message: visible ? "API key válida e modelo de imagem visível" : `API key válida, mas ${OPENROUTER_IMAGE_MODEL} não apareceu entre os modelos de imagem disponíveis`,
+    };
   } catch (error) {
-    return { provider: "nvidia", configured: true, ok: false, model: NVIDIA_IMAGE_MODEL, message: providerErrorMessage(error) };
+    return { provider: "openrouter", configured: true, ok: false, model: OPENROUTER_IMAGE_MODEL, message: providerErrorMessage(error) };
   } finally { clearTimeout(timeoutId); }
 }
 
@@ -661,8 +651,8 @@ export const testImageProvidersConnection = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<{ ok: boolean; message: string; providers: ProviderTestStatus[]; order: ImageProvider[] }> => {
     const providers = await Promise.all([
       testCloudflareProvider(data.imageQuality),
+      testOpenRouterProvider(),
       testGeminiProvider(data.imageQuality),
-      testNvidiaProvider(),
     ]);
     const order = imageProviderOrder();
     const usable = providers.filter((item) => item.ok);
