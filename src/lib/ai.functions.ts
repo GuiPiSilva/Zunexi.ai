@@ -130,27 +130,33 @@ Seed única: ${data.seed}-${Math.random().toString(36).slice(2)}`;
 
 
 // ---------------------------------------------------------------------------
-// IMAGEM — Together AI (serverless).
+// IMAGEM — múltiplos provedores com fallback automático.
 //
-// O backend do Vercel chama diretamente a API da Together usando TOGETHER_API_KEY.
-// Não existe Lightning, servidor GPU próprio ou endpoint dedicado.
-// Modelo padrão: Qwen/Qwen-Image-2.0.
+// Ordem padrão: Cloudflare Workers AI -> Gemini -> NVIDIA NIM/Partner endpoint.
+// A ordem pode ser alterada no Vercel com IMAGE_PROVIDER_ORDER.
+// Nenhuma chave é enviada ao navegador; todas são lidas somente no servidor.
 // ---------------------------------------------------------------------------
 
-const TOGETHER_IMAGE_MODEL = process.env.TOGETHER_IMAGE_MODEL || "Qwen/Qwen-Image-2.0";
-const TOGETHER_IMAGE_API_URL = "https://api.together.xyz/v1/images/generations";
-const TOGETHER_MODELS_URL = "https://api.together.xyz/v1/models";
-const TOGETHER_IMAGE_TIMEOUT_MS = Number(process.env.TOGETHER_IMAGE_TIMEOUT_MS || 120_000);
-const TOGETHER_KEY_TEST_TIMEOUT_MS = 15_000;
-const TOGETHER_MAX_ATTEMPTS = 2;
-const TOGETHER_BASE_DELAY_MS = 1_500;
 const IMAGE_STORAGE_BUCKET = process.env.IMAGE_STORAGE_BUCKET || process.env.GEMINI_STORAGE_BUCKET || "generated-images";
 
-type ImageQuality = "fast" | "premium";
+const CLOUDFLARE_MODEL_FAST = process.env.CLOUDFLARE_IMAGE_MODEL_FAST || "@cf/black-forest-labs/flux-2-klein-4b";
+const CLOUDFLARE_MODEL_PREMIUM = process.env.CLOUDFLARE_IMAGE_MODEL_PREMIUM || "@cf/black-forest-labs/flux-2-klein-9b";
+const CLOUDFLARE_IMAGE_TIMEOUT_MS = Number(process.env.CLOUDFLARE_IMAGE_TIMEOUT_MS || 90_000);
 
-function imageModelFor(_quality: ImageQuality = "premium") {
-  return TOGETHER_IMAGE_MODEL;
-}
+const GEMINI_MODEL_FAST = process.env.GEMINI_IMAGE_MODEL_FAST || "gemini-3.1-flash-lite-image";
+const GEMINI_MODEL_PREMIUM = process.env.GEMINI_IMAGE_MODEL_PREMIUM || "gemini-3.1-flash-image";
+const GEMINI_IMAGE_API_URL = process.env.GEMINI_IMAGE_API_URL || "https://generativelanguage.googleapis.com/v1beta/interactions";
+const GEMINI_IMAGE_TIMEOUT_MS = Number(process.env.GEMINI_IMAGE_TIMEOUT_MS || 120_000);
+
+const NVIDIA_IMAGE_API_URL = process.env.NVIDIA_IMAGE_API_URL || "";
+const NVIDIA_IMAGE_MODEL = process.env.NVIDIA_IMAGE_MODEL || "qwen-image";
+const NVIDIA_IMAGE_TIMEOUT_MS = Number(process.env.NVIDIA_IMAGE_TIMEOUT_MS || 120_000);
+
+const PROVIDER_TEST_TIMEOUT_MS = 15_000;
+
+type ImageQuality = "fast" | "premium";
+type ImageProvider = "cloudflare" | "gemini" | "nvidia";
+type GeneratedImage = { mimeType: string; bytes: Buffer; provider: ImageProvider; model: string };
 
 const ImageInput = z.object({
   prompt: z.string().min(1),
@@ -171,10 +177,6 @@ const ReferenceImageInput = z.object({
   dataUrl: z.string().min(20).max(15_000_000),
   fileName: z.string().trim().min(1).max(120).default("referencia.png"),
 });
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function parseDataUrl(dataUrl: string): { mimeType: string; base64: string } {
   const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(dataUrl);
@@ -216,9 +218,7 @@ function compactImagePrompt(prompt: string): string {
   const normalized = prompt.replace(/\r/g, "").trim();
   const maxChars = 7_500;
   if (normalized.length <= maxChars) return normalized;
-  const head = normalized.slice(0, 4_800);
-  const tail = normalized.slice(-2_500);
-  return `${head}\n\n[brief compacted]\n\n${tail}`;
+  return `${normalized.slice(0, 4_800)}\n\n[brief compacted]\n\n${normalized.slice(-2_500)}`;
 }
 
 function dimensionsForAspectRatio(aspectRatio: "1:1" | "4:5" | "9:16") {
@@ -227,133 +227,271 @@ function dimensionsForAspectRatio(aspectRatio: "1:1" | "4:5" | "9:16") {
   return { width: 1024, height: 1024 };
 }
 
-function togetherErrorMessage(error: unknown): string {
+function providerErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "string" && error.trim()) return error.trim();
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
+  try { return JSON.stringify(error); } catch { return String(error); }
 }
 
-type TogetherImageResponse = {
-  id?: string;
-  model?: string;
-  data?: Array<{ index?: number; url?: string; b64_json?: string }>;
-  error?: { message?: string; type?: string; code?: string | number };
-  message?: string;
-};
+function imageProviderOrder(): ImageProvider[] {
+  const allowed = new Set<ImageProvider>(["cloudflare", "gemini", "nvidia"]);
+  const raw = (process.env.IMAGE_PROVIDER_ORDER || "cloudflare,gemini,nvidia")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter((item): item is ImageProvider => allowed.has(item as ImageProvider));
+  return [...new Set(raw.length ? raw : ["cloudflare", "gemini", "nvidia"])] as ImageProvider[];
+}
 
-async function fetchTogetherImageBytes(url: string): Promise<{ mimeType: string; bytes: Buffer }> {
+function providerConfigured(provider: ImageProvider) {
+  if (provider === "cloudflare") return Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN);
+  if (provider === "gemini") return Boolean(process.env.GEMINI_API_KEY);
+  return Boolean(NVIDIA_IMAGE_API_URL && process.env.NVIDIA_API_KEY);
+}
+
+function cloudflareModelFor(quality: ImageQuality) {
+  return quality === "fast" ? CLOUDFLARE_MODEL_FAST : CLOUDFLARE_MODEL_PREMIUM;
+}
+
+function geminiModelFor(quality: ImageQuality) {
+  return quality === "fast" ? GEMINI_MODEL_FAST : GEMINI_MODEL_PREMIUM;
+}
+
+function decodeBase64Image(value: string, fallbackMime = "image/jpeg") {
+  const dataUrl = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(value);
+  const mimeType = dataUrl?.[1] || fallbackMime;
+  const base64 = dataUrl?.[2] || value;
+  const bytes = Buffer.from(base64, "base64");
+  if (!bytes.length) throw new Error("O provedor retornou uma imagem vazia.");
+  return { mimeType, bytes };
+}
+
+async function callCloudflareImage(
+  prompt: string,
+  aspectRatio: "1:1" | "4:5" | "9:16",
+  seed: string,
+  quality: ImageQuality,
+): Promise<GeneratedImage> {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+  if (!accountId || !token) throw new Error("Cloudflare não configurada: faltam CLOUDFLARE_ACCOUNT_ID e/ou CLOUDFLARE_API_TOKEN.");
+
+  const model = cloudflareModelFor(quality);
+  const { width, height } = dimensionsForAspectRatio(aspectRatio);
+  const form = new FormData();
+  form.append("prompt", compactImagePrompt(prompt));
+  form.append("width", String(width));
+  form.append("height", String(height));
+  form.append("seed", String(imageSeed(seed)));
+
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 45_000);
+  const timeoutId = setTimeout(() => controller.abort(), CLOUDFLARE_IMAGE_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) throw new Error(`Não foi possível baixar a imagem gerada pela Together (${response.status}).`);
-    const mimeType = response.headers.get("content-type")?.split(";")[0] || "image/jpeg";
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (!bytes.length) throw new Error("A Together retornou uma imagem vazia.");
-    return { mimeType, bytes };
+    const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+      signal: controller.signal,
+    });
+
+    const contentType = response.headers.get("content-type")?.split(";")[0] || "";
+    if (contentType.startsWith("image/")) {
+      if (!response.ok) throw new Error(`Cloudflare retornou ${response.status}.`);
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (!bytes.length) throw new Error("Cloudflare retornou uma imagem vazia.");
+      return { mimeType: contentType, bytes, provider: "cloudflare", model };
+    }
+
+    const raw = await response.text();
+    let json: any = {};
+    try { json = raw ? JSON.parse(raw) : {}; } catch { /* mantém raw para diagnóstico */ }
+    if (!response.ok || json?.success === false) {
+      const detail = json?.errors?.[0]?.message || json?.message || raw.slice(0, 500) || "erro sem detalhes";
+      throw new Error(`Cloudflare Workers AI ${response.status}: ${detail}`);
+    }
+
+    const encoded = json?.result?.image || json?.image || (typeof json?.result === "string" ? json.result : "");
+    if (!encoded) throw new Error("Cloudflare respondeu sem o campo de imagem esperado.");
+    const decoded = decodeBase64Image(encoded, "image/jpeg");
+    return { ...decoded, provider: "cloudflare", model };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Cloudflare excedeu ${Math.round(CLOUDFLARE_IMAGE_TIMEOUT_MS / 1000)}s.`);
+    }
+    throw error;
   } finally {
     clearTimeout(timeoutId);
   }
 }
 
-async function callTogetherImage(
-  token: string,
+type GeminiInteractionResponse = {
+  steps?: Array<{ content?: Array<{ type?: string; data?: string; mime_type?: string }> }>;
+  output_image?: { data?: string; mime_type?: string };
+  error?: { message?: string; status?: string; code?: number };
+};
+
+async function callGeminiImage(
+  prompt: string,
+  aspectRatio: "1:1" | "4:5" | "9:16",
+  quality: ImageQuality,
+): Promise<GeneratedImage> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("Gemini não configurado: falta GEMINI_API_KEY.");
+  const model = geminiModelFor(quality);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), GEMINI_IMAGE_TIMEOUT_MS);
+  try {
+    const response = await fetch(GEMINI_IMAGE_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        input: compactImagePrompt(prompt),
+        response_format: {
+          type: "image",
+          mime_type: "image/jpeg",
+          aspect_ratio: aspectRatio,
+          image_size: "1K",
+        },
+      }),
+    });
+
+    const raw = await response.text();
+    let json: GeminiInteractionResponse = {};
+    try { json = raw ? JSON.parse(raw) as GeminiInteractionResponse : {}; } catch {
+      throw new Error(`Gemini retornou uma resposta inválida (${response.status}): ${raw.slice(0, 400)}`);
+    }
+    if (!response.ok) {
+      throw new Error(`Gemini API ${response.status}: ${json.error?.message || raw.slice(0, 500) || "erro sem detalhes"}`);
+    }
+
+    const convenience = json.output_image;
+    if (convenience?.data) {
+      const decoded = decodeBase64Image(convenience.data, convenience.mime_type || "image/jpeg");
+      return { ...decoded, provider: "gemini", model };
+    }
+
+    for (const step of json.steps || []) {
+      for (const content of step.content || []) {
+        if (content.type === "image" && content.data) {
+          const decoded = decodeBase64Image(content.data, content.mime_type || "image/jpeg");
+          return { ...decoded, provider: "gemini", model };
+        }
+      }
+    }
+    throw new Error("Gemini respondeu sem imagem na interação.");
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Gemini excedeu ${Math.round(GEMINI_IMAGE_TIMEOUT_MS / 1000)}s.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function callNvidiaImage(
   prompt: string,
   aspectRatio: "1:1" | "4:5" | "9:16",
   seed: string,
-): Promise<{ mimeType: string; bytes: Buffer }> {
+): Promise<GeneratedImage> {
+  const apiKey = process.env.NVIDIA_API_KEY;
+  if (!apiKey) throw new Error("NVIDIA não configurada: falta NVIDIA_API_KEY.");
+  if (!NVIDIA_IMAGE_API_URL) throw new Error("NVIDIA não configurada para imagens: falta NVIDIA_IMAGE_API_URL de um NIM/Partner Endpoint.");
+
   const { width, height } = dimensionsForAspectRatio(aspectRatio);
-  let lastError: Error | null = null;
-  let requestPrompt = compactImagePrompt(prompt);
-
-  for (let attempt = 1; attempt <= TOGETHER_MAX_ATTEMPTS; attempt += 1) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TOGETHER_IMAGE_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(TOGETHER_IMAGE_API_URL, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: TOGETHER_IMAGE_MODEL,
-          prompt: requestPrompt,
-          width,
-          height,
-          steps: 28,
-          n: 1,
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), NVIDIA_IMAGE_TIMEOUT_MS);
+  try {
+    const configuredFormat = (process.env.NVIDIA_IMAGE_API_FORMAT || "").trim().toLowerCase();
+    const apiFormat = configuredFormat || (NVIDIA_IMAGE_API_URL.includes("/v1/infer") ? "nim" : "openai");
+    const body = apiFormat === "nim"
+      ? {
+          prompt: compactImagePrompt(prompt),
           seed: imageSeed(seed),
-          response_format: "url",
-          output_format: "jpeg",
-        }),
-      });
+        }
+      : {
+          model: NVIDIA_IMAGE_MODEL,
+          prompt: compactImagePrompt(prompt),
+          size: `${width}x${height}`,
+          response_format: "b64_json",
+          n: 1,
+        };
 
-      const raw = await response.text();
-      let json: TogetherImageResponse = {};
-      try {
-        json = raw ? JSON.parse(raw) as TogetherImageResponse : {};
-      } catch {
-        throw new Error(`Resposta inválida da Together (${response.status}): ${raw.slice(0, 500)}`);
-      }
+    const response = await fetch(NVIDIA_IMAGE_API_URL, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      signal: controller.signal,
+      body: JSON.stringify(body),
+    });
 
-      if (!response.ok) {
-        const detail = json.error?.message || json.message || raw.slice(0, 500);
-        throw new Error(`Together API ${response.status}: ${detail || "erro sem detalhes"}`);
-      }
+    const contentType = response.headers.get("content-type")?.split(";")[0] || "";
+    if (contentType.startsWith("image/")) {
+      if (!response.ok) throw new Error(`NVIDIA retornou ${response.status}.`);
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (!bytes.length) throw new Error("NVIDIA retornou uma imagem vazia.");
+      return { mimeType: contentType, bytes, provider: "nvidia", model: NVIDIA_IMAGE_MODEL };
+    }
 
-      const first = json.data?.[0];
-      if (first?.url) return fetchTogetherImageBytes(first.url);
-      if (first?.b64_json) {
-        const bytes = Buffer.from(first.b64_json, "base64");
-        if (!bytes.length) throw new Error("A Together retornou uma imagem vazia.");
-        return { mimeType: "image/jpeg", bytes };
-      }
+    const raw = await response.text();
+    let json: any = {};
+    try { json = raw ? JSON.parse(raw) : {}; } catch {
+      throw new Error(`NVIDIA retornou uma resposta inválida (${response.status}): ${raw.slice(0, 400)}`);
+    }
+    if (!response.ok) {
+      const detail = json?.detail || json?.error?.message || json?.message || raw.slice(0, 500) || "erro sem detalhes";
+      throw new Error(`NVIDIA Image API ${response.status}: ${detail}`);
+    }
 
-      throw new Error("A Together respondeu sem URL ou base64 da imagem.");
+    const encoded = json?.artifacts?.[0]?.base64 || json?.data?.[0]?.b64_json || json?.image || json?.result?.image;
+    if (!encoded) throw new Error("NVIDIA respondeu sem base64 da imagem.");
+    const decoded = decodeBase64Image(encoded, "image/jpeg");
+    return { ...decoded, provider: "nvidia", model: NVIDIA_IMAGE_MODEL };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`NVIDIA excedeu ${Math.round(NVIDIA_IMAGE_TIMEOUT_MS / 1000)}s.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function generateWithProviderFallback(
+  prompt: string,
+  aspectRatio: "1:1" | "4:5" | "9:16",
+  seed: string,
+  quality: ImageQuality,
+): Promise<GeneratedImage> {
+  const configured = imageProviderOrder().filter(providerConfigured);
+  if (!configured.length) {
+    throw new Error("Nenhum provedor de imagem está configurado no Vercel. Configure Cloudflare, Gemini ou NVIDIA NIM.");
+  }
+
+  const failures: string[] = [];
+  for (const provider of configured) {
+    try {
+      if (provider === "cloudflare") return await callCloudflareImage(prompt, aspectRatio, seed, quality);
+      if (provider === "gemini") return await callGeminiImage(prompt, aspectRatio, quality);
+      return await callNvidiaImage(prompt, aspectRatio, seed);
     } catch (error) {
-      const detail = error instanceof Error && error.name === "AbortError"
-        ? `Tempo esgotado ao gerar imagem na Together após ${Math.round(TOGETHER_IMAGE_TIMEOUT_MS / 1000)}s.`
-        : togetherErrorMessage(error);
-
-      if (/401|unauthori|invalid.*key|authentication/i.test(detail)) {
-        throw new Error(`Together recusou a API key. Confira TOGETHER_API_KEY no Vercel. ${detail}`);
-      }
-      if (/402|payment|required|credit|quota|billing|balance/i.test(detail)) {
-        throw new Error(`A Together recusou a solicitação por saldo/crédito: ${detail}`);
-      }
-      if (/403|forbidden|permission/i.test(detail)) {
-        throw new Error(`Sua TOGETHER_API_KEY não tem permissão para o modelo selecionado: ${detail}`);
-      }
-      if (/404|not found|model.*not/i.test(detail)) {
-        throw new Error(`Modelo Together não encontrado: ${TOGETHER_IMAGE_MODEL}. ${detail}`);
-      }
-
-      lastError = new Error(`Falha na Together API: ${detail}`);
-      if (attempt < TOGETHER_MAX_ATTEMPTS && /429|rate|timeout|tempo esgotado|5\d\d|fetch failed|network|socket/i.test(detail)) {
-        await sleep(TOGETHER_BASE_DELAY_MS * attempt);
-        continue;
-      }
-      if (attempt < TOGETHER_MAX_ATTEMPTS && requestPrompt.length > 4_500) {
-        requestPrompt = requestPrompt.slice(0, 4_500);
-        await sleep(500);
-        continue;
-      }
-      throw lastError;
-    } finally {
-      clearTimeout(timeoutId);
+      const detail = providerErrorMessage(error);
+      console.error(`[image-provider:${provider}]`, detail);
+      failures.push(`${provider}: ${detail}`);
     }
   }
 
-  throw lastError ?? new Error("Falha ao gerar imagem na Together após múltiplas tentativas.");
+  throw new Error(`Todos os provedores de imagem configurados falharam. ${failures.join(" | ")}`);
 }
+
 
 export const uploadReferenceImage = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => ReferenceImageInput.parse(d))
@@ -410,10 +548,7 @@ function creativeProfile(data: z.infer<typeof ImageInput>) {
 
 export const generateImage = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => ImageInput.parse(d))
-  .handler(async ({ data }): Promise<{ url: string }> => {
-    const apiToken = process.env.TOGETHER_API_KEY;
-    if (!apiToken) throw new Error("TOGETHER_API_KEY não configurada no servidor.");
-
+  .handler(async ({ data }): Promise<{ url: string; provider: ImageProvider; model: string }> => {
     const fullPrompt = `CREATE ONLY A SINGLE CONTINUOUS PHOTOGRAPHIC / 3D / ILLUSTRATIVE SCENE FOR A HIGH-END INSTAGRAM CAMPAIGN. Zunexi will apply the final Portuguese copy afterward and flatten everything into the finished image.
 
 ABSOLUTE FORMAT RULES:
@@ -443,67 +578,104 @@ ART-DIRECTION STANDARD:
 - No duplicate objects, melted anatomy, extra fingers, warped product geometry, meaningless symbols or pseudo-writing.
 - Do not invent visible brand names. Brand identity comes from art direction, palette accents and supplied reference imagery only.
 
-
 Unique variation seed: ${data.seed}.`;
 
-    try {
-      const { mimeType, bytes } = await callTogetherImage(apiToken, fullPrompt, data.aspectRatio, data.seed);
-      const url = await uploadBytesToSupabaseStorage(bytes, mimeType, "slide");
-      // Não devolva Base64 pela função do Vercel: respostas grandes podem ultrapassar
-      // o limite de payload. O arquivo já está salvo no Supabase; devolvemos só a URL.
-      return { url };
-    } catch (error) {
-      const err = error as Error;
-      if (err.message) throw err;
-      throw new Error(`Falha ao gerar imagem: ${String(error)}`);
-    }
+    const generated = await generateWithProviderFallback(fullPrompt, data.aspectRatio, data.seed, data.imageQuality);
+    const url = await uploadBytesToSupabaseStorage(generated.bytes, generated.mimeType, `slide-${generated.provider}`);
+    return { url, provider: generated.provider, model: generated.model };
   });
 
-export const testTogetherConnection = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => z.object({ imageQuality: z.enum(["fast", "premium"]).optional().default("premium") }).parse(d ?? {}))
-  .handler(async ({ data }): Promise<{ ok: boolean; message: string; model: string }> => {
-    const apiToken = process.env.TOGETHER_API_KEY;
-    const model = imageModelFor(data.imageQuality);
-    if (!apiToken) return { ok: false, model, message: "TOGETHER_API_KEY não configurada no servidor." };
+type ProviderTestStatus = {
+  provider: ImageProvider;
+  configured: boolean;
+  ok: boolean;
+  model: string;
+  message: string;
+};
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TOGETHER_KEY_TEST_TIMEOUT_MS);
-    try {
-      const response = await fetch(TOGETHER_MODELS_URL, {
-        method: "GET",
-        headers: { Accept: "application/json", Authorization: `Bearer ${apiToken}` },
-        signal: controller.signal,
-      });
+async function testCloudflareProvider(quality: ImageQuality): Promise<ProviderTestStatus> {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+  const model = cloudflareModelFor(quality);
+  if (!accountId || !token) return { provider: "cloudflare", configured: false, ok: false, model, message: "não configurada" };
 
-      const raw = await response.text();
-      if (!response.ok) {
-        const detail = raw.replace(/\s+/g, " ").slice(0, 350);
-        return { ok: false, model, message: `A Together respondeu ${response.status}: ${detail || "sem detalhes"}` };
-      }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PROVIDER_TEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/models/search?search=${encodeURIComponent(model.replace("@cf/", ""))}`, {
+      headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+    const raw = await response.text();
+    if (!response.ok) return { provider: "cloudflare", configured: true, ok: false, model, message: `HTTP ${response.status}: ${raw.replace(/\s+/g, " ").slice(0, 220)}` };
+    return { provider: "cloudflare", configured: true, ok: true, model, message: "Account ID e token válidos" };
+  } catch (error) {
+    return { provider: "cloudflare", configured: true, ok: false, model, message: providerErrorMessage(error) };
+  } finally { clearTimeout(timeoutId); }
+}
 
-      let models: Array<{ id?: string; type?: string }> = [];
-      try {
-        const parsed = JSON.parse(raw) as Array<{ id?: string; type?: string }>;
-        if (Array.isArray(parsed)) models = parsed;
-      } catch {
-        return { ok: true, model, message: "API key Together válida. A autenticação respondeu com sucesso." };
-      }
+async function testGeminiProvider(quality: ImageQuality): Promise<ProviderTestStatus> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const model = geminiModelFor(quality);
+  if (!apiKey) return { provider: "gemini", configured: false, ok: false, model, message: "não configurada" };
 
-      const selectedVisible = models.some((item) => item.id === model);
-      const imageModelCount = models.filter((item) => item.type === "image").length;
-      return {
-        ok: selectedVisible,
-        model,
-        message: selectedVisible
-          ? `Together API conectada. Modelo ${model} disponível${imageModelCount ? `; ${imageModelCount} modelos de imagem visíveis` : ""}.`
-          : `API key Together válida, mas o modelo ${model} não apareceu na lista disponível para esta conta.`,
-      };
-    } catch (error) {
-      const message = error instanceof Error && error.name === "AbortError"
-        ? "O teste da Together excedeu 15 segundos. Tente novamente."
-        : togetherErrorMessage(error);
-      return { ok: false, model, message };
-    } finally {
-      clearTimeout(timeoutId);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PROVIDER_TEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}`, {
+      headers: { Accept: "application/json", "x-goog-api-key": apiKey },
+      signal: controller.signal,
+    });
+    const raw = await response.text();
+    if (!response.ok) return { provider: "gemini", configured: true, ok: false, model, message: `HTTP ${response.status}: ${raw.replace(/\s+/g, " ").slice(0, 220)}` };
+    return { provider: "gemini", configured: true, ok: true, model, message: "API key válida e modelo visível" };
+  } catch (error) {
+    return { provider: "gemini", configured: true, ok: false, model, message: providerErrorMessage(error) };
+  } finally { clearTimeout(timeoutId); }
+}
+
+async function testNvidiaProvider(): Promise<ProviderTestStatus> {
+  const apiKey = process.env.NVIDIA_API_KEY;
+  if (!apiKey) return { provider: "nvidia", configured: false, ok: false, model: NVIDIA_IMAGE_MODEL, message: "não configurada" };
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PROVIDER_TEST_TIMEOUT_MS);
+  try {
+    const response = await fetch("https://integrate.api.nvidia.com/v1/models", {
+      headers: { Accept: "application/json", Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
+    });
+    const raw = await response.text();
+    if (!response.ok) return { provider: "nvidia", configured: true, ok: false, model: NVIDIA_IMAGE_MODEL, message: `HTTP ${response.status}: ${raw.replace(/\s+/g, " ").slice(0, 220)}` };
+    if (!NVIDIA_IMAGE_API_URL) {
+      return { provider: "nvidia", configured: true, ok: false, model: NVIDIA_IMAGE_MODEL, message: "API key válida; falta NVIDIA_IMAGE_API_URL de um NIM/Partner Endpoint para gerar imagens" };
     }
+    return { provider: "nvidia", configured: true, ok: true, model: NVIDIA_IMAGE_MODEL, message: "API key válida e endpoint de imagem configurado" };
+  } catch (error) {
+    return { provider: "nvidia", configured: true, ok: false, model: NVIDIA_IMAGE_MODEL, message: providerErrorMessage(error) };
+  } finally { clearTimeout(timeoutId); }
+}
+
+export const testImageProvidersConnection = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => z.object({ imageQuality: z.enum(["fast", "premium"]).optional().default("premium") }).parse(d ?? {}))
+  .handler(async ({ data }): Promise<{ ok: boolean; message: string; providers: ProviderTestStatus[]; order: ImageProvider[] }> => {
+    const providers = await Promise.all([
+      testCloudflareProvider(data.imageQuality),
+      testGeminiProvider(data.imageQuality),
+      testNvidiaProvider(),
+    ]);
+    const order = imageProviderOrder();
+    const usable = providers.filter((item) => item.ok);
+    const configured = providers.filter((item) => item.configured);
+    const summary = providers.map((item) => `${item.provider}: ${item.ok ? "OK" : item.message}`).join(" • ");
+    return {
+      ok: usable.length > 0,
+      providers,
+      order,
+      message: usable.length
+        ? `${usable.length} provedor(es) pronto(s). Ordem de fallback: ${order.join(" → ")}. ${summary}`
+        : configured.length
+          ? `Nenhum provedor de imagem está pronto. ${summary}`
+          : "Nenhum provedor de imagem foi configurado no Vercel.",
+    };
   });
