@@ -321,8 +321,8 @@ function ImageEnginePanel() {
         <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/12 text-primary"><ImageIcon className="h-5 w-5" /></div>
         <div>
           <div className="eyebrow mb-1">Motor de imagem</div>
-          <h2 className="section-title text-lg">FLUX.1-schnell · NVIDIA Build API</h2>
-          <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">A geração de imagens usa diretamente a NVIDIA Build API. A chave fica somente no backend do Vercel em NVIDIA_API_KEY; não é necessário Lightning nem servidor GPU próprio.</p>
+          <h2 className="section-title text-lg">Cloudflare + Gemini + NVIDIA</h2>
+          <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">A geração usa fallback automático entre Cloudflare Workers AI, Gemini e NVIDIA. As chaves ficam somente no backend do Vercel. A NVIDIA entra no fallback quando um NVIDIA_IMAGE_API_URL válido de NIM/Partner Endpoint estiver configurado.</p>
         </div>
       </div>
     </section>
