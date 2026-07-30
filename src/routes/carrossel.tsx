@@ -616,7 +616,7 @@ function NovoCarrossel() {
                   <Field label="Quantidade de slides"><select value={form.quantidadeSlides} onChange={(e) => setForm({ ...form, quantidadeSlides: Number(e.target.value) })} className="app-input">{Array.from({ length: 20 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value} slides</option>)}</select></Field>
                   <Field label="Estilo visual"><select value={form.estilo} onChange={(e) => setForm({ ...form, estilo: e.target.value })} className="app-input"><option>publicidade premium</option><option>food commercial</option><option>cinematográfico</option><option>luxury campaign</option><option>editorial</option><option>minimalista e premium</option><option>tech campaign</option><option>3D publicitário</option><option>corporativo</option><option>vibrante</option></select></Field>
                   <Field label="Paleta de cores"><input value={form.paleta} onChange={(e) => setForm({ ...form, paleta: e.target.value })} className="app-input" /></Field>
-                  <Field label="Motor de imagem"><div className="app-input flex items-center">Cloudflare → Gemini → NVIDIA</div></Field>
+                  <Field label="Motor de imagem"><div className="app-input flex items-center">Cloudflare → OpenRouter → Gemini</div></Field>
                 </div>
 
                 <Field label="CTA — chamada para ação"><input value={form.cta} onChange={(e) => setForm({ ...form, cta: e.target.value })} placeholder="Ex.: Experimente grátis a Zunexi.ai" className="app-input" /></Field>
@@ -626,7 +626,7 @@ function NovoCarrossel() {
                   <div className="rounded-xl border border-border bg-white/[0.02] p-4">
                     <div className="text-sm font-medium">Temporariamente desativada</div>
                     <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                      A geração usa fallback automático entre Cloudflare, Gemini e NVIDIA conforme as APIs configuradas no Vercel. O upload de referência continua separado da geração principal por enquanto.
+                      A geração usa fallback automático entre Cloudflare, OpenRouter e Gemini conforme as APIs configuradas no Vercel. O upload de referência continua separado da geração principal por enquanto.
                     </p>
                   </div>
                 </Field>
@@ -652,9 +652,9 @@ function NovoCarrossel() {
               </div>
 
               <div className="panel p-5">
-                <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Teste dos motores de imagem</h2><p className="mt-1 text-xs text-muted-foreground">Valida Cloudflare, Gemini e NVIDIA sem gerar imagem.</p></div><ImageIcon className="h-5 w-5 text-primary" /></div>
+                <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Teste dos motores de imagem</h2><p className="mt-1 text-xs text-muted-foreground">Valida Cloudflare, OpenRouter e Gemini sem gerar imagem.</p></div><ImageIcon className="h-5 w-5 text-primary" /></div>
                 <button type="button" onClick={runImageEngineTest} disabled={imageEngineTesting} className="secondary-button w-full disabled:opacity-60">{imageEngineTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />} {imageEngineTesting ? "Testando..." : "Testar APIs de imagem"}</button>
-                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">A ordem padrão é Cloudflare → Gemini → NVIDIA. Se um provedor falhar ou atingir limite, o servidor tenta o próximo configurado. A NVIDIA exige também NVIDIA_IMAGE_API_URL de um NIM/Partner Endpoint.</p>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">A ordem padrão é Cloudflare → OpenRouter → Gemini. Se um provedor falhar ou atingir limite, o servidor tenta o próximo configurado.</p>
                 {imageEngineTestResult && <div className={`mt-3 rounded-xl border p-3 text-xs ${imageEngineTestResult.ok ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-200" : "border-red-500/25 bg-red-500/8 text-red-200"}`}><div className="flex items-start gap-2">{imageEngineTestResult.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{imageEngineTestResult.message}</span></div></div>}
               </div>
             </aside>
