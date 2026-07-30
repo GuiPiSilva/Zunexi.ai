@@ -130,32 +130,29 @@ Seed única: ${data.seed}-${Math.random().toString(36).slice(2)}`;
 
 
 // ---------------------------------------------------------------------------
-// IMAGEM — múltiplos provedores com fallback automático.
+// IMAGEM — Colab + Cloudflare com fallback automático.
 //
-// Ordem padrão: Cloudflare Workers AI -> OpenRouter -> Gemini.
+// Ordem padrão: Colab -> Cloudflare Workers AI.
 // A ordem pode ser alterada no Vercel com IMAGE_PROVIDER_ORDER.
+// A API do Colab deve expor GET /health e POST /generate.
 // Nenhuma chave é enviada ao navegador; todas são lidas somente no servidor.
 // ---------------------------------------------------------------------------
 
-const IMAGE_STORAGE_BUCKET = process.env.IMAGE_STORAGE_BUCKET || process.env.GEMINI_STORAGE_BUCKET || "generated-images";
+const IMAGE_STORAGE_BUCKET = process.env.IMAGE_STORAGE_BUCKET || "generated-images";
 
 const CLOUDFLARE_MODEL_FAST = process.env.CLOUDFLARE_IMAGE_MODEL_FAST || "@cf/black-forest-labs/flux-2-klein-4b";
 const CLOUDFLARE_MODEL_PREMIUM = process.env.CLOUDFLARE_IMAGE_MODEL_PREMIUM || "@cf/black-forest-labs/flux-2-klein-9b";
 const CLOUDFLARE_IMAGE_TIMEOUT_MS = Number(process.env.CLOUDFLARE_IMAGE_TIMEOUT_MS || 90_000);
 
-const GEMINI_MODEL_FAST = process.env.GEMINI_IMAGE_MODEL_FAST || "gemini-3.1-flash-lite-image";
-const GEMINI_MODEL_PREMIUM = process.env.GEMINI_IMAGE_MODEL_PREMIUM || "gemini-3.1-flash-image";
-const GEMINI_IMAGE_API_URL = process.env.GEMINI_IMAGE_API_URL || "https://generativelanguage.googleapis.com/v1beta/interactions";
-const GEMINI_IMAGE_TIMEOUT_MS = Number(process.env.GEMINI_IMAGE_TIMEOUT_MS || 120_000);
-
-const OPENROUTER_IMAGE_API_URL = process.env.OPENROUTER_IMAGE_API_URL || "https://openrouter.ai/api/v1/images";
-const OPENROUTER_IMAGE_MODEL = process.env.OPENROUTER_IMAGE_MODEL || "black-forest-labs/flux.2-klein-4b";
-const OPENROUTER_IMAGE_TIMEOUT_MS = Number(process.env.OPENROUTER_IMAGE_TIMEOUT_MS || 120_000);
+const COLAB_IMAGE_API_URL = (process.env.COLAB_IMAGE_API_URL || "").trim();
+const COLAB_IMAGE_API_KEY = (process.env.COLAB_IMAGE_API_KEY || "").trim();
+const COLAB_IMAGE_MODEL = (process.env.COLAB_IMAGE_MODEL || "zunexi-colab-image-engine").trim();
+const COLAB_IMAGE_TIMEOUT_MS = Number(process.env.COLAB_IMAGE_TIMEOUT_MS || 240_000);
 
 const PROVIDER_TEST_TIMEOUT_MS = 15_000;
 
 type ImageQuality = "fast" | "premium";
-type ImageProvider = "cloudflare" | "openrouter" | "gemini";
+type ImageProvider = "colab" | "cloudflare";
 type GeneratedImage = { mimeType: string; bytes: Buffer; provider: ImageProvider; model: string };
 
 const ImageInput = z.object({
@@ -233,35 +230,71 @@ function providerErrorMessage(error: unknown): string {
   try { return JSON.stringify(error); } catch { return String(error); }
 }
 
+function normalizedColabBaseUrl(): string {
+  return COLAB_IMAGE_API_URL.replace(/\/+$/, "").replace(/\/(?:generate|health)$/i, "");
+}
+
+function colabGenerateUrl(): string {
+  const base = normalizedColabBaseUrl();
+  return base ? `${base}/generate` : "";
+}
+
+function colabHealthUrl(): string {
+  const base = normalizedColabBaseUrl();
+  return base ? `${base}/health` : "";
+}
+
+function colabHeaders(json = false): Record<string, string> {
+  return {
+    Accept: json ? "application/json, image/*" : "image/*, application/json",
+    ...(json ? { "Content-Type": "application/json" } : {}),
+    ...(COLAB_IMAGE_API_KEY ? {
+      "X-API-Key": COLAB_IMAGE_API_KEY,
+      Authorization: `Bearer ${COLAB_IMAGE_API_KEY}`,
+    } : {}),
+  };
+}
+
 function imageProviderOrder(): ImageProvider[] {
-  const allowed = new Set<ImageProvider>(["cloudflare", "openrouter", "gemini"]);
-  const raw = (process.env.IMAGE_PROVIDER_ORDER || "cloudflare,openrouter,gemini")
+  const allowed = new Set<ImageProvider>(["colab", "cloudflare"]);
+  const raw = (process.env.IMAGE_PROVIDER_ORDER || "colab,cloudflare")
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter((item): item is ImageProvider => allowed.has(item as ImageProvider));
-  return [...new Set(raw.length ? raw : ["cloudflare", "openrouter", "gemini"])] as ImageProvider[];
+
+  const order = [...new Set(raw.length ? raw : ["colab", "cloudflare"])] as ImageProvider[];
+  // Evita excluir acidentalmente um provedor que está configurado no Vercel.
+  for (const fallback of ["colab", "cloudflare"] as ImageProvider[]) {
+    if (providerConfigured(fallback) && !order.includes(fallback)) order.push(fallback);
+  }
+  return order;
 }
 
 function providerConfigured(provider: ImageProvider) {
-  if (provider === "cloudflare") return Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN);
-  if (provider === "openrouter") return Boolean(process.env.OPENROUTER_API_KEY);
-  return Boolean(process.env.GEMINI_API_KEY);
+  if (provider === "colab") return Boolean(normalizedColabBaseUrl());
+  return Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN);
 }
 
 function cloudflareModelFor(quality: ImageQuality) {
   return quality === "fast" ? CLOUDFLARE_MODEL_FAST : CLOUDFLARE_MODEL_PREMIUM;
 }
 
-function geminiModelFor(quality: ImageQuality) {
-  return quality === "fast" ? GEMINI_MODEL_FAST : GEMINI_MODEL_PREMIUM;
-}
-
-function decodeBase64Image(value: string, fallbackMime = "image/jpeg") {
+function decodeBase64Image(value: string, fallbackMime = "image/png") {
   const dataUrl = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(value);
   const mimeType = dataUrl?.[1] || fallbackMime;
   const base64 = dataUrl?.[2] || value;
   const bytes = Buffer.from(base64, "base64");
   if (!bytes.length) throw new Error("O provedor retornou uma imagem vazia.");
+  return { mimeType, bytes };
+}
+
+async function fetchImageUrl(url: string): Promise<{ mimeType: string; bytes: Buffer }> {
+  const response = await fetch(url, { headers: { Accept: "image/*" } });
+  if (!response.ok) throw new Error(`A URL da imagem retornou HTTP ${response.status}.`);
+  const mimeType = response.headers.get("content-type")?.split(";")[0] || "image/png";
+  if (!mimeType.startsWith("image/")) throw new Error(`A URL retornada pelo Colab não é uma imagem (${mimeType}).`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (!bytes.length) throw new Error("A URL retornada pelo Colab contém uma imagem vazia.");
   return { mimeType, bytes };
 }
 
@@ -323,124 +356,77 @@ async function callCloudflareImage(
   }
 }
 
-type GeminiInteractionResponse = {
-  steps?: Array<{ content?: Array<{ type?: string; data?: string; mime_type?: string }> }>;
-  output_image?: { data?: string; mime_type?: string };
-  error?: { message?: string; status?: string; code?: number };
-};
-
-async function callGeminiImage(
+async function callColabImage(
   prompt: string,
   aspectRatio: "1:1" | "4:5" | "9:16",
+  seed: string,
   quality: ImageQuality,
 ): Promise<GeneratedImage> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("Gemini não configurado: falta GEMINI_API_KEY.");
-  const model = geminiModelFor(quality);
+  const endpoint = colabGenerateUrl();
+  if (!endpoint) throw new Error("Colab não configurado: falta COLAB_IMAGE_API_URL.");
 
+  const { width, height } = dimensionsForAspectRatio(aspectRatio);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), GEMINI_IMAGE_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), COLAB_IMAGE_TIMEOUT_MS);
   try {
-    const response = await fetch(GEMINI_IMAGE_API_URL, {
+    const response = await fetch(endpoint, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
+      headers: colabHeaders(true),
       signal: controller.signal,
       body: JSON.stringify({
-        model,
-        input: compactImagePrompt(prompt),
-        response_format: {
-          type: "image",
-          mime_type: "image/jpeg",
-          aspect_ratio: aspectRatio,
-          image_size: "1K",
-        },
-      }),
-    });
-
-    const raw = await response.text();
-    let json: GeminiInteractionResponse = {};
-    try { json = raw ? JSON.parse(raw) as GeminiInteractionResponse : {}; } catch {
-      throw new Error(`Gemini retornou uma resposta inválida (${response.status}): ${raw.slice(0, 400)}`);
-    }
-    if (!response.ok) {
-      throw new Error(`Gemini API ${response.status}: ${json.error?.message || raw.slice(0, 500) || "erro sem detalhes"}`);
-    }
-
-    const convenience = json.output_image;
-    if (convenience?.data) {
-      const decoded = decodeBase64Image(convenience.data, convenience.mime_type || "image/jpeg");
-      return { ...decoded, provider: "gemini", model };
-    }
-
-    for (const step of json.steps || []) {
-      for (const content of step.content || []) {
-        if (content.type === "image" && content.data) {
-          const decoded = decodeBase64Image(content.data, content.mime_type || "image/jpeg");
-          return { ...decoded, provider: "gemini", model };
-        }
-      }
-    }
-    throw new Error("Gemini respondeu sem imagem na interação.");
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(`Gemini excedeu ${Math.round(GEMINI_IMAGE_TIMEOUT_MS / 1000)}s.`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-async function callOpenRouterImage(
-  prompt: string,
-  seed: string,
-): Promise<GeneratedImage> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) throw new Error("OpenRouter não configurado: falta OPENROUTER_API_KEY.");
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), OPENROUTER_IMAGE_TIMEOUT_MS);
-  try {
-    const response = await fetch(OPENROUTER_IMAGE_API_URL, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        ...(process.env.OPENROUTER_HTTP_REFERER ? { "HTTP-Referer": process.env.OPENROUTER_HTTP_REFERER } : {}),
-        ...(process.env.OPENROUTER_APP_NAME ? { "X-Title": process.env.OPENROUTER_APP_NAME } : {}),
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: OPENROUTER_IMAGE_MODEL,
         prompt: compactImagePrompt(prompt),
-        output_format: "png",
-        n: 1,
+        width,
+        height,
         seed: imageSeed(seed),
+        quality,
+        aspect_ratio: aspectRatio,
+        model: COLAB_IMAGE_MODEL,
+        response_format: "png",
       }),
     });
+
+    const contentType = response.headers.get("content-type")?.split(";")[0] || "";
+    if (contentType.startsWith("image/")) {
+      if (!response.ok) throw new Error(`Colab Image API ${response.status}.`);
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (!bytes.length) throw new Error("Colab retornou uma imagem vazia.");
+      return { mimeType: contentType, bytes, provider: "colab", model: COLAB_IMAGE_MODEL };
+    }
 
     const raw = await response.text();
     let json: any = {};
     try { json = raw ? JSON.parse(raw) : {}; } catch {
-      throw new Error(`OpenRouter retornou uma resposta inválida (${response.status}): ${raw.slice(0, 400)}`);
+      throw new Error(`Colab retornou uma resposta inválida (${response.status}): ${raw.slice(0, 400)}`);
     }
-    if (!response.ok) {
-      const detail = json?.error?.message || json?.message || raw.slice(0, 500) || "erro sem detalhes";
-      throw new Error(`OpenRouter Image API ${response.status}: ${detail}`);
+    if (!response.ok || json?.ok === false) {
+      const detail = json?.error?.message || json?.error || json?.detail || json?.message || raw.slice(0, 500) || "erro sem detalhes";
+      throw new Error(`Colab Image API ${response.status}: ${detail}`);
     }
 
-    const item = json?.data?.[0];
-    const encoded = item?.b64_json;
-    if (!encoded) throw new Error("OpenRouter respondeu sem b64_json da imagem.");
-    const decoded = decodeBase64Image(encoded, item?.media_type || "image/png");
-    return { ...decoded, provider: "openrouter", model: OPENROUTER_IMAGE_MODEL };
+    const encoded =
+      json?.image ||
+      json?.base64 ||
+      json?.b64_json ||
+      json?.result?.image ||
+      json?.result?.base64 ||
+      json?.data?.[0]?.b64_json ||
+      "";
+
+    if (encoded) {
+      const decoded = decodeBase64Image(encoded, json?.mime_type || json?.mimeType || "image/png");
+      return { ...decoded, provider: "colab", model: json?.model || COLAB_IMAGE_MODEL };
+    }
+
+    const imageUrl = json?.url || json?.image_url || json?.result?.url || json?.data?.[0]?.url || "";
+    if (imageUrl) {
+      const downloaded = await fetchImageUrl(imageUrl);
+      return { ...downloaded, provider: "colab", model: json?.model || COLAB_IMAGE_MODEL };
+    }
+
+    throw new Error("Colab respondeu sem imagem, base64 ou URL reconhecível.");
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(`OpenRouter excedeu ${Math.round(OPENROUTER_IMAGE_TIMEOUT_MS / 1000)}s.`);
+      throw new Error(`Colab excedeu ${Math.round(COLAB_IMAGE_TIMEOUT_MS / 1000)}s.`);
     }
     throw error;
   } finally {
@@ -456,15 +442,14 @@ async function generateWithProviderFallback(
 ): Promise<GeneratedImage> {
   const configured = imageProviderOrder().filter(providerConfigured);
   if (!configured.length) {
-    throw new Error("Nenhum provedor de imagem está configurado no Vercel. Configure Cloudflare, OpenRouter ou Gemini.");
+    throw new Error("Nenhum provedor de imagem está configurado no Vercel. Configure o Colab e/ou a Cloudflare.");
   }
 
   const failures: string[] = [];
   for (const provider of configured) {
     try {
-      if (provider === "cloudflare") return await callCloudflareImage(prompt, aspectRatio, seed, quality);
-      if (provider === "openrouter") return await callOpenRouterImage(prompt, seed);
-      return await callGeminiImage(prompt, aspectRatio, quality);
+      if (provider === "colab") return await callColabImage(prompt, aspectRatio, seed, quality);
+      return await callCloudflareImage(prompt, aspectRatio, seed, quality);
     } catch (error) {
       const detail = providerErrorMessage(error);
       console.error(`[image-provider:${provider}]`, detail);
@@ -597,52 +582,34 @@ async function testCloudflareProvider(quality: ImageQuality): Promise<ProviderTe
   } finally { clearTimeout(timeoutId); }
 }
 
-async function testGeminiProvider(quality: ImageQuality): Promise<ProviderTestStatus> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  const model = geminiModelFor(quality);
-  if (!apiKey) return { provider: "gemini", configured: false, ok: false, model, message: "não configurada" };
+async function testColabProvider(): Promise<ProviderTestStatus> {
+  const endpoint = colabHealthUrl();
+  if (!endpoint) return { provider: "colab", configured: false, ok: false, model: COLAB_IMAGE_MODEL, message: "não configurado" };
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), PROVIDER_TEST_TIMEOUT_MS);
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}`, {
-      headers: { Accept: "application/json", "x-goog-api-key": apiKey },
-      signal: controller.signal,
-    });
-    const raw = await response.text();
-    if (!response.ok) return { provider: "gemini", configured: true, ok: false, model, message: `HTTP ${response.status}: ${raw.replace(/\s+/g, " ").slice(0, 220)}` };
-    return { provider: "gemini", configured: true, ok: true, model, message: "API key válida e modelo visível" };
-  } catch (error) {
-    return { provider: "gemini", configured: true, ok: false, model, message: providerErrorMessage(error) };
-  } finally { clearTimeout(timeoutId); }
-}
-
-async function testOpenRouterProvider(): Promise<ProviderTestStatus> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) return { provider: "openrouter", configured: false, ok: false, model: OPENROUTER_IMAGE_MODEL, message: "não configurada" };
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), PROVIDER_TEST_TIMEOUT_MS);
-  try {
-    const response = await fetch("https://openrouter.ai/api/v1/images/models", {
-      headers: { Accept: "application/json", Authorization: `Bearer ${apiKey}` },
+    const response = await fetch(endpoint, {
+      headers: colabHeaders(false),
       signal: controller.signal,
     });
     const raw = await response.text();
     let json: any = {};
-    try { json = raw ? JSON.parse(raw) : {}; } catch { /* diagnóstico abaixo */ }
-    if (!response.ok) return { provider: "openrouter", configured: true, ok: false, model: OPENROUTER_IMAGE_MODEL, message: `HTTP ${response.status}: ${raw.replace(/\s+/g, " ").slice(0, 220)}` };
-    const models = Array.isArray(json?.data) ? json.data : [];
-    const visible = models.some((item: any) => item?.id === OPENROUTER_IMAGE_MODEL);
+    try { json = raw ? JSON.parse(raw) : {}; } catch { /* health pode responder texto */ }
+    const model = json?.model || json?.model_id || COLAB_IMAGE_MODEL;
+    if (!response.ok || json?.ok === false) {
+      const detail = json?.detail || json?.error || json?.message || raw.replace(/\s+/g, " ").slice(0, 220) || `HTTP ${response.status}`;
+      return { provider: "colab", configured: true, ok: false, model, message: String(detail) };
+    }
     return {
-      provider: "openrouter",
+      provider: "colab",
       configured: true,
-      ok: visible,
-      model: OPENROUTER_IMAGE_MODEL,
-      message: visible ? "API key válida e modelo de imagem visível" : `API key válida, mas ${OPENROUTER_IMAGE_MODEL} não apareceu entre os modelos de imagem disponíveis`,
+      ok: true,
+      model,
+      message: COLAB_IMAGE_API_KEY ? "endpoint online e chave aceita" : "endpoint online (sem COLAB_IMAGE_API_KEY configurada)",
     };
   } catch (error) {
-    return { provider: "openrouter", configured: true, ok: false, model: OPENROUTER_IMAGE_MODEL, message: providerErrorMessage(error) };
+    return { provider: "colab", configured: true, ok: false, model: COLAB_IMAGE_MODEL, message: providerErrorMessage(error) };
   } finally { clearTimeout(timeoutId); }
 }
 
@@ -650,9 +617,8 @@ export const testImageProvidersConnection = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ imageQuality: z.enum(["fast", "premium"]).optional().default("premium") }).parse(d ?? {}))
   .handler(async ({ data }): Promise<{ ok: boolean; message: string; providers: ProviderTestStatus[]; order: ImageProvider[] }> => {
     const providers = await Promise.all([
+      testColabProvider(),
       testCloudflareProvider(data.imageQuality),
-      testOpenRouterProvider(),
-      testGeminiProvider(data.imageQuality),
     ]);
     const order = imageProviderOrder();
     const usable = providers.filter((item) => item.ok);
