@@ -24,7 +24,8 @@ import { generateImage, testImageProvidersConnection } from "@/lib/ai.functions"
 import { generateInstagramContent, testGroqConnection, updateSlide, type CarrosselOut } from "@/lib/groq.functions";
 import { getAccessKey } from "@/lib/session";
 import { newProject, upsertProject } from "@/lib/storage";
-import { buildLayout, compositionForLayout, fontPairFromStyle, layoutForSlide, paletteFromDescription } from "@/lib/layouts";
+import { buildLayout, compositionForLayout, fontPairFromStyle, paletteFromDescription } from "@/lib/layouts";
+import { explicitHumanVisualRequest, resolveCampaignLayouts, reviewAndRepairElements } from "@/lib/creative-engine";
 import { renderElementsThumbnail } from "@/lib/fabric-elements";
 import {
   createCreationJob,
@@ -263,6 +264,10 @@ function NovoCarrossel() {
         return;
       }
 
+      const resolvedLayouts = resolveCampaignLayouts(output.slides);
+      const allowPeople = output.slides.some((slide) => slide.allowPeople === true) ||
+        explicitHumanVisualRequest(payload.form.tema, payload.form.produto, payload.details);
+
       setActiveJob(job.id);
       setResult(output);
       setStep(3);
@@ -294,11 +299,12 @@ function NovoCarrossel() {
                   slideBody: slide.texto,
                   slideIndex: slide.numero,
                   slideTotal: output.slides.length,
-                  slideKind: `${slide.tipo}. ${compositionForLayout(layoutForSlide(index, slide.tipo))}`,
+                  slideKind: `${slide.tipo}. ${compositionForLayout(resolvedLayouts[index])}`,
                   brand: payload.form.empresa,
                   palette: payload.form.paleta,
                   style: `${payload.form.estilo}; tom ${payload.form.tom}`,
                   imageQuality: payload.form.imageQuality || "premium",
+                  allowPeople,
                 } });
                 if (wasCancelled(job.id)) return;
                 break;
@@ -723,18 +729,21 @@ async function saveCarouselProject({
     theme: caption,
     style,
     ratio: "1080x1080",
+    creativePlan: output.creativePlan,
   });
 
   const resolvedPalette = paletteFromDescription(palette);
   const fonts = fontPairFromStyle(style);
 
   const previews: Record<number, string> = {};
+  const resolvedLayouts = resolveCampaignLayouts(output.slides);
+  const reviews: Array<{ slide: number; score: number; warnings: string[] }> = [];
 
   project.slides = await Promise.all(output.slides.map(async (slide, index) => {
     const asset = assets[slide.numero];
     const storedImage = asset?.url || (asset?.dataUrl ? await resizeImageDataUrl(asset.dataUrl, 1080, 0.9) : undefined);
 
-    const elements = buildLayout(layoutForSlide(index, slide.tipo, slide.titulo, slide.texto), {
+    const rawElements = buildLayout(resolvedLayouts[index], {
       title: slide.titulo,
       body: slide.texto,
       imageUrl: storedImage,
@@ -745,7 +754,7 @@ async function saveCarouselProject({
     });
 
     if (brand?.trim()) {
-      elements.push({
+      rawElements.push({
         kind: "text",
         x: 64,
         y: 1018,
@@ -757,8 +766,14 @@ async function saveCarouselProject({
         weight: 600,
         font: fonts.body,
         lineHeight: 1,
+        name: "Marca",
+        role: "brand",
       });
     }
+
+    const reviewed = reviewAndRepairElements(rawElements, 1080, 1080);
+    const elements = reviewed.elements;
+    reviews.push({ slide: slide.numero, score: reviewed.review.score, warnings: reviewed.review.warnings });
 
     // Renderize em sequência. Além de reduzir o pico de memória, isso evita
     // que duas exportações do Fabric disputem o carregamento da mesma imagem.
@@ -789,11 +804,26 @@ async function saveCarouselProject({
         elements,
         background: resolvedPalette[0],
         fonts,
+        layout: resolvedLayouts[index],
+        review: reviewed.review,
+        creative: {
+          visualConcept: slide.visualConcept,
+          textZone: slide.textZone,
+          subjectZone: slide.subjectZone,
+          aiReviewScore: slide.reviewScore,
+        },
       },
     };
   }));
 
   if (isCancelled?.()) throw new Error("Criação cancelada pelo usuário.");
+  project.meta = {
+    ...project.meta,
+    reviewSummary: {
+      averageScore: reviews.length ? Math.round(reviews.reduce((sum, item) => sum + item.score, 0) / reviews.length) : 100,
+      slides: reviews,
+    },
+  };
   upsertProject(project, ownerScope);
   return { projectId: project.id, previews };
 }
@@ -935,6 +965,14 @@ function ScriptStage({
           </div>
         </div>
 
+        {data.creativePlan && (
+          <div className="mt-5 grid gap-3 rounded-xl border border-primary/20 bg-primary/[0.05] p-4 md:grid-cols-3">
+            <div><div className="text-[10px] uppercase tracking-[.14em] text-primary">Ideia central</div><div className="mt-1 text-sm font-medium">{data.creativePlan.centralIdea}</div></div>
+            <div><div className="text-[10px] uppercase tracking-[.14em] text-primary">Assinatura visual</div><div className="mt-1 text-sm text-muted-foreground">{data.creativePlan.visualSignature}</div></div>
+            <div><div className="text-[10px] uppercase tracking-[.14em] text-primary">Política visual</div><div className="mt-1 text-sm text-muted-foreground">{data.creativePlan.peoplePolicy === "disabled" ? "Sem pessoas por padrão" : "Pessoas solicitadas no briefing"}</div></div>
+          </div>
+        )}
+
         <div className="mt-5 rounded-xl border border-border bg-white/[0.02] p-4">
           <div className="text-sm font-semibold">{data.titulo}</div>
           <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">{data.legenda}</p>
@@ -955,7 +993,12 @@ function ScriptStage({
             <div className="space-y-4 p-5">
               <Field label="Título"><input value={slide.titulo} maxLength={300} onChange={(event) => onSlideChange(index, "titulo", event.target.value)} className="app-input" /></Field>
               <Field label="Texto"><textarea value={slide.texto} maxLength={2000} onChange={(event) => onSlideChange(index, "texto", event.target.value)} rows={5} className="app-input resize-y" /></Field>
-              <div className="rounded-xl border border-border bg-white/[0.02] p-3 text-xs leading-relaxed text-muted-foreground"><span className="font-semibold text-foreground">Direção visual: </span>{slide.promptImagem}</div>
+              <div className="rounded-xl border border-border bg-white/[0.02] p-3 text-xs leading-relaxed text-muted-foreground">
+                <div><span className="font-semibold text-foreground">Conceito: </span>{slide.visualConcept || "Direção criada para este slide"}</div>
+                <div className="mt-2"><span className="font-semibold text-foreground">Layout: </span>{slide.layout || "seleção automática"} · texto {slide.textZone || "zona segura"} · assunto {slide.subjectZone || "zona oposta"}</div>
+                <div className="mt-2"><span className="font-semibold text-foreground">Prompt visual: </span>{slide.promptImagem}</div>
+                {typeof slide.reviewScore === "number" && <div className="mt-2 text-primary">Revisão da IA: {slide.reviewScore}/100</div>}
+              </div>
             </div>
           </article>
         ))}

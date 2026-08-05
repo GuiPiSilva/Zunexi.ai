@@ -7,6 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { generateCartaz, generateImage } from "@/lib/ai.functions";
 import { newProject, upsertProject } from "@/lib/storage";
 import { buildLayout, compositionForLayout, fontPairFromStyle, paletteFromDescription } from "@/lib/layouts";
+import { explicitHumanVisualRequest, resolveCampaignLayouts, reviewAndRepairElements } from "@/lib/creative-engine";
 import { renderElementsThumbnail } from "@/lib/fabric-elements";
 import { getAccessKey } from "@/lib/session";
 import {
@@ -124,7 +125,17 @@ function NovoCartaz() {
           currentForm.palette && `Paleta: ${currentForm.palette}`,
         ].filter(Boolean).join("\n");
 
-        let generated = job.result as { title: string; body: string; imagePrompt: string } | undefined;
+        let generated = job.result as {
+          title: string;
+          body: string;
+          imagePrompt: string;
+          layout?: string;
+          visualConcept?: string;
+          textZone?: string;
+          subjectZone?: string;
+          allowPeople?: boolean;
+          reviewScore?: number;
+        } | undefined;
         if (!generated) {
           const generatedOutput = await generateText({ data: {
             jobId: job.id,
@@ -149,6 +160,18 @@ function NovoCartaz() {
         const dimensions = currentForm.format === "1080x1080" ? [1080, 1080] : currentForm.format === "1080x1920" ? [1080, 1920] : [1080, 1350];
         const [width, height] = dimensions;
         const aspectRatio = currentForm.format === "1080x1080" ? "1:1" : currentForm.format === "1080x1920" ? "9:16" : "4:5";
+        const resolvedLayout = resolveCampaignLayouts([{
+          title: generated.title,
+          body: generated.body,
+          tipo: "cartaz",
+          layout: generated.layout,
+        }])[0];
+        const allowPeople = generated.allowPeople === true || explicitHumanVisualRequest(
+          currentForm.title,
+          currentForm.kind,
+          currentForm.description,
+          currentForm.style,
+        );
 
         let imageUrl = job.assets.main?.url || memoryPhoto || payload.photo;
         if (!imageUrl) {
@@ -158,12 +181,13 @@ function NovoCartaz() {
               seed,
               slideTitle: generated.title,
               slideBody: generated.body,
-              slideKind: `cartaz profissional de ${currentForm.kind}. ${compositionForLayout("text-over-image")}`,
+              slideKind: `cartaz profissional de ${currentForm.kind}. ${compositionForLayout(resolvedLayout)}`,
               brand: currentForm.title,
               palette: currentForm.palette,
               style: `${currentForm.style}; campaign key visual; premium event art direction; no typography inside the generated image`,
               aspectRatio,
               imageQuality: currentForm.imageQuality || "premium",
+              allowPeople,
             },
           });
           imageUrl = image.url;
@@ -175,10 +199,19 @@ function NovoCartaz() {
 
         let projectId = job.projectId;
         if (!projectId) {
-          const project = newProject("cartaz", currentForm.title, { style: currentForm.style, ratio: currentForm.format });
+          const project = newProject("cartaz", currentForm.title, {
+            style: currentForm.style,
+            ratio: currentForm.format,
+            creativePlan: {
+              visualConcept: generated.visualConcept,
+              textZone: generated.textZone,
+              subjectZone: generated.subjectZone,
+              aiReviewScore: generated.reviewScore,
+            },
+          });
           const resolvedPalette = paletteFromDescription(currentForm.palette);
           const fonts = fontPairFromStyle(currentForm.style);
-          const elements = buildLayout("text-over-image", {
+          const rawElements = buildLayout(resolvedLayout, {
             title: generated.title,
             body: generated.body,
             imageUrl,
@@ -187,6 +220,12 @@ function NovoCartaz() {
             height,
             fonts,
           });
+          const reviewed = reviewAndRepairElements(rawElements, width, height);
+          const elements = reviewed.elements;
+          project.meta = {
+            ...project.meta,
+            reviewSummary: reviewed.review,
+          };
           const thumb = await renderElementsThumbnail({
             elements,
             background: resolvedPalette[0],
@@ -203,6 +242,14 @@ function NovoCartaz() {
               elements,
               background: resolvedPalette[0],
               fonts,
+              layout: resolvedLayout,
+              review: reviewed.review,
+              creative: {
+                visualConcept: generated.visualConcept,
+                textZone: generated.textZone,
+                subjectZone: generated.subjectZone,
+                aiReviewScore: generated.reviewScore,
+              },
             },
           }];
           upsertProject(project, job.ownerScope);
