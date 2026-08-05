@@ -35,3 +35,22 @@ A chamada é feita somente no backend do TanStack Start/Vercel. A `NVIDIA_API_KE
 Não é necessário Lightning AI nem servidor GPU próprio.
 
 As variáveis do Supabase e Groq devem continuar configuradas conforme o ambiente atual do projeto.
+
+## Motor criativo Zunexi
+
+O fluxo de carrossel e cartaz agora usa uma arquitetura em etapas:
+
+1. planejamento da campanha e da narrativa;
+2. direção visual específica por slide;
+3. memória das criações recentes do usuário para evitar repetição;
+4. política sem pessoas por padrão, liberada apenas quando o briefing pede pessoas explicitamente;
+5. geração somente do fundo visual, sem texto;
+6. aplicação de texto e marca por coordenadas controladas;
+7. revisão criativa pela Groq e revisão geométrica local antes de salvar.
+
+Variáveis opcionais:
+
+- `GROQ_CREATIVE_REVIEW_ENABLED=false` desativa a segunda revisão por IA.
+- `GROQ_REVIEW_MODEL` escolhe um modelo separado para a revisão. Quando ausente, usa `GROQ_TEXT_MODEL`.
+
+Nenhuma migração nova do Supabase é necessária. A memória criativa utiliza as gerações já salvas na tabela `generations`.
