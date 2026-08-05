@@ -760,24 +760,24 @@ async function saveCarouselProject({
       });
     }
 
-    const [thumb, preview] = await Promise.all([
-      renderElementsThumbnail({
-        elements,
-        background: resolvedPalette[0],
-        width: 1080,
-        height: 1080,
-        maxDimension: 420,
-      }),
-      renderElementsThumbnail({
-        elements,
-        background: resolvedPalette[0],
-        width: 1080,
-        height: 1080,
-        maxDimension: 900,
-        format: "jpeg",
-        quality: 0.9,
-      }),
-    ]);
+    // Renderize em sequência. Além de reduzir o pico de memória, isso evita
+    // que duas exportações do Fabric disputem o carregamento da mesma imagem.
+    const thumb = await renderElementsThumbnail({
+      elements,
+      background: resolvedPalette[0],
+      width: 1080,
+      height: 1080,
+      maxDimension: 420,
+    });
+    const preview = await renderElementsThumbnail({
+      elements,
+      background: resolvedPalette[0],
+      width: 1080,
+      height: 1080,
+      maxDimension: 900,
+      format: "jpeg",
+      quality: 0.9,
+    });
     if (preview) previews[slide.numero] = preview;
 
     return {
