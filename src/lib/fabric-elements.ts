@@ -115,54 +115,205 @@ export async function addElementDescToCanvas(canvas: CanvasLike, el: ElementDesc
 }
 
 /**
- * Redimensiona as coordenadas lógicas antes de desenhar.
+ * Renderizador 2D independente do Fabric para miniaturas e exportações finais.
  *
- * Não usamos mais o `multiplier` do Fabric para miniaturas. Em alguns
- * navegadores/Fabric 7 ele criava um arquivo maior, mas mantinha os objetos
- * no tamanho reduzido no canto superior esquerdo. Isso era exatamente o que
- * fazia a arte correta da etapa de criação aparecer pequena e deslocada na
- * finalização e nos projetos.
+ * Em telas com escala do Windows/Retina (devicePixelRatio 2), algumas versões
+ * do Fabric criavam um backing store duas vezes maior, mas mantinham os objetos
+ * nas coordenadas reduzidas. O resultado era a arte inteira presa no quadrante
+ * superior esquerdo, com o restante do canvas mostrando apenas a cor de fundo.
+ *
+ * Aqui o canvas nativo recebe dimensões físicas exatas e todos os elementos são
+ * desenhados diretamente nessas dimensões. Assim, devicePixelRatio, zoom do
+ * navegador e escala do Windows não alteram a posição nem o tamanho da arte.
  */
-function scaleElementDesc(el: ElementDesc, scale: number): ElementDesc {
-  if (scale === 1) return el;
+function roundedRectPath(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  const safeRadius = Math.max(0, Math.min(radius, Math.abs(width) / 2, Math.abs(height) / 2));
+  context.beginPath();
+  context.moveTo(x + safeRadius, y);
+  context.lineTo(x + width - safeRadius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  context.lineTo(x + width, y + height - safeRadius);
+  context.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+  context.lineTo(x + safeRadius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  context.lineTo(x, y + safeRadius);
+  context.quadraticCurveTo(x, y, x + safeRadius, y);
+  context.closePath();
+}
 
-  if (el.kind === "rect") {
-    return {
-      ...el,
-      x: el.x * scale,
-      y: el.y * scale,
-      w: el.w * scale,
-      h: el.h * scale,
-      rx: el.rx === undefined ? undefined : el.rx * scale,
-    };
+function splitLongCanvasWord(context: CanvasRenderingContext2D, word: string, maxWidth: number) {
+  const chunks: string[] = [];
+  let current = "";
+  for (const character of Array.from(word)) {
+    const next = current + character;
+    if (current && context.measureText(next).width > maxWidth) {
+      chunks.push(current);
+      current = character;
+    } else {
+      current = next;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.length ? chunks : [word];
+}
+
+function wrapCanvasText(context: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  const output: string[] = [];
+  const paragraphs = String(text || "").replace(/\r/g, "").split("\n");
+
+  paragraphs.forEach((paragraph, paragraphIndex) => {
+    const words = paragraph.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) {
+      if (paragraphIndex < paragraphs.length - 1) output.push("");
+      return;
+    }
+
+    let line = "";
+    for (const originalWord of words) {
+      const parts = context.measureText(originalWord).width > maxWidth
+        ? splitLongCanvasWord(context, originalWord, maxWidth)
+        : [originalWord];
+
+      for (const word of parts) {
+        const candidate = line ? `${line} ${word}` : word;
+        if (line && context.measureText(candidate).width > maxWidth) {
+          output.push(line);
+          line = word;
+        } else {
+          line = candidate;
+        }
+      }
+    }
+    if (line) output.push(line);
+  });
+
+  return output;
+}
+
+function loadCanvasImage(source: string): Promise<HTMLImageElement> {
+  const normalizedSource = normalizeImageSource(source);
+
+  function attempt(useCors: boolean) {
+    return new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image();
+      if (useCors && /^https?:\/\//i.test(normalizedSource)) image.crossOrigin = "anonymous";
+      image.decoding = "async";
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("Não foi possível carregar a imagem do slide."));
+      image.src = normalizedSource;
+    });
   }
 
-  if (el.kind === "circle") {
-    return {
-      ...el,
-      cx: el.cx * scale,
-      cy: el.cy * scale,
-      r: el.r * scale,
-    };
-  }
+  if (!/^https?:\/\//i.test(normalizedSource)) return attempt(false);
+  return attempt(true).catch(() => attempt(false));
+}
 
-  if (el.kind === "text") {
-    return {
-      ...el,
-      x: el.x * scale,
-      y: el.y * scale,
-      w: el.w * scale,
-      size: el.size * scale,
-    };
-  }
+async function drawCanvasElement(
+  context: CanvasRenderingContext2D,
+  element: ElementDesc,
+  scale: number,
+) {
+  context.save();
 
-  return {
-    ...el,
-    x: el.x * scale,
-    y: el.y * scale,
-    w: el.w * scale,
-    h: el.h * scale,
-  };
+  try {
+    if (element.kind === "rect") {
+      const x = element.x * scale;
+      const y = element.y * scale;
+      const width = element.w * scale;
+      const height = element.h * scale;
+      context.globalAlpha = element.opacity ?? 1;
+      context.fillStyle = element.fill;
+      roundedRectPath(context, x, y, width, height, (element.rx || 0) * scale);
+      context.fill();
+      return;
+    }
+
+    if (element.kind === "circle") {
+      context.globalAlpha = element.opacity ?? 1;
+      context.fillStyle = element.fill;
+      context.beginPath();
+      context.arc(element.cx * scale, element.cy * scale, Math.max(0.5, element.r * scale), 0, Math.PI * 2);
+      context.fill();
+      return;
+    }
+
+    if (element.kind === "image") {
+      const image = await loadCanvasImage(element.url);
+      const sourceWidth = image.naturalWidth || image.width || 1;
+      const sourceHeight = image.naturalHeight || image.height || 1;
+      const destinationX = element.x * scale;
+      const destinationY = element.y * scale;
+      const destinationWidth = Math.max(1, element.w * scale);
+      const destinationHeight = Math.max(1, element.h * scale);
+      const sourceRatio = sourceWidth / sourceHeight;
+      const destinationRatio = destinationWidth / destinationHeight;
+
+      let sourceX = 0;
+      let sourceY = 0;
+      let cropWidth = sourceWidth;
+      let cropHeight = sourceHeight;
+
+      if (sourceRatio > destinationRatio) {
+        cropWidth = sourceHeight * destinationRatio;
+        sourceX = (sourceWidth - cropWidth) / 2;
+      } else if (sourceRatio < destinationRatio) {
+        cropHeight = sourceWidth / destinationRatio;
+        sourceY = (sourceHeight - cropHeight) / 2;
+      }
+
+      context.globalAlpha = element.opacity ?? 1;
+      context.drawImage(
+        image,
+        sourceX,
+        sourceY,
+        cropWidth,
+        cropHeight,
+        destinationX,
+        destinationY,
+        destinationWidth,
+        destinationHeight,
+      );
+      return;
+    }
+
+    const fontSize = Math.max(1, element.size * scale);
+    const weight = element.weight ?? 400;
+    const fontFamily = element.font || "Inter";
+    await ensureFabricFont(fontFamily, weight, fontSize);
+
+    context.globalAlpha = 1;
+    context.fillStyle = element.color;
+    context.textBaseline = "top";
+    context.textAlign = element.align;
+    context.font = `${element.italic ? "italic " : ""}${weight} ${fontSize}px "${fontFamily}", Inter, Arial, sans-serif`;
+
+    if (element.shadow) {
+      context.shadowColor = "rgba(0,0,0,0.48)";
+      context.shadowBlur = 18 * scale;
+      context.shadowOffsetX = 0;
+      context.shadowOffsetY = 4 * scale;
+    }
+
+    const x = element.x * scale;
+    const y = element.y * scale;
+    const width = Math.max(1, element.w * scale);
+    const lineHeight = fontSize * (element.lineHeight ?? 1.02);
+    const lines = wrapCanvasText(context, element.text, width);
+    const drawX = element.align === "center" ? x + width / 2 : element.align === "right" ? x + width : x;
+
+    lines.forEach((line, index) => {
+      context.fillText(line, drawX, y + index * lineHeight, width);
+    });
+  } finally {
+    context.restore();
+  }
 }
 
 export async function renderElementsThumbnail(args: {
@@ -176,34 +327,37 @@ export async function renderElementsThumbnail(args: {
 }) {
   if (typeof document === "undefined") return undefined;
 
+  const logicalWidth = Math.max(1, Math.round(args.width));
+  const logicalHeight = Math.max(1, Math.round(args.height));
   const maxDimension = Math.max(160, args.maxDimension ?? 420);
-  const scale = Math.min(1, maxDimension / Math.max(args.width, args.height));
-  const renderWidth = Math.max(1, Math.round(args.width * scale));
-  const renderHeight = Math.max(1, Math.round(args.height * scale));
-  const element = document.createElement("canvas");
-  const canvas = new fabric.StaticCanvas(element, {
-    width: renderWidth,
-    height: renderHeight,
-    backgroundColor: args.background,
-    renderOnAddRemove: false,
-    enableRetinaScaling: false,
-  });
+  const scale = Math.min(1, maxDimension / Math.max(logicalWidth, logicalHeight));
+  const renderWidth = Math.max(1, Math.round(logicalWidth * scale));
+  const renderHeight = Math.max(1, Math.round(logicalHeight * scale));
+
+  const canvas = document.createElement("canvas");
+  // Use atributos físicos, não CSS. O arquivo exportado terá exatamente estas
+  // dimensões, mesmo quando o Windows estiver em 125%, 150% ou 200%.
+  canvas.width = renderWidth;
+  canvas.height = renderHeight;
+
+  const context = canvas.getContext("2d", { alpha: args.format === "png" });
+  if (!context) return undefined;
+
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.globalAlpha = 1;
+  context.fillStyle = args.background;
+  context.fillRect(0, 0, renderWidth, renderHeight);
 
   try {
-    for (const item of args.elements) {
-      await addElementDescToCanvas(canvas, scaleElementDesc(item, scale));
+    for (const element of args.elements) {
+      await drawCanvasElement(context, element, scale);
     }
-    canvas.renderAll();
-    return canvas.toDataURL({
-      format: args.format ?? "jpeg",
-      quality: args.quality ?? 0.82,
-      multiplier: 1,
-    });
+    return canvas.toDataURL(`image/${args.format ?? "jpeg"}`, args.quality ?? 0.82);
   } catch (error) {
     console.warn("Não foi possível gerar a miniatura fiel do layout:", error);
     return undefined;
-  } finally {
-    canvas.dispose();
   }
 }
 
