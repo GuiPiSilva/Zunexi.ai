@@ -114,6 +114,57 @@ export async function addElementDescToCanvas(canvas: CanvasLike, el: ElementDesc
   canvas.add(image);
 }
 
+/**
+ * Redimensiona as coordenadas lógicas antes de desenhar.
+ *
+ * Não usamos mais o `multiplier` do Fabric para miniaturas. Em alguns
+ * navegadores/Fabric 7 ele criava um arquivo maior, mas mantinha os objetos
+ * no tamanho reduzido no canto superior esquerdo. Isso era exatamente o que
+ * fazia a arte correta da etapa de criação aparecer pequena e deslocada na
+ * finalização e nos projetos.
+ */
+function scaleElementDesc(el: ElementDesc, scale: number): ElementDesc {
+  if (scale === 1) return el;
+
+  if (el.kind === "rect") {
+    return {
+      ...el,
+      x: el.x * scale,
+      y: el.y * scale,
+      w: el.w * scale,
+      h: el.h * scale,
+      rx: el.rx === undefined ? undefined : el.rx * scale,
+    };
+  }
+
+  if (el.kind === "circle") {
+    return {
+      ...el,
+      cx: el.cx * scale,
+      cy: el.cy * scale,
+      r: el.r * scale,
+    };
+  }
+
+  if (el.kind === "text") {
+    return {
+      ...el,
+      x: el.x * scale,
+      y: el.y * scale,
+      w: el.w * scale,
+      size: el.size * scale,
+    };
+  }
+
+  return {
+    ...el,
+    x: el.x * scale,
+    y: el.y * scale,
+    w: el.w * scale,
+    h: el.h * scale,
+  };
+}
+
 export async function renderElementsThumbnail(args: {
   elements: ElementDesc[];
   background: string;
@@ -124,23 +175,29 @@ export async function renderElementsThumbnail(args: {
   quality?: number;
 }) {
   if (typeof document === "undefined") return undefined;
+
+  const maxDimension = Math.max(160, args.maxDimension ?? 420);
+  const scale = Math.min(1, maxDimension / Math.max(args.width, args.height));
+  const renderWidth = Math.max(1, Math.round(args.width * scale));
+  const renderHeight = Math.max(1, Math.round(args.height * scale));
   const element = document.createElement("canvas");
   const canvas = new fabric.StaticCanvas(element, {
-    width: args.width,
-    height: args.height,
+    width: renderWidth,
+    height: renderHeight,
     backgroundColor: args.background,
     renderOnAddRemove: false,
+    enableRetinaScaling: false,
   });
 
   try {
-    for (const item of args.elements) await addElementDescToCanvas(canvas, item);
+    for (const item of args.elements) {
+      await addElementDescToCanvas(canvas, scaleElementDesc(item, scale));
+    }
     canvas.renderAll();
-    const maxDimension = Math.max(160, args.maxDimension ?? 420);
-    const multiplier = Math.min(1, maxDimension / Math.max(args.width, args.height));
     return canvas.toDataURL({
       format: args.format ?? "jpeg",
-      quality: args.quality ?? 0.78,
-      multiplier,
+      quality: args.quality ?? 0.82,
+      multiplier: 1,
     });
   } catch (error) {
     console.warn("Não foi possível gerar a miniatura fiel do layout:", error);

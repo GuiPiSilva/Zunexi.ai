@@ -69,6 +69,17 @@ function fittedTitleSize(text: string, width: number, max: number, min: number, 
   return px(clamp(byLength, min, max));
 }
 
+function fitTextToLines(text: string, width: number, fontSize: number, maxLines: number) {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  const charsPerLine = Math.max(4, Math.floor(width / Math.max(1, fontSize * 0.56)));
+  const limit = Math.max(24, charsPerLine * maxLines);
+  if (clean.length <= limit) return clean;
+  const sample = clean.slice(0, limit + 1);
+  const boundary = sample.lastIndexOf(" ");
+  return `${sample.slice(0, boundary > limit * 0.65 ? boundary : limit).trim()}…`;
+}
+
 function isDenseCopy(title: string, body?: string) {
   const source = `${title}\n${body || ""}`.toLowerCase();
   const lineCount = (body || "").split(/\n+/).filter(Boolean).length;
@@ -109,6 +120,10 @@ function parseRichBody(body: string): RichLine[] {
     }
     if (/^\*\*.+\*\*$/.test(line)) {
       output.push({ kind: "item", text: cleanMarkdownInline(line) });
+      continue;
+    }
+    if ((line.endsWith(":") || (line === line.toUpperCase() && /[A-ZÁÉÍÓÚÃÕÇ]/.test(line))) && line.length <= 42) {
+      output.push({ kind: "heading", text: cleanMarkdownInline(line).replace(/:$/, "") });
       continue;
     }
     if (/^[•●▪◦]/.test(line) || /^\*\s+/.test(line) || /^-\s+/.test(line)) {
@@ -245,7 +260,7 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
       els.push({ kind: "text", x: P, y: titleY, w: boxW, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 760, font: fonts.display, lineHeight: 0.94, charSpacing: -8, shadow: "soft", name: "Título", role: "title" });
       if (body) {
         const bodyY = titleY + titleLines * titleSize * 0.96 + px(W * 0.032);
-        els.push({ kind: "text", x: P, y: bodyY, w: boxW * 0.95, text: body, size: bodySize, color: "#ffffff", align: "left", weight: 450, font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
+        els.push({ kind: "text", x: P, y: bodyY, w: boxW * 0.95, text: fitTextToLines(body, boxW * 0.95, bodySize, 6), size: bodySize, color: "#ffffff", align: "left", weight: 450, font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
       }
       break;
     }
@@ -259,7 +274,7 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
       const lines = Math.min(4, estimatedLineCount(title, boxW, titleSize));
       const y = H * 0.24;
       els.push({ kind: "text", x: P, y, w: boxW, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 750, font: fonts.display, lineHeight: 0.96, charSpacing: -6, name: "Título", role: "title" });
-      if (body) els.push({ kind: "text", x: P, y: y + lines * titleSize + 30, w: boxW, text: body, size: bodySize, color: "#ffffff", align: "left", font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
+      if (body) els.push({ kind: "text", x: P, y: y + lines * titleSize + 30, w: boxW, text: fitTextToLines(body, boxW, bodySize, 8), size: bodySize, color: "#ffffff", align: "left", font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
       break;
     }
 
@@ -272,7 +287,7 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
       const y = H * 0.67;
       addBrandAccent(els, P, y - 24, W * 0.09, accent);
       els.push({ kind: "text", x: P, y, w: boxW, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 760, font: fonts.display, lineHeight: 0.95, charSpacing: -6, shadow: "soft", name: "Título", role: "title" });
-      if (body) els.push({ kind: "text", x: P, y: y + lines * titleSize * 0.97 + 24, w: W * 0.72, text: body, size: bodySize, color: "#ffffff", align: "left", font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
+      if (body) els.push({ kind: "text", x: P, y: y + lines * titleSize * 0.97 + 24, w: W * 0.72, text: fitTextToLines(body, W * 0.72, bodySize, 4), size: bodySize, color: "#ffffff", align: "left", font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
       break;
     }
 
@@ -284,7 +299,7 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
       const lines = Math.min(3, estimatedLineCount(title, boxW, titleSize));
       const y = H * 0.71;
       els.push({ kind: "text", x: P, y, w: boxW, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 750, font: fonts.display, lineHeight: 0.96, charSpacing: -5, shadow: "soft", name: "Título", role: "title" });
-      if (body) els.push({ kind: "text", x: P, y: y + lines * titleSize + 18, w: W * 0.62, text: body, size: bodySize, color: "#ffffff", align: "left", font: fonts.body, lineHeight: 1.16, name: "Texto", role: "body" });
+      if (body) els.push({ kind: "text", x: P, y: y + lines * titleSize + 18, w: W * 0.62, text: fitTextToLines(body, W * 0.62, bodySize, 4), size: bodySize, color: "#ffffff", align: "left", font: fonts.body, lineHeight: 1.16, name: "Texto", role: "body" });
       break;
     }
 
@@ -296,7 +311,7 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
       const lines = Math.min(3, estimatedLineCount(title, boxW, titleSize));
       const y = H * 0.34;
       els.push({ kind: "text", x: W * 0.18, y, w: boxW, text: title, size: titleSize, color: "#ffffff", align: "center", weight: 760, font: fonts.display, lineHeight: 0.96, charSpacing: -5, name: "Título", role: "title" });
-      if (body) els.push({ kind: "text", x: W * 0.22, y: y + lines * titleSize + 28, w: W * 0.56, text: body, size: bodySize, color: "#ffffff", align: "center", font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
+      if (body) els.push({ kind: "text", x: W * 0.22, y: y + lines * titleSize + 28, w: W * 0.56, text: fitTextToLines(body, W * 0.56, bodySize, 4), size: bodySize, color: "#ffffff", align: "center", font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
       break;
     }
 
@@ -309,7 +324,7 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
       const lines = Math.min(3, estimatedLineCount(title, boxW, titleSize));
       const y = H * 0.3;
       els.push({ kind: "text", x: P, y, w: boxW, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 760, font: fonts.display, lineHeight: 0.95, charSpacing: -6, shadow: "soft", name: "Título", role: "title" });
-      if (body) els.push({ kind: "text", x: P, y: y + lines * titleSize + 25, w: boxW, text: body, size: bodySize, color: "#ffffff", align: "left", font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
+      if (body) els.push({ kind: "text", x: P, y: y + lines * titleSize + 25, w: boxW, text: fitTextToLines(body, boxW, bodySize, 6), size: bodySize, color: "#ffffff", align: "left", font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
       break;
     }
   }

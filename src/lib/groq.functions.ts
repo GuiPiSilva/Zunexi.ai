@@ -40,6 +40,87 @@ export interface CarrosselOut {
 
 const TIMEOUT_MS = 45_000;
 
+const PLACEHOLDER_LINE = /(?:\[(?:inserir|adicione|preencha|coloque)[^\]]*\]|<(?:inserir|adicione|preencha|coloque)[^>]*>|\b(?:a definir|não informado|nao informado|não fornecido|nao fornecido|exemplo|seu telefone|seu endereço|seu endereco)\b)/i;
+const WEAK_COPY = /^(?:bem[- ]?vindo|conheça|descubra|aproveite|saiba mais|qualidade que|sabor que|uma experiência|experiência única|o melhor para você|feito para você|não perca)(?:\b|[!.:]|$)/i;
+
+function compactWhitespace(value: string) {
+  return value
+    .replace(/\r/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function stripMarkdown(value: string) {
+  return value
+    .replace(/```(?:json)?/gi, "")
+    .replace(/^\s{0,3}#{1,6}\s*/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/^\s*[-*+]\s+/gm, "• ");
+}
+
+function removePlaceholderLines(value: string) {
+  return value
+    .split("\n")
+    .filter((line) => !PLACEHOLDER_LINE.test(line))
+    .join("\n");
+}
+
+function trimAtWord(value: string, limit: number) {
+  if (value.length <= limit) return value;
+  const slice = value.slice(0, limit + 1);
+  const boundary = slice.lastIndexOf(" ");
+  return `${slice.slice(0, boundary > limit * 0.65 ? boundary : limit).trim()}…`;
+}
+
+function sanitizeTitle(value: unknown) {
+  const cleaned = compactWhitespace(removePlaceholderLines(stripMarkdown(String(value ?? ""))))
+    .split("\n")
+    .find(Boolean)
+    ?.replace(/^[“"']|[”"']$/g, "")
+    .replace(/[.!]+$/g, "")
+    .trim() || "";
+  return trimAtWord(cleaned, 82);
+}
+
+function sanitizeBody(value: unknown, dense: boolean) {
+  const cleaned = compactWhitespace(removePlaceholderLines(stripMarkdown(String(value ?? ""))))
+    .replace(/(^|\n)(?:texto|descrição|descricao|copy)\s*:\s*/gi, "$1")
+    .trim();
+  return trimAtWord(cleaned, dense ? 1300 : 190);
+}
+
+function sanitizePromptImage(value: unknown) {
+  return compactWhitespace(String(value ?? ""))
+    .replace(/```/g, "")
+    .replace(/\b(?:add|include|render|write|display)\s+(?:the\s+)?(?:text|title|headline|words?|letters?|logo|price|phone|watermark)[^.;]*[.;]?/gi, "")
+    .trim();
+}
+
+function parseJsonObject(raw: string): Omit<CarrosselOut, "id"> {
+  const cleaned = raw.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+  try {
+    return JSON.parse(cleaned) as Omit<CarrosselOut, "id">;
+  } catch {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1)) as Omit<CarrosselOut, "id">;
+    throw new Error("Resposta da Groq em formato inválido.");
+  }
+}
+
+function copyQualityWarnings(slides: SlideOut[]) {
+  const warnings: string[] = [];
+  slides.forEach((slide) => {
+    if (!slide.titulo) warnings.push(`slide ${slide.numero} sem título`);
+    if (PLACEHOLDER_LINE.test(`${slide.titulo}\n${slide.texto}`)) warnings.push(`slide ${slide.numero} com placeholder`);
+    if (WEAK_COPY.test(slide.titulo)) warnings.push(`slide ${slide.numero} com título genérico`);
+  });
+  return warnings;
+}
+
 export const generateInstagramContent = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => Input.parse(d))
   .handler(async ({ data }): Promise<CarrosselOut> => {
@@ -92,9 +173,9 @@ export const generateInstagramContent = createServerFn({ method: "POST" })
       return `Slide ${index + 1}: CONTEÚDO — desenvolver uma ideia específica, útil e visualmente distinta, mantendo continuidade de campanha.`;
     }).join("\n");
 
-    const systemPrompt = `Você é diretor de criação, designer de campanhas para Instagram e copywriter de resposta direta. Sua tarefa não é criar apenas um roteiro: você deve planejar um CARROSSEL VISUALMENTE PRONTO, com qualidade de agência, consistência de marca e composição semelhante a anúncios profissionais de alimentação, varejo, tecnologia e serviços.
+    const systemPrompt = `Você é um diretor de criação e copywriter sênior de campanhas para Instagram. Crie conteúdo que pareça escrito para ESTA marca e ESTE pedido, não um texto genérico reutilizável. O resultado será aplicado diretamente em uma arte profissional; por isso, toda frase precisa ser útil, específica, curta e visualmente legível.
 
-Retorne SEMPRE JSON válido, sem markdown, no formato EXATO:
+Retorne SOMENTE JSON válido, sem cercas de código, no formato EXATO:
 {
   "titulo": "Título principal do carrossel",
   "legenda": "Legenda completa para Instagram, com quebras de linha e CTA no final",
@@ -102,9 +183,9 @@ Retorne SEMPRE JSON válido, sem markdown, no formato EXATO:
   "slides": [
     {
       "numero": 1,
-      "titulo": "Texto principal que aparecerá no layout",
-      "texto": "Texto secundário curto que aparecerá no layout",
-      "promptImagem": "Direção de arte em inglês para gerar somente o visual/fundo fotográfico do slide, sem texto",
+      "titulo": "Texto principal do slide",
+      "texto": "Texto secundário do slide",
+      "promptImagem": "Direção de arte em inglês, somente para a imagem sem texto",
       "tipo": "capa"
     }
   ]
@@ -113,58 +194,65 @@ Retorne SEMPRE JSON válido, sem markdown, no formato EXATO:
 PLANEJAMENTO OBRIGATÓRIO:
 ${slideRoles}
 
-PADRÃO DE QUALIDADE VISUAL:
-- Pense como diretor de arte de uma campanha real. Cada slide precisa ter um CONCEITO VISUAL deliberado, não apenas “uma foto bonita”.
-- A referência de qualidade é CARTAZ PUBLICITÁRIO: tipografia visualmente dominante, produto/personagem grande, textura, contraste, selos, divisores e informação organizada. Como a tipografia será adicionada pela Zunexi, o promptImagem deve reservar zonas para essa hierarquia sem desenhar letras.
-- Use arquétipos por nicho: FOOD/DELIVERY = preto/carvão texturizado + âmbar/laranja + fumaça/brasa + produto enorme; TECH/AI = preto profundo + azul/violeta/magenta + ondas/halftone/dots luminosos; IGREJA/FÉ = editorial clássico/vintage, marfim/pergaminho, vinho/dourado, ilustração simbólica e ornamentação elegante; outros nichos = key visual publicitário forte equivalente.
-- NÃO faça todos os slides com o mesmo grid. Varie entre: hero gigante + título lateral; produto + preço/oferta; cardápio/lista em blocos; composição central editorial; close-up com CTA; vários produtos organizados em zonas.
-- O layout, tipografia, textos, formas, selos e elementos gráficos serão montados depois pela Zunexi e achatados na arte final; o promptImagem descreve somente a fotografia/ilustração principal.
-- O produto, serviço ou assunto do cliente deve ser o herói. Evite cenas genéricas de escritório, restaurante, cidade ou pessoas sorrindo sem função narrativa.
-- Quando o tema for comida, descreva fotografia gastronômica de campanha: produto dominante, textura real, luz controlada, profundidade, cor natural dos ingredientes e enquadramento apetitoso. Não use filtro laranja/bege global.
-- Quando for tecnologia, pense em key visual de lançamento: materiais precisos, luz escultural, composição limpa e sofisticada; evite hologramas e circuitos clichês sem motivo.
-- Quando for automotivo, preserve proporções e use linguagem de campanha automotiva, não foto comum de concessionária.
-- A paleta da marca deve aparecer como ACENTOS controlados em luz, cenário ou props. Nunca transforme a foto inteira em uma única cor.
-- Preserve uma assinatura visual única ao longo do carrossel: mesma lógica de luz, contraste, materiais e tratamento; varie câmera, distância, perspectiva e posição do assunto.
-- Não use metáforas surreais aleatórias quando elas não combinarem com o negócio. A direção visual deve nascer do produto, do nicho e do objetivo.
-- Não invente telefone, preço, endereço, desconto, data ou condição comercial. Use somente dados fornecidos; quando não houver, não inclua.
+PROCESSO CRIATIVO OBRIGATÓRIO:
+- Escolha primeiro um ângulo central claro para a campanha. Todos os slides devem desenvolver esse ângulo em sequência.
+- Cada slide precisa ter uma função diferente. Não repita a mesma promessa com outras palavras.
+- A capa deve interromper o scroll com uma promessa, tensão, benefício ou ideia específica; nunca use uma simples saudação à marca.
+- Os slides intermediários devem avançar a narrativa com informação concreta, benefício, detalhe do produto, objeção, comparação, prova permitida ou orientação prática.
+- O último slide deve encerrar a ideia e indicar uma ação coerente. Use o CTA fornecido quando existir.
 
-REGRAS DE COPY:
-- Português brasileiro correto, natural e persuasivo.
-- Título entre 2 e 8 palavras, legível e forte.
-- Quando o conteúdo for normal, escreva um texto secundário realmente útil, com 1 a 3 frases curtas, e não apenas uma linha genérica. Inclua benefício, contexto, prova, característica ou ação concreta quando houver dados para isso.
-- Quando o pedido indicar cardápio, catálogo, lista, preços, sabores, itens ou informações detalhadas, o campo "texto" pode e deve ser mais completo, com quebras de linha, subtítulos e itens organizados para caber em um layout informativo premium.
-- Nesses casos de conteúdo denso, prefira estrutura clara como: subtítulo, seções, itens e pequenas descrições. Você pode usar linhas no estilo "## Seção", "**Item — preço**" e linhas de apoio.
-- Evite texto vazio como "saiba mais", "aproveite" ou "qualidade" sem informação concreta. Cada slide precisa entregar conteúdo real.
-- O primeiro slide é "capa", os intermediários são "conteudo" e o último é "cta".
-- Hashtags entre 8 e 15, sem # dentro do JSON.
+REGRAS DE COPY — PRIORIDADE MÁXIMA:
+- Escreva em português brasileiro natural, correto e contemporâneo.
+- Títulos: de 2 a 8 palavras, preferencialmente até 55 caracteres. Varie a construção sintática entre os slides.
+- Texto secundário padrão: 1 a 3 frases curtas, com aproximadamente 60 a 180 caracteres no total.
+- Para cardápio, catálogo, lista ou preços realmente fornecidos, organize o texto em linhas simples e legíveis. Não use Markdown, #, **, tabelas ou blocos de código.
+- PROIBIDO usar placeholders ou campos fictícios, como “[inserir endereço]”, “[telefone]”, “a definir”, “não informado” ou “seu contato”. Quando um dado não foi fornecido, simplesmente não o mencione.
+- PROIBIDO inventar preço, desconto, sabor, ingrediente, número, endereço, telefone, data, depoimento, resultado, garantia ou condição comercial.
+- PROIBIDO escrever títulos vazios ou clichês como “Bem-vindo”, “Conheça”, “Descubra”, “Aproveite”, “Saiba mais”, “Qualidade que você merece”, “Sabor que conquista”, “Experiência única” e variações, salvo quando a frase receber informação específica que a torne indispensável.
+- Não use linguagem de bastidor (“neste slide”, “o objetivo é”, “a marca deve”). Escreva somente a copy que aparecerá ao público.
+- Não repita palavras-chave em todos os títulos. Não comece vários slides do mesmo jeito.
+- Se o briefing tiver poucos dados, trabalhe com posicionamento e benefícios plausíveis da categoria, sem fingir fatos específicos sobre a empresa.
+- Hashtags: 8 a 15, relevantes, sem # no JSON e sem termos aleatórios.
+
+PADRÃO DE QUALIDADE VISUAL:
+- Pense como diretor de arte de uma campanha real. Cada slide precisa ter um conceito visual deliberado, não apenas “uma foto bonita”.
+- O produto, serviço ou assunto deve ser o herói. Evite cenas genéricas de escritório, restaurante, cidade ou pessoas sorrindo sem função narrativa.
+- Não faça todos os slides com o mesmo enquadramento. Preserve a assinatura visual da campanha, mas varie câmera, distância, perspectiva e posição do assunto.
+- Em alimentação, use fotografia gastronômica de campanha: produto dominante, textura real, luz controlada, profundidade e cores naturais dos ingredientes. Não aplique filtro laranja ou bege global.
+- Em tecnologia, use key visual de lançamento com materiais precisos, luz escultural, composição limpa e sofisticada; evite hologramas e circuitos clichês sem motivo.
+- Em automotivo, preserve proporções e use linguagem de campanha automotiva, não foto comum de concessionária.
+- A paleta da marca deve aparecer como acentos controlados, nunca como banho monocromático sobre toda a imagem.
 
 REGRAS DO promptImagem:
-- Escreva em inglês, com direção de arte específica e útil ao modelo de imagem.
-- Gere SOMENTE o visual principal do slide: hero subject, environment, camera, lens, lighting, materials, depth, color treatment and composition.
-- Cada promptImagem deve indicar claramente: (1) o que é o herói, (2) onde ele está no quadro, (3) tipo de luz, (4) distância/ângulo de câmera, (5) textura/material e (6) estética de campanha.
-- NÃO peça texto, tipografia, letras, números, logotipo, preço, telefone, watermark, UI, moldura ou palavras na imagem.
-- Considere que título e texto serão adicionados depois pela Zunexi antes da exportação final. Deixe negative space natural, sem criar cartão vazio ou painel artificial.
-- Peça natural local colors e controlled brand-color accents; proíba global monochrome color cast quando a paleta for intensa.
-- Evite “stock photo”, “generic modern interior”, “generic smiling person”, composições centralizadas sem intenção, mãos deformadas, objetos duplicados e fundos poluídos.
-- Em alimentação/produto físico, o produto deve ocupar visualmente cerca de 35–55% da cena quando fizer sentido, com detalhes de campanha e não uma visão distante do ambiente.
-- Preserve a mesma linguagem visual da campanha, mas varie enquadramento, distância, perspectiva e distribuição do assunto entre slides.`;
+- Escreva em inglês, com direção de arte específica.
+- Descreva SOMENTE o visual principal: hero subject, environment, camera, lens, lighting, materials, depth, color treatment and composition.
+- Indique claramente o herói, posição no quadro, luz, distância/ângulo de câmera, textura/material e estética de campanha.
+- NÃO solicite texto, tipografia, letras, números, logotipo, preço, telefone, watermark, UI, moldura ou palavras dentro da imagem.
+- Reserve negative space natural para a copy; não crie painel branco vazio ou cartão artificial.
+- Use cores locais naturais e acentos controlados da marca.
+- Evite stock photo, generic modern interior, generic smiling person, objetos duplicados, mãos deformadas e fundos poluídos.
+- Em alimentação ou produto físico, faça o produto ocupar cerca de 35–55% da cena quando adequado.
 
-    const userPrompt = `Crie o carrossel completo com estes dados:
+Antes de responder, revise silenciosamente cada slide e elimine: clichês, repetição, placeholders, dados inventados, Markdown e frases que poderiam servir para qualquer empresa.`;
+
+    const userPrompt = `Crie o carrossel completo usando apenas os dados abaixo.
+
+BRIEFING AUTORIZADO:
 Tema: ${data.tema}
-Marca: ${brand}
+Marca: ${brand === "marca do cliente" ? "não fornecida — não invente nome" : brand}
 Produto ou serviço: ${product}
 Objetivo: ${data.objetivo || "engajamento"}
-Público-alvo: ${data.publicoAlvo || "geral"}
+Público-alvo: ${data.publicoAlvo || "não especificado"}
 Tom de comunicação: ${data.tom}
 Quantidade de slides: ${data.quantidadeSlides}
 Estilo visual: ${visualStyle}
 Paleta: ${palette}
-CTA fornecido: ${requestedCta || "nenhum CTA específico"}
-Informações adicionais completas: ${data.informacoesAdicionais || "nenhuma"}
+CTA fornecido: ${requestedCta || "não fornecido — crie apenas uma ação genérica coerente, sem telefone, endereço ou link"}
+Informações adicionais: ${data.informacoesAdicionais || "nenhuma"}
 
-Faça os slides funcionarem como uma campanha contínua. O promptImagem de cada slide deve gerar apenas o visual fotográfico/ilustrado principal, sem texto, deixando a composição preparada para a Zunexi aplicar o texto e finalizar a arte depois. Não invente dados ausentes.
-${denseContentMode ? "MODELO DE CONTEÚDO DENSO: o texto de cada slide pode ser mais completo, com blocos, listas, preços, sabores, itens e descrições quando isso fizer sentido para o pedido." : "MODELO DE CONTEÚDO PADRÃO: faça textos mais bem trabalhados, com mais substância e clareza, porém ainda enxutos e fáceis de ler."}
-Semente de variação: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
+Faça uma campanha contínua e específica. Não use saudações de abertura, texto de apresentação genérico, placeholders ou dados que não estejam no briefing. O promptImagem de cada slide deve gerar somente a fotografia/ilustração principal sem texto.
+${denseContentMode ? "MODO DENSO: use conteúdo mais completo apenas quando os itens e dados estiverem presentes no briefing. Organize em linhas simples, sem Markdown." : "MODO PADRÃO: mantenha a copy enxuta, forte e com informação real em todos os slides."}
+Semente de variação criativa: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -179,7 +267,9 @@ Semente de variação: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
         signal: controller.signal,
         body: JSON.stringify({
           model: process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile",
-          temperature: 0.78,
+          temperature: 0.7,
+          top_p: 0.9,
+          max_tokens: 6500,
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: systemPrompt },
@@ -204,9 +294,7 @@ Semente de variação: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
     const json = await response.json() as { choices?: { message?: { content?: string } }[] };
     const raw = json.choices?.[0]?.message?.content ?? "";
     if (!raw) throw new Error("Resposta vazia da Groq.");
-    let parsed: Omit<CarrosselOut, "id">;
-    try { parsed = JSON.parse(raw) as Omit<CarrosselOut, "id">; }
-    catch { throw new Error("Resposta da Groq em formato inválido."); }
+    const parsed = parseJsonObject(raw);
 
     if (
       !parsed || typeof parsed.titulo !== "string" || typeof parsed.legenda !== "string" ||
@@ -215,12 +303,25 @@ Semente de variação: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
     const slides = parsed.slides.slice(0, data.quantidadeSlides).map((s, i) => ({
       numero: i + 1,
-      titulo: String(s.titulo ?? ""),
-      texto: String(s.texto ?? ""),
-      promptImagem: String(s.promptImagem ?? ""),
-      tipo: String(s.tipo ?? (i === 0 ? "capa" : i === parsed.slides.length - 1 ? "cta" : "conteudo")),
+      titulo: sanitizeTitle(s.titulo),
+      texto: sanitizeBody(s.texto, denseContentMode),
+      promptImagem: sanitizePromptImage(s.promptImagem),
+      tipo: String(s.tipo ?? (i === 0 ? "capa" : i === data.quantidadeSlides - 1 ? "cta" : "conteudo")),
     }));
-    const hashtags = parsed.hashtags.map(h => String(h).replace(/^#/, "")).slice(0, 20);
+
+    const warnings = copyQualityWarnings(slides);
+    if (warnings.some((warning) => warning.includes("sem título"))) {
+      throw new Error("A IA retornou um roteiro incompleto. Tente gerar novamente com mais detalhes sobre o produto ou serviço.");
+    }
+    if (warnings.length) console.warn("Avisos de qualidade da copy:", warnings);
+
+    const hashtags = parsed.hashtags
+      .map((hashtag) => compactWhitespace(String(hashtag)).replace(/^#+/, "").replace(/\s+/g, ""))
+      .filter(Boolean)
+      .filter((hashtag, index, all) => all.indexOf(hashtag) === index)
+      .slice(0, 15);
+    const carouselTitle = sanitizeTitle(parsed.titulo) || slides[0]?.titulo || data.tema;
+    const caption = sanitizeBody(parsed.legenda, true);
 
     const { data: inserted, error: insErr } = await sb
       .from("generations")
@@ -233,8 +334,8 @@ Semente de variação: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
         tom: data.tom,
         quantidade_slides: data.quantidadeSlides,
         informacoes_adicionais: data.informacoesAdicionais,
-        titulo: parsed.titulo,
-        legenda: parsed.legenda,
+        titulo: carouselTitle,
+        legenda: caption,
         hashtags,
         slides,
       })
@@ -243,7 +344,7 @@ Semente de variação: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
     if (insErr || !inserted) throw new Error("Falha ao salvar geração no banco.");
 
 
-    return { id: inserted.id, titulo: parsed.titulo, legenda: parsed.legenda, hashtags, slides };
+    return { id: inserted.id, titulo: carouselTitle, legenda: caption, hashtags, slides };
   });
 
 const UpdateSlideInput = z.object({
