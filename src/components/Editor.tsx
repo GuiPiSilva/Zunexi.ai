@@ -159,6 +159,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       selection: true,
       stopContextMenu: true,
       fireRightClick: true,
+      enableRetinaScaling: false,
     });
     fcRef.current = canvas;
     skipHistory.current = true;
