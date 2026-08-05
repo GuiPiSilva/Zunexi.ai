@@ -22,6 +22,8 @@ export interface Project {
     style?: string;
     ratio?: string;
     reference?: string;
+    creativePlan?: unknown;
+    reviewSummary?: unknown;
   };
 }
 

@@ -3,6 +3,8 @@ import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { consumeAccessCredit, requireAccessKey } from "@/lib/access.functions";
+import { explicitHumanVisualRequest } from "@/lib/creative-engine";
+import { LAYOUT_IDS } from "@/lib/layouts";
 
 function admin() {
   return createClient<Database>(
@@ -23,12 +25,28 @@ const Input = z.object({
   informacoesAdicionais: z.string().trim().max(3000).optional().default(""),
 });
 
-interface SlideOut {
+export interface CreativePlanOut {
+  centralIdea: string;
+  visualSignature: string;
+  audienceInsight: string;
+  peoplePolicy: "disabled" | "explicitly-requested";
+  avoidPatterns: string[];
+}
+
+export interface SlideOut {
   numero: number;
   titulo: string;
   texto: string;
   promptImagem: string;
   tipo: string;
+  layout?: string;
+  visualConcept?: string;
+  textZone?: string;
+  subjectZone?: string;
+  camera?: string;
+  lighting?: string;
+  allowPeople?: boolean;
+  reviewScore?: number;
 }
 export interface CarrosselOut {
   id: string;
@@ -36,6 +54,7 @@ export interface CarrosselOut {
   legenda: string;
   hashtags: string[];
   slides: SlideOut[];
+  creativePlan?: CreativePlanOut;
 }
 
 const TIMEOUT_MS = 45_000;
@@ -118,7 +137,117 @@ function copyQualityWarnings(slides: SlideOut[]) {
     if (PLACEHOLDER_LINE.test(`${slide.titulo}\n${slide.texto}`)) warnings.push(`slide ${slide.numero} com placeholder`);
     if (WEAK_COPY.test(slide.titulo)) warnings.push(`slide ${slide.numero} com título genérico`);
   });
+
+  const normalizedTitles = slides.map((slide) => slide.titulo.toLowerCase().replace(/[^a-z0-9áéíóúãõâêôç ]/gi, "").trim());
+  normalizedTitles.forEach((title, index) => {
+    if (title && normalizedTitles.indexOf(title) !== index) warnings.push(`slide ${slides[index].numero} repete um título anterior`);
+  });
+
+  const layouts = slides.map((slide) => slide.layout).filter(Boolean);
+  for (let index = 1; index < layouts.length; index += 1) {
+    if (layouts[index] === layouts[index - 1]) warnings.push("layouts consecutivos repetidos");
+  }
   return warnings;
+}
+
+function sanitizeCreativeField(value: unknown, limit = 220) {
+  return trimAtWord(compactWhitespace(stripMarkdown(String(value ?? ""))), limit);
+}
+
+function normalizeCreativePlan(value: unknown, allowPeople: boolean): CreativePlanOut | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const plan = value as Partial<CreativePlanOut>;
+  const avoidPatterns = Array.isArray(plan.avoidPatterns)
+    ? plan.avoidPatterns.map((item) => sanitizeCreativeField(item, 120)).filter(Boolean).slice(0, 8)
+    : [];
+  return {
+    centralIdea: sanitizeCreativeField(plan.centralIdea, 240),
+    visualSignature: sanitizeCreativeField(plan.visualSignature, 300),
+    audienceInsight: sanitizeCreativeField(plan.audienceInsight, 220),
+    peoplePolicy: allowPeople ? "explicitly-requested" : "disabled",
+    avoidPatterns,
+  };
+}
+
+function normalizeSlide(value: SlideOut, index: number, total: number, dense: boolean, allowPeople: boolean): SlideOut {
+  const requestedLayout = sanitizeCreativeField(value.layout, 40);
+  const layout = (LAYOUT_IDS as readonly string[]).includes(requestedLayout) ? requestedLayout : undefined;
+  return {
+    numero: index + 1,
+    titulo: sanitizeTitle(value.titulo),
+    texto: sanitizeBody(value.texto, dense),
+    promptImagem: sanitizePromptImage(value.promptImagem),
+    tipo: String(value.tipo ?? (index === 0 ? "capa" : index === total - 1 ? "cta" : "conteudo")),
+    layout,
+    visualConcept: sanitizeCreativeField(value.visualConcept, 240),
+    textZone: sanitizeCreativeField(value.textZone, 40),
+    subjectZone: sanitizeCreativeField(value.subjectZone, 40),
+    camera: sanitizeCreativeField(value.camera, 100),
+    lighting: sanitizeCreativeField(value.lighting, 100),
+    allowPeople,
+    reviewScore: typeof value.reviewScore === "number" ? Math.max(0, Math.min(100, Math.round(value.reviewScore))) : undefined,
+  };
+}
+
+async function reviewCampaignWithGroq({
+  apiKey,
+  campaign,
+  briefing,
+  allowPeople,
+}: {
+  apiKey: string;
+  campaign: Omit<CarrosselOut, "id">;
+  briefing: string;
+  allowPeople: boolean;
+}): Promise<Omit<CarrosselOut, "id">> {
+  if (process.env.GROQ_CREATIVE_REVIEW_ENABLED === "false") return campaign;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 40_000);
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: process.env.GROQ_REVIEW_MODEL || process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile",
+        temperature: 0.25,
+        top_p: 0.8,
+        max_tokens: 6500,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: `Você é o revisor final da Zunexi. Receba um carrossel em JSON e devolva o MESMO formato JSON, corrigido e pronto para produção. Não explique nada. Preserve somente fatos autorizados pelo briefing. Elimine clichês, repetição de títulos, repetição de layouts, prompts visuais genéricos, placeholders e dados inventados. Cada slide deve ter layout válido entre: ${LAYOUT_IDS.join(", ")}. Garanta que promptImagem esteja em inglês e descreva somente a cena sem texto. Pessoas estão ${allowPeople ? "permitidas porque foram solicitadas explicitamente" : "PROIBIDAS; remova pessoas, rostos, mãos, corpos e silhuetas de todos os prompts"}. Dê reviewScore de 0 a 100 para cada slide depois das correções.`,
+          },
+          {
+            role: "user",
+            content: `BRIEFING AUTORIZADO:
+${briefing}
+
+CAMPANHA A REVISAR:
+${JSON.stringify(campaign)}`,
+          },
+        ],
+      }),
+    });
+    if (!response.ok) return campaign;
+    const json = await response.json() as { choices?: { message?: { content?: string } }[] };
+    const raw = json.choices?.[0]?.message?.content?.trim();
+    if (!raw) return campaign;
+    const reviewed = parseJsonObject(raw);
+    if (
+      !reviewed || typeof reviewed.titulo !== "string" || typeof reviewed.legenda !== "string" ||
+      !Array.isArray(reviewed.hashtags) || !Array.isArray(reviewed.slides) ||
+      reviewed.slides.length < campaign.slides.length
+    ) return campaign;
+    return reviewed;
+  } catch (error) {
+    console.warn("Revisor criativo indisponível; usando primeira versão.", error);
+    return campaign;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export const generateInstagramContent = createServerFn({ method: "POST" })
@@ -163,6 +292,28 @@ export const generateInstagramContent = createServerFn({ method: "POST" })
     const denseContentMode = /card[aá]pio|menu|cat[aá]logo|lista|tabela|pre[cç]o|sabores|pizzas|bebidas|tradicionais|doces|promo[cç][aã]o/.test(
       `${data.tema} ${data.informacoesAdicionais} ${product}`.toLowerCase(),
     );
+    const allowPeople = explicitHumanVisualRequest(data.tema, data.informacoesAdicionais, product);
+
+    const { data: recentRows } = await sb
+      .from("generations")
+      .select("titulo, slides, created_at")
+      .eq("access_key_id", keyId)
+      .neq("client_job_id", data.jobId)
+      .order("created_at", { ascending: false })
+      .limit(6);
+
+    const recentCreativeMemory = (recentRows || []).map((row) => {
+      const recentSlides = Array.isArray(row.slides) ? row.slides as unknown as SlideOut[] : [];
+      return {
+        titulo: row.titulo,
+        slides: recentSlides.slice(0, 8).map((slide) => ({
+          titulo: slide.titulo,
+          layout: slide.layout,
+          visualConcept: slide.visualConcept,
+          prompt: String(slide.promptImagem || "").slice(0, 180),
+        })),
+      };
+    });
 
     const slideRoles = Array.from({ length: data.quantidadeSlides }, (_, index) => {
       if (index == 0) return `Slide 1: CAPA — interromper o scroll, apresentar a promessa principal e estabelecer a identidade visual.`;
@@ -180,13 +331,28 @@ Retorne SOMENTE JSON válido, sem cercas de código, no formato EXATO:
   "titulo": "Título principal do carrossel",
   "legenda": "Legenda completa para Instagram, com quebras de linha e CTA no final",
   "hashtags": ["hashtag1", "hashtag2"],
+  "creativePlan": {
+    "centralIdea": "ideia central específica da campanha",
+    "visualSignature": "assinatura visual que une os slides",
+    "audienceInsight": "insight útil sobre o público sem inventar fatos",
+    "peoplePolicy": "disabled ou explicitly-requested",
+    "avoidPatterns": ["padrões visuais e verbais que não devem ser repetidos"]
+  },
   "slides": [
     {
       "numero": 1,
       "titulo": "Texto principal do slide",
       "texto": "Texto secundário do slide",
       "promptImagem": "Direção de arte em inglês, somente para a imagem sem texto",
-      "tipo": "capa"
+      "tipo": "capa",
+      "layout": "text-over-image",
+      "visualConcept": "conceito visual específico deste slide",
+      "textZone": "left",
+      "subjectZone": "right",
+      "camera": "close-up low three-quarter angle",
+      "lighting": "controlled cinematic rim light",
+      "allowPeople": false,
+      "reviewScore": 95
     }
   ]
 }
@@ -200,6 +366,9 @@ PROCESSO CRIATIVO OBRIGATÓRIO:
 - A capa deve interromper o scroll com uma promessa, tensão, benefício ou ideia específica; nunca use uma simples saudação à marca.
 - Os slides intermediários devem avançar a narrativa com informação concreta, benefício, detalhe do produto, objeção, comparação, prova permitida ou orientação prática.
 - O último slide deve encerrar a ideia e indicar uma ação coerente. Use o CTA fornecido quando existir.
+- Defina uma creativePlan antes dos slides. Ela deve unir a campanha sem tornar as composições iguais.
+- Escolha para cada slide um layout válido entre: ${LAYOUT_IDS.join(", ")}. Nunca repita o mesmo layout em slides consecutivos, exceto menu-board quando o conteúdo realmente for denso.
+- textZone e subjectZone devem ser opostos ou claramente separados para proteger a legibilidade.
 
 REGRAS DE COPY — PRIORIDADE MÁXIMA:
 - Escreva em português brasileiro natural, correto e contemporâneo.
@@ -249,6 +418,10 @@ Estilo visual: ${visualStyle}
 Paleta: ${palette}
 CTA fornecido: ${requestedCta || "não fornecido — crie apenas uma ação genérica coerente, sem telefone, endereço ou link"}
 Informações adicionais: ${data.informacoesAdicionais || "nenhuma"}
+Política de pessoas: ${allowPeople ? "Pessoas permitidas porque o pedido visual as solicitou explicitamente." : "SEM PESSOAS. Não use pessoas, rostos, mãos, corpos, silhuetas ou multidões."}
+
+MEMÓRIA CRIATIVA RECENTE — não copie títulos, conceitos, enquadramentos ou sequências de layout abaixo:
+${recentCreativeMemory.length ? JSON.stringify(recentCreativeMemory) : "nenhuma criação anterior disponível"}
 
 Faça uma campanha contínua e específica. Não use saudações de abertura, texto de apresentação genérico, placeholders ou dados que não estejam no briefing. O promptImagem de cada slide deve gerar somente a fotografia/ilustração principal sem texto.
 ${denseContentMode ? "MODO DENSO: use conteúdo mais completo apenas quando os itens e dados estiverem presentes no briefing. Organize em linhas simples, sem Markdown." : "MODO PADRÃO: mantenha a copy enxuta, forte e com informação real em todos os slides."}
@@ -294,20 +467,33 @@ Semente de variação criativa: ${Math.random().toString(36).slice(2)}-${Date.no
     const json = await response.json() as { choices?: { message?: { content?: string } }[] };
     const raw = json.choices?.[0]?.message?.content ?? "";
     if (!raw) throw new Error("Resposta vazia da Groq.");
-    const parsed = parseJsonObject(raw);
+    let parsed = parseJsonObject(raw);
 
     if (
       !parsed || typeof parsed.titulo !== "string" || typeof parsed.legenda !== "string" ||
       !Array.isArray(parsed.hashtags) || !Array.isArray(parsed.slides) || parsed.slides.length === 0
     ) throw new Error("Resposta da Groq não segue o formato esperado.");
 
-    const slides = parsed.slides.slice(0, data.quantidadeSlides).map((s, i) => ({
-      numero: i + 1,
-      titulo: sanitizeTitle(s.titulo),
-      texto: sanitizeBody(s.texto, denseContentMode),
-      promptImagem: sanitizePromptImage(s.promptImagem),
-      tipo: String(s.tipo ?? (i === 0 ? "capa" : i === data.quantidadeSlides - 1 ? "cta" : "conteudo")),
-    }));
+    const authorizedBriefing = `Tema: ${data.tema}
+Marca: ${brand}
+Produto: ${product}
+Objetivo: ${data.objetivo}
+Público: ${data.publicoAlvo}
+Tom: ${data.tom}
+Estilo: ${visualStyle}
+Paleta: ${palette}
+CTA: ${requestedCta}
+Informações: ${data.informacoesAdicionais}`;
+    parsed = await reviewCampaignWithGroq({
+      apiKey,
+      campaign: parsed,
+      briefing: authorizedBriefing,
+      allowPeople,
+    });
+
+    const slides = parsed.slides.slice(0, data.quantidadeSlides).map((slide, index) =>
+      normalizeSlide(slide, index, data.quantidadeSlides, denseContentMode, allowPeople),
+    );
 
     const warnings = copyQualityWarnings(slides);
     if (warnings.some((warning) => warning.includes("sem título"))) {
@@ -322,6 +508,7 @@ Semente de variação criativa: ${Math.random().toString(36).slice(2)}-${Date.no
       .slice(0, 15);
     const carouselTitle = sanitizeTitle(parsed.titulo) || slides[0]?.titulo || data.tema;
     const caption = sanitizeBody(parsed.legenda, true);
+    const creativePlan = normalizeCreativePlan(parsed.creativePlan, allowPeople);
 
     const { data: inserted, error: insErr } = await sb
       .from("generations")
@@ -344,7 +531,7 @@ Semente de variação criativa: ${Math.random().toString(36).slice(2)}-${Date.no
     if (insErr || !inserted) throw new Error("Falha ao salvar geração no banco.");
 
 
-    return { id: inserted.id, titulo: carouselTitle, legenda: caption, hashtags, slides };
+    return { id: inserted.id, titulo: carouselTitle, legenda: caption, hashtags, slides, creativePlan };
   });
 
 const UpdateSlideInput = z.object({

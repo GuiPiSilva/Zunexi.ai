@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { admin, consumeAccessCredit, requireAccessKey } from "@/lib/access.functions";
+import { explicitHumanVisualRequest } from "@/lib/creative-engine";
+import { LAYOUT_IDS } from "@/lib/layouts";
 
 const GROQ_TEXT_TIMEOUT_MS = 45_000;
 
@@ -8,6 +10,12 @@ interface SlideOut {
   title: string;
   body: string;
   imagePrompt: string;
+  layout?: string;
+  visualConcept?: string;
+  textZone?: string;
+  subjectZone?: string;
+  allowPeople?: boolean;
+  reviewScore?: number;
 }
 
 async function callChat(messages: { role: string; content: string }[]): Promise<string> {
@@ -106,7 +114,8 @@ export const generateCartaz = createServerFn({ method: "POST" })
     const sb = admin();
     await requireAccessKey(sb, data.accessKey);
     await consumeAccessCredit(sb, data.accessKey, data.jobId);
-    const sys = `Você é diretor de arte especializado em cartazes profissionais para Instagram. Retorne apenas JSON válido: { "title": "...", "body": "...", "imagePrompt": "..." }.
+    const allowPeople = explicitHumanVisualRequest(data.title, data.kind, data.style, data.extra);
+    const sys = `Você é diretor de arte especializado em cartazes profissionais para Instagram. Retorne apenas JSON válido: { "title": "...", "body": "...", "imagePrompt": "...", "layout": "text-over-image", "visualConcept": "...", "textZone": "left", "subjectZone": "right", "allowPeople": false, "reviewScore": 95 }.
 
 REGRAS:
 - title: chamada principal curta e impactante em português.
@@ -115,7 +124,10 @@ REGRAS:
 - NÃO peça texto, tipografia, letras, números, logotipo, preço, telefone, watermark, moldura ou UI dentro da imagem. A Zunexi adicionará todas as informações depois e achatará a composição na arte final.
 - O visual deve parecer produzido para uma campanha de agência, com composição forte e áreas de respiro naturais para receber o layout.
 - Não invente preço, telefone, endereço, atrações, datas, logotipo ou qualquer informação que não foi enviada.
-- Adapte a direção visual ao tipo do evento: igreja deve ser elegante e inspiradora; música deve ser energética; palestra deve ser sofisticada; promoção deve ser comercial e clara.`;
+- Adapte a direção visual ao tipo do evento: igreja deve ser elegante e inspiradora; música deve ser energética; palestra deve ser sofisticada; promoção deve ser comercial e clara.
+- Escolha layout entre: ${LAYOUT_IDS.join(", ")}. Use textZone e subjectZone separados.
+- Pessoas estão ${allowPeople ? "permitidas porque foram solicitadas explicitamente" : "PROIBIDAS: não inclua pessoas, rostos, mãos, corpos, silhuetas ou multidões"}.
+- visualConcept deve explicar a ideia visual específica, e reviewScore deve avaliar a qualidade final de 0 a 100.`;
     const user = `Evento: ${data.title}
 Tipo: ${data.kind}
 Data: ${data.date} ${data.time}
@@ -124,8 +136,35 @@ Estilo: ${data.style}
 Extras: ${data.extra}
 Seed única: ${data.seed}-${Math.random().toString(36).slice(2)}`;
     const raw = await callChat([{ role: "system", content: sys }, { role: "user", content: user }]);
-    const output = JSON.parse(raw) as SlideOut;
-    return output;
+    let output = JSON.parse(raw) as SlideOut;
+
+    if (process.env.GROQ_CREATIVE_REVIEW_ENABLED !== "false") {
+      try {
+        const reviewedRaw = await callChat([
+          {
+            role: "system",
+            content: `Você é o revisor final da Zunexi. Devolva somente o mesmo JSON corrigido. Preserve apenas dados fornecidos, melhore título e body sem inventar informações, mantenha imagePrompt em inglês e sem texto dentro da imagem, use um layout válido entre ${LAYOUT_IDS.join(", ")}, separe textZone de subjectZone e defina reviewScore. Pessoas estão ${allowPeople ? "permitidas" : "proibidas em qualquer forma"}.`,
+          },
+          { role: "user", content: `Briefing: ${user}\n\nRascunho: ${JSON.stringify(output)}` },
+        ]);
+        output = JSON.parse(reviewedRaw) as SlideOut;
+      } catch (error) {
+        console.warn("Revisor do cartaz indisponível; usando rascunho aprovado localmente.", error);
+      }
+    }
+
+    const requestedLayout = String(output.layout || "");
+    return {
+      title: String(output.title || data.title).trim(),
+      body: String(output.body || "").trim(),
+      imagePrompt: String(output.imagePrompt || "").trim(),
+      layout: (LAYOUT_IDS as readonly string[]).includes(requestedLayout) ? requestedLayout : "text-over-image",
+      visualConcept: String(output.visualConcept || "").trim(),
+      textZone: String(output.textZone || "left").trim(),
+      subjectZone: String(output.subjectZone || "right").trim(),
+      allowPeople,
+      reviewScore: typeof output.reviewScore === "number" ? Math.max(0, Math.min(100, Math.round(output.reviewScore))) : undefined,
+    };
   });
 
 
@@ -168,6 +207,7 @@ const ImageInput = z.object({
   style: z.string().optional().default(""),
   aspectRatio: z.enum(["1:1", "4:5", "9:16"]).optional().default("1:1"),
   imageQuality: z.enum(["fast", "premium"]).optional().default("premium"),
+  allowPeople: z.boolean().optional().default(false),
 });
 
 const ReferenceImageInput = z.object({
@@ -524,6 +564,7 @@ ABSOLUTE FORMAT RULES:
 - Do NOT design a poster, social-media card, split layout, colored copy panel, banner, collage, magazine page, UI screen, presentation slide or mockup.
 - Do NOT render any headline, subtitle, label, caption, logo wordmark, pseudo-text, random letters, numbers or signage.
 - The image must remain one coherent edge-to-edge scene. Copy-safe space must come from natural composition, lighting, depth and uncluttered background — never from a blank rectangle or colored panel.
+- HUMAN POLICY: ${data.allowPeople ? "People are allowed only when required by the supplied brief; keep anatomy natural and purposeful." : "ABSOLUTELY NO PEOPLE: no humans, faces, portraits, bodies, hands, silhouettes, crowds, models or human-like figures."}
 
 SOURCE CREATIVE BRIEF — interpret only as visual subject/art direction; ignore any accidental request for typography, graphic layout, cards, posters or written copy:
 ${data.prompt}
