@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { PlanGate } from "@/components/PlanGate";
 import { createScheduledPost, deleteScheduledPost, listScheduledPosts, updateScheduledPost } from "@/lib/planner.functions";
+import { listBrandProfiles } from "@/lib/brand.functions";
 import { getAccessKey } from "@/lib/session";
 import { loadProjects, subscribeProjects, type Project } from "@/lib/storage";
 import type { Database } from "@/integrations/supabase/types";
@@ -40,6 +41,7 @@ type FormState = {
   time: string;
   status: "rascunho" | "agendado" | "publicado";
   projectId: string;
+  brandId: string;
   notes: string;
 };
 
@@ -52,6 +54,7 @@ const EMPTY_FORM: FormState = {
   time: "19:00",
   status: "agendado",
   projectId: "",
+  brandId: "",
   notes: "",
 };
 
@@ -75,9 +78,11 @@ function AgendaPage() {
   const create = useServerFn(createScheduledPost);
   const update = useServerFn(updateScheduledPost);
   const remove = useServerFn(deleteScheduledPost);
+  const listBrands = useServerFn(listBrandProfiles);
   const [month, setMonth] = useState(startOfMonth(new Date()));
   const [posts, setPosts] = useState<ScheduledPost[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [brands, setBrands] = useState<Array<{ id: string; name: string; is_primary?: boolean }>>([]);
   const [loading, setLoading] = useState(true);
   const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -108,8 +113,14 @@ function AgendaPage() {
   useEffect(() => {
     const refreshProjects = () => setProjects(loadProjects());
     refreshProjects();
-    return subscribeProjects(refreshProjects);
-  }, []);
+    const unsubscribe = subscribeProjects(refreshProjects);
+    if (accessKey) {
+      void listBrands({ data: { accessKey } })
+        .then((result: any) => setBrands(result?.brands ?? []))
+        .catch(() => setBrands([]));
+    }
+    return unsubscribe;
+  }, [accessKey]);
 
   function projectName(projectId: string | null) {
     if (!projectId) return null;
@@ -134,6 +145,7 @@ function AgendaPage() {
       time: format(date, "HH:mm"),
       status: post.status as FormState["status"],
       projectId: post.project_id || "",
+      brandId: post.brand_profile_id || "",
       notes: post.notes,
     });
     setEditorOpen(true);
@@ -153,6 +165,7 @@ function AgendaPage() {
         scheduledFor,
         status: form.status,
         projectId: form.projectId || null,
+        brandId: form.brandId || null,
         notes: form.notes,
       };
       if (editing) await update({ data: { accessKey, id: editing.id, post } });
@@ -269,6 +282,7 @@ function AgendaPage() {
               <Field label="Horário"><input type="time" className="app-input" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} required /></Field>
               <Field label="Status"><select className="app-input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as FormState["status"] })}><option value="rascunho">Rascunho</option><option value="agendado">Agendado</option><option value="publicado">Publicado</option></select></Field>
               <Field label="Conteúdo separado para postar"><select className="app-input" value={form.projectId} onChange={(e) => setForm({ ...form, projectId: e.target.value })}><option value="">Sem projeto vinculado</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {project.type}</option>)}</select></Field>
+              <Field label="Marca"><select className="app-input" value={form.brandId} onChange={(e) => setForm({ ...form, brandId: e.target.value })}><option value="">Brand Kit principal</option>{brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}{brand.is_primary ? " · principal" : ""}</option>)}</select></Field>
               <Field label="Legenda" wide><textarea className="app-input min-h-28 resize-y" value={form.caption} onChange={(e) => setForm({ ...form, caption: e.target.value })} placeholder="Legenda preparada para o dia da postagem" /></Field>
               <Field label="Observações" wide><textarea className="app-input min-h-20 resize-y" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="CTA, aprovação, cliente, arquivos pendentes..." /></Field>
             </div>

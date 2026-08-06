@@ -10,7 +10,7 @@ import { buildLayout, compositionForLayout, fontPairFromStyle, paletteFromDescri
 import { explicitHumanVisualRequest, resolveCampaignLayouts, reviewAndRepairElements } from "@/lib/creative-engine";
 import { renderElementsThumbnail } from "@/lib/fabric-elements";
 import { getAccessKey } from "@/lib/session";
-import { getPrimaryBrandProfile } from "@/lib/brand.functions";
+import { getPrimaryBrandProfile, listBrandProfiles } from "@/lib/brand.functions";
 import {
   createCreationJob,
   getActiveCreationJob,
@@ -41,10 +41,12 @@ function NovoCartaz() {
   const generateText = useServerFn(generateCartaz);
   const generateImageFn = useServerFn(generateImage);
   const getPrimaryBrand = useServerFn(getPrimaryBrandProfile);
+  const listBrands = useServerFn(listBrandProfiles);
   const [accessKey, setAccessKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [photo, setPhoto] = useState<string | undefined>();
+  const [brands, setBrands] = useState<Array<any>>([]);
   const [form, setForm] = useState({
     title: "",
     kind: "evento",
@@ -61,6 +63,7 @@ function NovoCartaz() {
     palette: "roxo, rosa, azul e ciano",
     format: "1080x1350",
     imageQuality: "fast" as "fast" | "premium",
+    brandId: "",
   });
 
   useEffect(() => {
@@ -73,17 +76,25 @@ function NovoCartaz() {
   }, [nav]);
 
 
+  function applyBrand(brand: any) {
+    if (!brand) return;
+    setForm((current) => ({
+      ...current,
+      brandId: brand.id,
+      palette: `${brand.primary_color}, ${brand.secondary_color}, ${brand.accent_color}`,
+      style: [brand.visual_style || current.style, Array.isArray(brand.typography) && brand.typography.length ? `Tipografia obrigatória: ${brand.typography.join(", ")}` : ""].filter(Boolean).join("; "),
+      description: [current.description, brand.notes, brand.guide_summary, Array.isArray(brand.content_pillars) ? `Pilares: ${brand.content_pillars.join(", ")}` : "", Array.isArray(brand.prohibited_terms) ? `Evitar: ${brand.prohibited_terms.join(", ")}` : ""].filter(Boolean).join("\n"),
+    }));
+  }
+
   useEffect(() => {
     if (!accessKey) return;
-    getPrimaryBrand({ data: { accessKey } }).then((brand) => {
-      if (!brand) return;
-      setForm((current) => ({
-        ...current,
-        palette: current.palette === "roxo, rosa, azul e ciano" ? `${brand.primary_color}, ${brand.secondary_color}, ${brand.accent_color}` : current.palette,
-        style: current.style === "moderno" && brand.visual_style ? brand.visual_style : current.style,
-        description: current.description || brand.notes,
-      }));
-    }).catch(() => undefined);
+    listBrands({ data: { accessKey } }).then((result) => {
+      const next = result.brands as any[];
+      setBrands(next);
+      const selected = next.find((brand) => brand.is_primary) || next[0];
+      if (selected) applyBrand(selected);
+    }).catch(() => getPrimaryBrand({ data: { accessKey, brandId: null } }).then(applyBrand).catch(() => undefined));
   }, [accessKey]);
 
   useEffect(() => {
@@ -164,6 +175,7 @@ function NovoCartaz() {
             style: currentForm.style,
             extra,
             seed,
+            brandId: currentForm.brandId || null,
           } });
           generated = generatedOutput;
           job = updateCreationJob(job.id, { result: generatedOutput, progress: 40 }, job.ownerScope) || job;
@@ -199,7 +211,7 @@ function NovoCartaz() {
               slideTitle: generated.title,
               slideBody: generated.body,
               slideKind: `cartaz profissional de ${currentForm.kind}. ${compositionForLayout(resolvedLayout)}`,
-              brand: currentForm.title,
+              brand: brands.find((item) => item.id === currentForm.brandId)?.name || currentForm.title,
               palette: currentForm.palette,
               style: `${currentForm.style}; campaign key visual; premium event art direction; no typography inside the generated image`,
               aspectRatio,
@@ -342,6 +354,7 @@ function NovoCartaz() {
           <section className="panel p-5 sm:p-7">
             <div className="mb-6"><h2 className="section-title text-xl">Informações do evento</h2><p className="mt-1 text-sm text-muted-foreground">Preencha os dados que devem aparecer na arte.</p></div>
             <div className="space-y-5">
+              {brands.length > 0 && <Field label="Marca desta criação"><select value={form.brandId} onChange={(event) => { const brand = brands.find((item) => item.id === event.target.value); if (brand) applyBrand(brand); }} className="app-input">{brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select><div className="mt-2 text-[11px] text-muted-foreground">O manual da marca será aplicado ao texto, paleta e direção visual.</div></Field>}
               <Field label="Nome do evento" required><input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Ex.: Sunset Vibes Festival" className="app-input" /></Field>
               <div className="grid gap-5 md:grid-cols-2"><Field label="Categoria"><select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} className="app-input"><option>evento</option><option>música / festival</option><option>igreja</option><option>palestra</option><option>promoção</option><option>lançamento</option></select></Field><Field label="Local"><div className="relative"><MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><input value={form.place} onChange={(e) => setForm({ ...form, place: e.target.value })} placeholder="Arena Zunexi" className="app-input pl-10" /></div></Field></div>
               <div className="grid gap-5 md:grid-cols-2"><Field label="Data"><div className="relative"><CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="app-input pl-10" /></div></Field><Field label="Horário"><div className="relative"><Clock3 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><input type="time" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} className="app-input pl-10" /></div></Field></div>

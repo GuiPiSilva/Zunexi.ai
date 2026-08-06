@@ -56,6 +56,12 @@ type Row = {
   credits_per_day: number;
   credits_used_today: number;
   credits_reset_date: string;
+  tenant_id: string | null;
+  tenant_name: string;
+  member_id: string | null;
+  member_role: "owner" | "admin" | "member";
+  member_active: boolean;
+  display_name: string | null;
 };
 
 function Admin() {
@@ -136,6 +142,9 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
   const [creating, setCreating] = useState(false);
   const [plan, setPlan] = useState<PlanId>("essencial");
   const [unlimited, setUnlimited] = useState(false);
+  const [tenantChoice, setTenantChoice] = useState("new");
+  const [tenantName, setTenantName] = useState("");
+  const [memberRole, setMemberRole] = useState<"owner" | "admin" | "member">("owner");
 
   async function refresh() {
     setLoading(true);
@@ -156,8 +165,16 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
   const filtered = useMemo(() => {
     const value = query.trim().toLowerCase();
     if (!value) return rows;
-    return rows.filter((row) => row.key.toLowerCase().includes(value) || row.label?.toLowerCase().includes(value));
+    return rows.filter((row) => row.key.toLowerCase().includes(value) || row.label?.toLowerCase().includes(value) || row.tenant_name?.toLowerCase().includes(value));
   }, [query, rows]);
+
+  const tenantOptions = useMemo(() => {
+    const seen = new Map<string, { id: string; name: string; plan: PlanId }>();
+    for (const row of rows) {
+      if (row.tenant_id && !seen.has(row.tenant_id)) seen.set(row.tenant_id, { id: row.tenant_id, name: row.tenant_name, plan: row.plan });
+    }
+    return Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [rows]);
 
   const activeCount = rows.filter((row) => row.active).length;
   const blockedCount = rows.length - activeCount;
@@ -172,9 +189,24 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
     }
     setCreating(true);
     try {
-      const row = await create({ data: { token, label: label.trim(), plan, unlimited } });
+      if (tenantChoice === "new" && tenantName.trim().length < 2) {
+        toast.error("Informe o nome da empresa.");
+        return;
+      }
+      const row = await create({ data: {
+        token,
+        label: label.trim(),
+        plan,
+        unlimited,
+        tenantId: tenantChoice === "new" ? null : tenantChoice,
+        tenantName: tenantChoice === "new" ? tenantName.trim() : undefined,
+        role: memberRole,
+      } });
       setRows((current) => [row as Row, ...current]);
       setLabel("");
+      setTenantName("");
+      setTenantChoice("new");
+      setMemberRole("owner");
       setPlan("essencial");
       setUnlimited(false);
       toast.success("Chave criada pelo administrador.");
@@ -188,8 +220,9 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
   async function doSavePlan(row: Row, nextPlan: PlanId, nextUnlimited: boolean) {
     try {
       const updated = await updatePlan({ data: { token, id: row.id, plan: nextPlan, unlimited: nextUnlimited } });
-      setRows((current) => current.map((item) => item.id === row.id ? updated as Row : item));
-      toast.success(nextUnlimited ? "Créditos infinitos ativados." : `Plano ${getPlanDefinition(nextPlan).name} atualizado.`);
+      setRows((current) => current.map((item) => item.id === row.id ? { ...item, ...(updated as Partial<Row>) } : item));
+      await refresh();
+      toast.success(nextUnlimited ? "Créditos infinitos ativados." : `Plano ${getPlanDefinition(nextPlan).name} atualizado para toda a empresa.`);
     } catch (error) {
       toast.error((error as Error).message);
       throw error;
@@ -250,23 +283,16 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
             <h2 className="section-title text-lg">Criar nova chave</h2>
             <p className="mt-1 text-xs text-muted-foreground">Esta ação é exclusiva do administrador. Identifique claramente o responsável pela chave.</p>
           </div>
-          <form onSubmit={doCreate} className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_210px_190px_auto] lg:items-center">
-            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Nome do cliente, equipe ou responsável" className="app-input" />
-            <label className="relative">
-              <Coins className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <select value={plan} onChange={(e) => setPlan(e.target.value as PlanId)} className="app-input pl-10" aria-label="Plano da assinatura">
-                {Object.values(PLAN_DEFINITIONS).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.creditsPerMonth} créditos/mês</option>)}
-              </select>
-            </label>
-            <label className="flex h-12 cursor-pointer items-center gap-3 rounded-xl border border-border bg-[#0a0e1a] px-4 text-sm">
-              <input type="checkbox" checked={unlimited} onChange={(e) => setUnlimited(e.target.checked)} className="h-4 w-4 accent-violet-500" />
-              Créditos infinitos
-            </label>
-            <button disabled={creating} className="primary-button shrink-0 disabled:opacity-60">
-              {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Gerar chave
-            </button>
+          <form onSubmit={doCreate} className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <label><span className="mb-2 block text-xs font-semibold">Usuário ou responsável</span><input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex.: Guilherme — Marketing" className="app-input" /></label>
+            <label><span className="mb-2 block text-xs font-semibold">Empresa / tenant</span><select value={tenantChoice} onChange={(e) => setTenantChoice(e.target.value)} className="app-input"><option value="new">+ Criar nova empresa</option>{tenantOptions.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name} · {getPlanDefinition(tenant.plan).name}</option>)}</select></label>
+            {tenantChoice === "new" ? <label><span className="mb-2 block text-xs font-semibold">Nome da nova empresa</span><input value={tenantName} onChange={(e) => setTenantName(e.target.value)} placeholder="Ex.: Agência Horizonte" className="app-input" /></label> : <div className="rounded-xl border border-primary/20 bg-primary/[.055] p-3 text-xs text-muted-foreground"><strong className="block text-foreground">Mesmo ambiente da empresa</strong><span>Projetos e marcas são compartilhados; a agenda continua privada para este usuário.</span></div>}
+            <label><span className="mb-2 block text-xs font-semibold">Função do usuário</span><select value={memberRole} onChange={(e) => setMemberRole(e.target.value as typeof memberRole)} className="app-input"><option value="owner">Proprietário</option><option value="admin">Administrador</option><option value="member">Membro</option></select></label>
+            {tenantChoice === "new" && <label className="relative"><span className="mb-2 block text-xs font-semibold">Plano da empresa</span><Coins className="pointer-events-none absolute left-3 top-[42px] h-4 w-4 -translate-y-1/2 text-muted-foreground" /><select value={plan} onChange={(e) => setPlan(e.target.value as PlanId)} className="app-input pl-10" aria-label="Plano da assinatura">{Object.values(PLAN_DEFINITIONS).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.creditsPerMonth} créditos/mês</option>)}</select></label>}
+            {tenantChoice === "new" && <label className="mt-auto flex h-12 cursor-pointer items-center gap-3 rounded-xl border border-border bg-[#0a0e1a] px-4 text-sm"><input type="checkbox" checked={unlimited} onChange={(e) => setUnlimited(e.target.checked)} className="h-4 w-4 accent-violet-500" />Créditos infinitos</label>}
+            <button disabled={creating} className="primary-button mt-auto h-12 shrink-0 disabled:opacity-60">{creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Gerar chave</button>
           </form>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className={`${tenantChoice === "new" ? "grid" : "hidden"} mt-4 gap-3 sm:grid-cols-3`}>
             {Object.values(PLAN_DEFINITIONS).map((item) => <div key={item.id} className={`rounded-xl border p-3 ${plan === item.id ? "border-primary/40 bg-primary/8" : "border-border bg-white/[.015]"}`}><div className="text-xs font-semibold">{item.name}</div><div className="mt-1 text-[11px] text-muted-foreground">{item.highlights.join(" · ")}</div></div>)}
           </div>
         </section>
@@ -289,11 +315,13 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
             <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">Nenhuma chave encontrada.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1120px] text-sm">
+              <table className="w-full min-w-[1420px] text-sm">
                 <thead className="bg-white/[0.025] text-left text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
                   <tr>
                     <th className="px-5 py-4">Chave</th>
                     <th className="px-5 py-4">Responsável</th>
+                    <th className="px-5 py-4">Empresa</th>
+                    <th className="px-5 py-4">Função</th>
                     <th className="px-5 py-4">Status</th>
                     <th className="px-5 py-4">Acessos</th>
                     <th className="px-5 py-4">Plano</th>
@@ -306,7 +334,9 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
                   {filtered.map((row) => (
                     <tr key={row.id} className="border-t border-border/75 hover:bg-white/[0.018]">
                       <td className="px-5 py-4"><div className="flex items-center gap-2 font-mono text-xs"><KeyRound className="h-3.5 w-3.5 text-primary" />{row.key}<CopyInline text={row.key} /></div></td>
-                      <td className="px-5 py-4"><div className="font-medium">{row.label || "Sem identificação"}</div><div className="mt-0.5 text-[11px] text-muted-foreground">Último uso: {row.last_used_at ? new Date(row.last_used_at).toLocaleString("pt-BR") : "nunca"}</div></td>
+                      <td className="px-5 py-4"><div className="font-medium">{row.display_name || row.label || "Sem identificação"}</div><div className="mt-0.5 text-[11px] text-muted-foreground">Último uso: {row.last_used_at ? new Date(row.last_used_at).toLocaleString("pt-BR") : "nunca"}</div></td>
+                      <td className="px-5 py-4"><div className="font-medium">{row.tenant_name}</div><div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{row.tenant_id}</div></td>
+                      <td className="px-5 py-4"><span className="rounded-full border border-border bg-white/[.03] px-2.5 py-1 text-xs">{row.member_role === "owner" ? "Proprietário" : row.member_role === "admin" ? "Administrador" : "Membro"}</span></td>
                       <td className="px-5 py-4"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${row.active ? "bg-emerald-500/12 text-emerald-300" : "bg-amber-500/12 text-amber-300"}`}>{row.active ? "Ativa" : "Bloqueada"}</span></td>
                       <td className="px-5 py-4">{row.uses}</td>
                       <td className="px-5 py-4"><span className="inline-flex rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">{getPlanDefinition(row.plan).name}</span></td>

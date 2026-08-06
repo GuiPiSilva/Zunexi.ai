@@ -23,7 +23,7 @@ import { AppShell } from "@/components/AppShell";
 import { generateImage, testImageProvidersConnection } from "@/lib/ai.functions";
 import { generateInstagramContent, testGroqConnection, updateSlide, type CarrosselOut } from "@/lib/groq.functions";
 import { getAccessKey } from "@/lib/session";
-import { getPrimaryBrandProfile } from "@/lib/brand.functions";
+import { getPrimaryBrandProfile, listBrandProfiles } from "@/lib/brand.functions";
 import { newProject, upsertProject } from "@/lib/storage";
 import { buildLayout, compositionForLayout, fontPairFromStyle, paletteFromDescription } from "@/lib/layouts";
 import { explicitHumanVisualRequest, resolveCampaignLayouts, reviewAndRepairElements } from "@/lib/creative-engine";
@@ -60,6 +60,7 @@ type CarouselForm = {
   cta: string;
   informacoesAdicionais: string;
   imageQuality: "fast" | "premium";
+  brandId: string;
 };
 
 const DEFAULT_FORM: CarouselForm = {
@@ -75,6 +76,7 @@ const DEFAULT_FORM: CarouselForm = {
   cta: "",
   informacoesAdicionais: "",
   imageQuality: "fast",
+  brandId: "",
 };
 
 type CarouselJobPayload = {
@@ -91,6 +93,7 @@ function NovoCarrossel() {
   const generateImageFn = useServerFn(generateImage);
   const testImageProviders = useServerFn(testImageProvidersConnection);
   const getPrimaryBrand = useServerFn(getPrimaryBrandProfile);
+  const listBrands = useServerFn(listBrandProfiles);
 
   const [accessKey, setAccessKey] = useState<string | null>(null);
   const [step, setStep] = useState<CarouselStep>(1);
@@ -105,6 +108,7 @@ function NovoCarrossel() {
   const [progress, setProgress] = useState(0);
   const [savedProjectId, setSavedProjectId] = useState<string | null>(null);
   const [form, setForm] = useState<CarouselForm>(DEFAULT_FORM);
+  const [brands, setBrands] = useState<Array<any>>([]);
   const cancelledJobsRef = useRef<Set<string>>(new Set());
   const activeUiJobIdRef = useRef<string | null>(null);
 
@@ -143,6 +147,7 @@ function NovoCarrossel() {
           paleta: data.paleta || current.paleta,
           cta: data.cta || current.cta,
           informacoesAdicionais: data.informacoesAdicionais || current.informacoesAdicionais,
+          brandId: (data as any).brandId || current.brandId,
         }));
         toast.success("Prompt e campos enviados para o criador de carrossel.");
       } catch {
@@ -154,20 +159,30 @@ function NovoCarrossel() {
   }, [nav]);
 
 
+  function applyBrand(brand: any) {
+    if (!brand) return;
+    setForm((current) => ({
+      ...current,
+      brandId: brand.id,
+      empresa: brand.name || current.empresa,
+      publicoAlvo: brand.audience || current.publicoAlvo,
+      tom: brand.tone_of_voice || current.tom,
+      estilo: [brand.visual_style || current.estilo, Array.isArray(brand.typography) && brand.typography.length ? `Tipografia obrigatória: ${brand.typography.join(", ")}` : ""].filter(Boolean).join("; "),
+      paleta: `${brand.primary_color}, ${brand.secondary_color}, ${brand.accent_color}`,
+      informacoesAdicionais: [current.informacoesAdicionais, brand.notes, brand.guide_summary, Array.isArray(brand.content_pillars) ? `Pilares: ${brand.content_pillars.join(", ")}` : "", Array.isArray(brand.prohibited_terms) ? `Evitar: ${brand.prohibited_terms.join(", ")}` : ""].filter(Boolean).join("\n"),
+    }));
+  }
+
   useEffect(() => {
     if (!accessKey) return;
-    getPrimaryBrand({ data: { accessKey } }).then((brand) => {
-      if (!brand) return;
-      setForm((current) => ({
-        ...current,
-        empresa: current.empresa || brand.name,
-        publicoAlvo: current.publicoAlvo || brand.audience,
-        tom: current.tom === DEFAULT_FORM.tom && brand.tone_of_voice ? brand.tone_of_voice : current.tom,
-        estilo: current.estilo === DEFAULT_FORM.estilo && brand.visual_style ? brand.visual_style : current.estilo,
-        paleta: current.paleta === DEFAULT_FORM.paleta ? `${brand.primary_color}, ${brand.secondary_color}, ${brand.accent_color}` : current.paleta,
-        informacoesAdicionais: current.informacoesAdicionais || brand.notes,
-      }));
-    }).catch(() => undefined);
+    listBrands({ data: { accessKey } }).then((result) => {
+      const next = result.brands as any[];
+      setBrands(next);
+      const selected = next.find((brand) => brand.id === form.brandId) || next.find((brand) => brand.is_primary) || next[0];
+      if (selected) applyBrand(selected);
+    }).catch(() => {
+      getPrimaryBrand({ data: { accessKey, brandId: form.brandId || null } }).then(applyBrand).catch(() => undefined);
+    });
   }, [accessKey]);
 
   useEffect(() => {
@@ -235,6 +250,7 @@ function NovoCarrossel() {
             tom: payload.form.tom,
             quantidadeSlides: payload.form.quantidadeSlides,
             informacoesAdicionais: payload.details,
+            brandId: payload.form.brandId || null,
             accessKey: payload.accessKey,
           } });
           window.dispatchEvent(new CustomEvent("inlabs:credits-changed"));
@@ -629,6 +645,7 @@ function NovoCarrossel() {
               </div>
 
               <div className="space-y-5">
+                {brands.length > 0 && <Field label="Marca desta criação"><select value={form.brandId} onChange={(event) => { const brand = brands.find((item) => item.id === event.target.value); if (brand) applyBrand(brand); }} className="app-input">{brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select><div className="mt-2 text-[11px] text-muted-foreground">O manual, as cores, a tipografia, o tom e as restrições da marca serão aplicados automaticamente.</div></Field>}
                 <Field label="Tema do carrossel" required>
                   <input value={form.tema} onChange={(e) => setForm({ ...form, tema: e.target.value })} placeholder="Ex.: 5 dicas para vender todos os dias no Instagram" className="app-input" />
                 </Field>
