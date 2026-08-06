@@ -4,6 +4,7 @@ import { ArrowRight, Copy, Loader2, MessageSquareText, Sparkles, Wand2 } from "l
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { PlanGate } from "@/components/PlanGate";
 import { generateCarouselPrompt, type CarouselPromptData } from "@/lib/groq.functions";
 import { getAccessKey } from "@/lib/session";
 
@@ -69,6 +70,7 @@ function PromptCreatorPage() {
 
   return (
     <AppShell>
+      <PlanGate feature="criador_prompts">
       <div className="page-wrap">
         <section className="mx-auto max-w-5xl">
           <div className="mb-7 text-center">
@@ -128,6 +130,7 @@ function PromptCreatorPage() {
           </section>
         </section>
       </div>
+      </PlanGate>
     </AppShell>
   );
 }

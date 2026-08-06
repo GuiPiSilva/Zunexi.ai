@@ -10,6 +10,7 @@ import { buildLayout, compositionForLayout, fontPairFromStyle, paletteFromDescri
 import { explicitHumanVisualRequest, resolveCampaignLayouts, reviewAndRepairElements } from "@/lib/creative-engine";
 import { renderElementsThumbnail } from "@/lib/fabric-elements";
 import { getAccessKey } from "@/lib/session";
+import { getPrimaryBrandProfile } from "@/lib/brand.functions";
 import {
   createCreationJob,
   getActiveCreationJob,
@@ -39,6 +40,7 @@ function NovoCartaz() {
   const nav = useNavigate();
   const generateText = useServerFn(generateCartaz);
   const generateImageFn = useServerFn(generateImage);
+  const getPrimaryBrand = useServerFn(getPrimaryBrandProfile);
   const [accessKey, setAccessKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -69,6 +71,20 @@ function NovoCartaz() {
     }
     setAccessKey(key);
   }, [nav]);
+
+
+  useEffect(() => {
+    if (!accessKey) return;
+    getPrimaryBrand({ data: { accessKey } }).then((brand) => {
+      if (!brand) return;
+      setForm((current) => ({
+        ...current,
+        palette: current.palette === "roxo, rosa, azul e ciano" ? `${brand.primary_color}, ${brand.secondary_color}, ${brand.accent_color}` : current.palette,
+        style: current.style === "moderno" && brand.visual_style ? brand.visual_style : current.style,
+        description: current.description || brand.notes,
+      }));
+    }).catch(() => undefined);
+  }, [accessKey]);
 
   useEffect(() => {
     if (!accessKey) return;
@@ -177,6 +193,7 @@ function NovoCartaz() {
         if (!imageUrl) {
           const image = await generateImageFn({
             data: {
+              accessKey: payload.accessKey,
               prompt: generated.imagePrompt,
               seed,
               slideTitle: generated.title,

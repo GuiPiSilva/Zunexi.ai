@@ -23,6 +23,7 @@ import { AppShell } from "@/components/AppShell";
 import { generateImage, testImageProvidersConnection } from "@/lib/ai.functions";
 import { generateInstagramContent, testGroqConnection, updateSlide, type CarrosselOut } from "@/lib/groq.functions";
 import { getAccessKey } from "@/lib/session";
+import { getPrimaryBrandProfile } from "@/lib/brand.functions";
 import { newProject, upsertProject } from "@/lib/storage";
 import { buildLayout, compositionForLayout, fontPairFromStyle, paletteFromDescription } from "@/lib/layouts";
 import { explicitHumanVisualRequest, resolveCampaignLayouts, reviewAndRepairElements } from "@/lib/creative-engine";
@@ -89,6 +90,7 @@ function NovoCarrossel() {
   const test = useServerFn(testGroqConnection);
   const generateImageFn = useServerFn(generateImage);
   const testImageProviders = useServerFn(testImageProvidersConnection);
+  const getPrimaryBrand = useServerFn(getPrimaryBrandProfile);
 
   const [accessKey, setAccessKey] = useState<string | null>(null);
   const [step, setStep] = useState<CarouselStep>(1);
@@ -150,6 +152,23 @@ function NovoCarrossel() {
       sessionStorage.removeItem("inlabs_carousel_prompt");
     }
   }, [nav]);
+
+
+  useEffect(() => {
+    if (!accessKey) return;
+    getPrimaryBrand({ data: { accessKey } }).then((brand) => {
+      if (!brand) return;
+      setForm((current) => ({
+        ...current,
+        empresa: current.empresa || brand.name,
+        publicoAlvo: current.publicoAlvo || brand.audience,
+        tom: current.tom === DEFAULT_FORM.tom && brand.tone_of_voice ? brand.tone_of_voice : current.tom,
+        estilo: current.estilo === DEFAULT_FORM.estilo && brand.visual_style ? brand.visual_style : current.estilo,
+        paleta: current.paleta === DEFAULT_FORM.paleta ? `${brand.primary_color}, ${brand.secondary_color}, ${brand.accent_color}` : current.paleta,
+        informacoesAdicionais: current.informacoesAdicionais || brand.notes,
+      }));
+    }).catch(() => undefined);
+  }, [accessKey]);
 
   useEffect(() => {
     if (!accessKey) return;
@@ -293,6 +312,7 @@ function NovoCarrossel() {
             for (let attempt = 1; attempt <= 2; attempt += 1) {
               try {
                 image = await generateImageFn({ data: {
+                  accessKey: payload.accessKey,
                   prompt: slide.promptImagem,
                   seed: `${output.id}-${slide.numero}`,
                   slideTitle: slide.titulo,
