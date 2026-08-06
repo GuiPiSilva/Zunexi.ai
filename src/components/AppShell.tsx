@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNod
 import {
   Bell,
   BellRing,
+  BarChart3,
   CalendarDays,
   CheckCheck,
   ChevronDown,
@@ -15,12 +16,16 @@ import {
   Library,
   LockKeyhole,
   LogOut,
+  Inbox,
   MessageSquareText,
   Menu,
   Palette,
   Search,
+  Send,
   Settings,
   Trash2,
+  UsersRound,
+  Workflow,
   X,
 } from "lucide-react";
 import { getAccessCreditStatus, type CreditStatus } from "@/lib/access.functions";
@@ -39,7 +44,7 @@ import type { PlanFeature } from "@/lib/plans";
 import { hydrateCloudWorkspace } from "@/lib/storage";
 
 type NavigationItem = {
-  to: "/" | "/carrossel" | "/cartaz" | "/criador-prompts" | "/agenda" | "/brand-kit" | "/projetos" | "/biblioteca" | "/configuracoes";
+  to: "/" | "/publicacoes" | "/redes" | "/caixa-entrada" | "/analytics" | "/automacoes" | "/equipe" | "/carrossel" | "/cartaz" | "/criador-prompts" | "/agenda" | "/brand-kit" | "/projetos" | "/biblioteca" | "/configuracoes";
   label: string;
   icon: ComponentType<{ className?: string }>;
   feature?: PlanFeature;
@@ -47,10 +52,16 @@ type NavigationItem = {
 
 const NAV: NavigationItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/publicacoes", label: "Publicações", icon: Send, feature: "publicacoes" },
+  { to: "/agenda", label: "Calendário", icon: CalendarDays, feature: "agenda" },
+  { to: "/redes", label: "Redes conectadas", icon: MessageSquareText, feature: "gestao_redes" },
+  { to: "/caixa-entrada", label: "Caixa de entrada", icon: Inbox, feature: "caixa_entrada" },
+  { to: "/analytics", label: "Analytics", icon: BarChart3, feature: "analytics" },
+  { to: "/automacoes", label: "Automações", icon: Workflow, feature: "automacoes" },
+  { to: "/equipe", label: "Equipe", icon: UsersRound, feature: "equipe" },
   { to: "/carrossel", label: "Criar carrossel", icon: Images },
   { to: "/cartaz", label: "Criar cartaz", icon: ImagePlus },
   { to: "/criador-prompts", label: "Criador de prompts", icon: MessageSquareText, feature: "criador_prompts" },
-  { to: "/agenda", label: "Agenda de posts", icon: CalendarDays, feature: "agenda" },
   { to: "/brand-kit", label: "Brand Kit", icon: Palette, feature: "brand_kit" },
   { to: "/projetos", label: "Meus projetos", icon: FolderOpen },
   { to: "/biblioteca", label: "Biblioteca", icon: Library },
@@ -59,6 +70,12 @@ const NAV: NavigationItem[] = [
 
 const PAGE_TITLES: Record<string, string> = {
   "/": "Dashboard",
+  "/publicacoes": "Publicações",
+  "/redes": "Redes conectadas",
+  "/caixa-entrada": "Caixa de entrada",
+  "/analytics": "Analytics",
+  "/automacoes": "Automações",
+  "/equipe": "Equipe",
   "/carrossel": "Criar carrossel",
   "/cartaz": "Criar cartaz",
   "/criador-prompts": "Criador de prompts",
@@ -180,7 +197,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
 
         <div className="px-4 pt-5">
-          <div className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">Estúdio</div>
+          <div className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">Central Zunexi</div>
           <nav className="space-y-1.5">
             {NAV.map((item) => {
               const Icon = item.icon;
