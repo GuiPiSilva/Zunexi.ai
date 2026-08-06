@@ -27,6 +27,10 @@ export type Database = {
           unlimited_credits: boolean
           credits_used_today: number
           credits_reset_date: string
+          plan: string
+          credits_per_month: number
+          credits_used_month: number
+          credits_reset_month: string
         }
         Insert: {
           active?: boolean
@@ -40,6 +44,10 @@ export type Database = {
           unlimited_credits?: boolean
           credits_used_today?: number
           credits_reset_date?: string
+          plan?: string
+          credits_per_month?: number
+          credits_used_month?: number
+          credits_reset_month?: string
         }
         Update: {
           active?: boolean
@@ -53,8 +61,121 @@ export type Database = {
           unlimited_credits?: boolean
           credits_used_today?: number
           credits_reset_date?: string
+          plan?: string
+          credits_per_month?: number
+          credits_used_month?: number
+          credits_reset_month?: string
         }
         Relationships: []
+      }
+      brand_profiles: {
+        Row: {
+          id: string
+          access_key_id: string
+          name: string
+          primary_color: string
+          secondary_color: string
+          accent_color: string
+          tone_of_voice: string
+          audience: string
+          visual_style: string
+          notes: string
+          is_primary: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          access_key_id: string
+          name: string
+          primary_color?: string
+          secondary_color?: string
+          accent_color?: string
+          tone_of_voice?: string
+          audience?: string
+          visual_style?: string
+          notes?: string
+          is_primary?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          access_key_id?: string
+          name?: string
+          primary_color?: string
+          secondary_color?: string
+          accent_color?: string
+          tone_of_voice?: string
+          audience?: string
+          visual_style?: string
+          notes?: string
+          is_primary?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brand_profiles_access_key_id_fkey"
+            columns: ["access_key_id"]
+            isOneToOne: false
+            referencedRelation: "access_keys"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scheduled_posts: {
+        Row: {
+          id: string
+          access_key_id: string
+          title: string
+          caption: string
+          platform: string
+          content_type: string
+          scheduled_for: string
+          status: string
+          project_id: string | null
+          notes: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          access_key_id: string
+          title: string
+          caption?: string
+          platform?: string
+          content_type?: string
+          scheduled_for: string
+          status?: string
+          project_id?: string | null
+          notes?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          access_key_id?: string
+          title?: string
+          caption?: string
+          platform?: string
+          content_type?: string
+          scheduled_for?: string
+          status?: string
+          project_id?: string | null
+          notes?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_posts_access_key_id_fkey"
+            columns: ["access_key_id"]
+            isOneToOne: false
+            referencedRelation: "access_keys"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       cloudflare_ai_usage: {
         Row: {
