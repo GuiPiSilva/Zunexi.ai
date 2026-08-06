@@ -36,6 +36,7 @@ import {
 import logoFull from "@/assets/logo-full.png";
 import logoIcon from "@/assets/logo-icon.png";
 import type { PlanFeature } from "@/lib/plans";
+import { hydrateCloudWorkspace } from "@/lib/storage";
 
 type NavigationItem = {
   to: "/" | "/carrossel" | "/cartaz" | "/criador-prompts" | "/agenda" | "/brand-kit" | "/projetos" | "/biblioteca" | "/configuracoes";
@@ -74,6 +75,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const getCredits = useServerFn(getAccessCreditStatus);
   const notificationBox = useRef<HTMLDivElement | null>(null);
   const profileBox = useRef<HTMLDivElement | null>(null);
+  const syncedAccessKey = useRef<string | null>(null);
   const [ready, setReady] = useState(false);
   const [authed, setAuthed] = useState(false);
   const [userName, setUserName] = useState("Usuário Zunexi.ai");
@@ -99,7 +101,16 @@ export function AppShell({ children }: { children: ReactNode }) {
     setUserName(getAccessUserName());
     setNotifications(loadNotifications());
     setReady(true);
-    if (key) void refreshCredits();
+    if (key) {
+      void refreshCredits();
+      if (syncedAccessKey.current !== key) {
+        syncedAccessKey.current = key;
+        void hydrateCloudWorkspace().catch((error) => {
+          syncedAccessKey.current = null;
+          console.warn("Sincronização inicial indisponível:", error);
+        });
+      }
+    }
   }, [loc.pathname]);
 
   useEffect(() => {

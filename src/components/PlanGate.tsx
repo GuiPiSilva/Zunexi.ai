@@ -29,7 +29,7 @@ export function PlanGate({ feature, children }: { feature: PlanFeature; children
           <h1 className="section-title text-4xl leading-tight sm:text-6xl">Sua próxima fase criativa começa aqui.</h1>
           <p className="mt-5 max-w-xl text-sm leading-7 text-muted-foreground">Este recurso está disponível nos planos Profissional e Agência. Seu plano atual é <strong className="text-foreground">{status?.planName || "Essencial"}</strong>.</p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <a href="https://zunexi-studio.vercel.app/#planos" className="primary-button" target="_blank" rel="noreferrer">Ver planos <ArrowUpRight className="h-4 w-4" /></a>
+            <a href="https://studios-zunexi.vercel.app/#planos" className="primary-button" target="_blank" rel="noreferrer">Ver planos <ArrowUpRight className="h-4 w-4" /></a>
             <Link to="/" className="secondary-button"><Sparkles className="h-4 w-4" /> Voltar ao painel</Link>
           </div>
         </div>
