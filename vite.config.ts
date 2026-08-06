@@ -12,7 +12,7 @@ export default defineConfig({
     tanstackStart({
       server: { entry: "server" },
     }),
-    nitro({ preset: "vercel" }),
+    nitro({ preset: "vercel", serverDir: "./server" }),
     viteReact(),
   ],
   resolve: {
