@@ -10,6 +10,8 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ProjetosRouteImport } from './routes/projetos'
+import { Route as AgendaRouteImport } from './routes/agenda'
+import { Route as BrandKitRouteImport } from './routes/brand-kit'
 import { Route as ConfiguracoesRouteImport } from './routes/configuracoes'
 import { Route as CriadorPromptsRouteImport } from './routes/criador-prompts'
 import { Route as CartazRouteImport } from './routes/cartaz'
@@ -20,6 +22,16 @@ import { Route as AcessoRouteImport } from './routes/acesso'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as EditorIdRouteImport } from './routes/editor.$id'
 
+const AgendaRoute = AgendaRouteImport.update({
+  id: '/agenda',
+  path: '/agenda',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BrandKitRoute = BrandKitRouteImport.update({
+  id: '/brand-kit',
+  path: '/brand-kit',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProjetosRoute = ProjetosRouteImport.update({
   id: '/projetos',
   path: '/projetos',
@@ -75,6 +87,8 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/acesso': typeof AcessoRoute
   '/admin': typeof AdminRoute
+  '/agenda': typeof AgendaRoute
+  '/brand-kit': typeof BrandKitRoute
   '/biblioteca': typeof BibliotecaRoute
   '/carrossel': typeof CarrosselRoute
   '/cartaz': typeof CartazRoute
@@ -87,6 +101,8 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/acesso': typeof AcessoRoute
   '/admin': typeof AdminRoute
+  '/agenda': typeof AgendaRoute
+  '/brand-kit': typeof BrandKitRoute
   '/biblioteca': typeof BibliotecaRoute
   '/carrossel': typeof CarrosselRoute
   '/cartaz': typeof CartazRoute
@@ -100,6 +116,8 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/acesso': typeof AcessoRoute
   '/admin': typeof AdminRoute
+  '/agenda': typeof AgendaRoute
+  '/brand-kit': typeof BrandKitRoute
   '/biblioteca': typeof BibliotecaRoute
   '/carrossel': typeof CarrosselRoute
   '/cartaz': typeof CartazRoute
@@ -113,6 +131,8 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/acesso'
+    | '/agenda'
+    | '/brand-kit'
     | '/admin'
     | '/biblioteca'
     | '/carrossel'
@@ -125,6 +145,8 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/acesso'
+    | '/agenda'
+    | '/brand-kit'
     | '/admin'
     | '/biblioteca'
     | '/carrossel'
@@ -137,6 +159,8 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/acesso'
+    | '/agenda'
+    | '/brand-kit'
     | '/admin'
     | '/biblioteca'
     | '/carrossel'
@@ -150,6 +174,8 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AcessoRoute: typeof AcessoRoute
+  AgendaRoute: typeof AgendaRoute
+  BrandKitRoute: typeof BrandKitRoute
   AdminRoute: typeof AdminRoute
   BibliotecaRoute: typeof BibliotecaRoute
   CarrosselRoute: typeof CarrosselRoute
@@ -162,6 +188,20 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/agenda': {
+      id: '/agenda'
+      path: '/agenda'
+      fullPath: '/agenda'
+      preLoaderRoute: typeof AgendaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/brand-kit': {
+      id: '/brand-kit'
+      path: '/brand-kit'
+      fullPath: '/brand-kit'
+      preLoaderRoute: typeof BrandKitRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/projetos': {
       id: '/projetos'
       path: '/projetos'
@@ -238,6 +278,8 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AcessoRoute: AcessoRoute,
+  AgendaRoute: AgendaRoute,
+  BrandKitRoute: BrandKitRoute,
   AdminRoute: AdminRoute,
   BibliotecaRoute: BibliotecaRoute,
   CarrosselRoute: CarrosselRoute,

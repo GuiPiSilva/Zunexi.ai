@@ -217,3 +217,38 @@
 @media (min-width: 1024px) {
   .page-wrap { padding: 2rem 2.25rem 2.75rem; }
 }
+
+/* Zunexi Studio — interface inspirada na linguagem cinematográfica do site */
+@layer components {
+  .app-shell { position: relative; isolation: isolate; }
+  .app-ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+  .app-ambient i { position: absolute; border-radius: 999px; filter: blur(90px); opacity: .18; }
+  .app-ambient i:nth-child(1) { width: 34rem; height: 34rem; right: -12rem; top: -16rem; background: #4d6bff; animation: zunexi-float 12s ease-in-out infinite alternate; }
+  .app-ambient i:nth-child(2) { width: 28rem; height: 28rem; left: 18%; bottom: -18rem; background: #8b5cf6; animation: zunexi-float 15s ease-in-out infinite alternate-reverse; }
+  .app-ambient i:nth-child(3) { width: 20rem; height: 20rem; right: 28%; top: 42%; background: #12c7ff; opacity: .08; }
+  .app-sidebar { background-image: linear-gradient(180deg, color-mix(in oklab, var(--color-sidebar) 96%, transparent), color-mix(in oklab, var(--color-sidebar) 90%, #050505)); }
+  .app-main { position: relative; min-width: 0; }
+  .app-topbar:after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--color-primary) 60%, transparent), transparent); opacity: .35; }
+
+  .studio-hero, .dashboard-cinematic, .premium-gate { background: linear-gradient(145deg, color-mix(in oklab, var(--panel-start) 92%, #050505), color-mix(in oklab, var(--panel-end) 90%, #060714)); }
+  .studio-hero-grid, .dashboard-grid, .premium-gate-grid { position: absolute; inset: 0; pointer-events: none; opacity: .22; background-image: linear-gradient(rgba(255,255,255,.055) 1px, transparent 1px), linear-gradient(90deg,rgba(255,255,255,.055) 1px, transparent 1px); background-size: 54px 54px; mask-image: radial-gradient(circle at 35% 40%, black, transparent 78%); }
+  .studio-hero:after, .premium-gate:after { content: ""; position: absolute; width: 28rem; height: 28rem; right: -10rem; top: -14rem; border-radius: 50%; background: radial-gradient(circle, rgba(77,107,255,.28), rgba(139,92,246,.1) 42%, transparent 72%); filter: blur(18px); }
+  .dashboard-orb { position: absolute; width: 40rem; height: 40rem; right: -15rem; top: -23rem; border-radius: 50%; background: radial-gradient(circle, rgba(18,199,255,.20), rgba(77,107,255,.15) 35%, rgba(139,92,246,.06) 55%, transparent 72%); filter: blur(10px); }
+  .dashboard-plan-card { box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 35px 90px rgba(0,0,0,.32); }
+  .text-outline-brand { color: transparent; -webkit-text-stroke: 1px color-mix(in oklab, var(--color-foreground) 75%, transparent); text-shadow: 0 0 38px color-mix(in oklab, var(--color-primary) 30%, transparent); }
+  .metric-card, .action-card { transition: transform .35s cubic-bezier(.2,.8,.2,1), border-color .35s, box-shadow .35s; }
+  .metric-card:hover, .action-card:hover { box-shadow: 0 26px 80px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.04); }
+  .premium-gate { min-height: 480px; display: flex; align-items: center; }
+  .calendar-grid > .calendar-day:nth-child(7n) { border-right: 0; }
+  .calendar-day { background: color-mix(in oklab, var(--color-card) 42%, transparent); }
+  .calendar-day:hover { box-shadow: inset 0 0 45px color-mix(in oklab, var(--color-primary) 7%, transparent); }
+}
+
+@keyframes zunexi-float { to { transform: translate3d(60px, 45px, 0) scale(1.12); } }
+
+@media (max-width: 680px) {
+  .dashboard-cinematic { padding: 1.45rem; }
+  .dashboard-cinematic h1 { font-size: clamp(3.25rem, 17vw, 5.2rem); }
+  .calendar-grid { min-width: 760px; }
+  .calendar-grid + * { min-width: 760px; }
+}
