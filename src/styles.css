@@ -252,3 +252,35 @@
   .calendar-grid { min-width: 760px; }
   .calendar-grid + * { min-width: 760px; }
 }
+
+/* Responsividade final — celular, tablet e desktop */
+@media (max-width: 1023px) {
+  .page-wrap { padding: 1.25rem; }
+  .app-topbar { min-width: 0; }
+  .panel { border-radius: .9rem; }
+  .studio-hero:after, .premium-gate:after { width: 20rem; height: 20rem; right: -9rem; top: -10rem; }
+}
+
+@media (max-width: 767px) {
+  .page-wrap { padding: .9rem; }
+  .app-topbar { height: 68px; padding-inline: .75rem; }
+  .app-main { width: 100%; overflow-x: clip; }
+  .panel { border-radius: .82rem; }
+  .primary-button, .secondary-button { min-height: 44px; }
+  .app-input { min-height: 46px; font-size: 16px; }
+  textarea.app-input { min-height: 96px; }
+  .studio-hero { padding: 1.2rem; }
+  .studio-hero h1 { overflow-wrap: anywhere; }
+  .studio-hero-grid, .dashboard-grid, .premium-gate-grid { background-size: 38px 38px; opacity: .16; }
+  .premium-gate { min-height: 390px; }
+  table { font-size: .78rem; }
+  dialog, [role="dialog"] { max-width: calc(100vw - 1rem); }
+}
+
+@media (max-width: 420px) {
+  .page-wrap { padding: .65rem; }
+  .studio-hero { padding: 1rem; }
+  .section-title { letter-spacing: -.035em; }
+  .primary-button, .secondary-button { width: 100%; }
+  .app-topbar .primary-button, .app-topbar .secondary-button { width: auto; }
+}
