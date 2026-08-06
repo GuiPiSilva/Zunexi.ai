@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { admin, consumeAccessCredit, requireAccessKey } from "@/lib/access.functions";
+import { admin, consumeAccessCredit, requireAccessKey, requireTenantContext } from "@/lib/access.functions";
+import { brandContextAsPrompt, resolveBrandContext } from "@/lib/brand.functions";
 import { planHasFeature } from "@/lib/plans";
 import { explicitHumanVisualRequest } from "@/lib/creative-engine";
 import { LAYOUT_IDS } from "@/lib/layouts";
@@ -107,13 +108,16 @@ const CartazInput = z.object({
   style: z.string().optional().default(""),
   extra: z.string().optional().default(""),
   seed: z.string().optional().default(""),
+  brandId: z.string().uuid().optional().nullable(),
 });
 
 export const generateCartaz = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => CartazInput.parse(d))
   .handler(async ({ data }): Promise<SlideOut> => {
     const sb = admin();
-    await requireAccessKey(sb, data.accessKey);
+    const context = await requireTenantContext(sb, data.accessKey);
+    const brand = await resolveBrandContext(sb, context, data.brandId);
+    const brandPrompt = brandContextAsPrompt(brand);
     await consumeAccessCredit(sb, data.accessKey, data.jobId);
     const allowPeople = explicitHumanVisualRequest(data.title, data.kind, data.style, data.extra);
     const sys = `Você é diretor de arte especializado em cartazes profissionais para Instagram. Retorne apenas JSON válido: { "title": "...", "body": "...", "imagePrompt": "...", "layout": "text-over-image", "visualConcept": "...", "textZone": "left", "subjectZone": "right", "allowPeople": false, "reviewScore": 95 }.
@@ -129,7 +133,9 @@ REGRAS:
 - Escolha layout entre: ${LAYOUT_IDS.join(", ")}. Use textZone e subjectZone separados.
 - Pessoas estão ${allowPeople ? "permitidas porque foram solicitadas explicitamente" : "PROIBIDAS: não inclua pessoas, rostos, mãos, corpos, silhuetas ou multidões"}.
 - visualConcept deve explicar a ideia visual específica, e reviewScore deve avaliar a qualidade final de 0 a 100.`;
-    const user = `Evento: ${data.title}
+    const user = `${brandPrompt}
+
+Evento: ${data.title}
 Tipo: ${data.kind}
 Data: ${data.date} ${data.time}
 Local: ${data.place}

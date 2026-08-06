@@ -2,7 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { consumeAccessCredit, requireAccessKey, requirePlanFeature } from "@/lib/access.functions";
+import { consumeAccessCredit, requirePlanFeature, requireTenantContext } from "@/lib/access.functions";
+import { brandContextAsPrompt, resolveBrandContext } from "@/lib/brand.functions";
 import { explicitHumanVisualRequest } from "@/lib/creative-engine";
 import { LAYOUT_IDS } from "@/lib/layouts";
 
@@ -23,6 +24,7 @@ const Input = z.object({
   tom: z.string().trim().max(100).optional().default("profissional"),
   quantidadeSlides: z.number().int().min(1).max(20),
   informacoesAdicionais: z.string().trim().max(3000).optional().default(""),
+  brandId: z.string().uuid().optional().nullable(),
 });
 
 export interface CreativePlanOut {
@@ -257,13 +259,16 @@ export const generateInstagramContent = createServerFn({ method: "POST" })
     if (!apiKey) throw new Error("GROQ_API_KEY não configurada no servidor.");
 
     const sb = admin();
-    const keyRow = await requireAccessKey(sb, data.accessKey);
-    const keyId = keyRow.id;
+    const context = await requireTenantContext(sb, data.accessKey);
+    const keyId = context.access.id;
+    const selectedBrand = await resolveBrandContext(sb, context, data.brandId);
+    const selectedBrandPrompt = brandContextAsPrompt(selectedBrand);
 
-    const { data: existing } = await sb
+    const { data: existing } = await (sb as any)
       .from("generations")
       .select("id, titulo, legenda, hashtags, slides")
-      .eq("access_key_id", keyId)
+      .eq("tenant_id", context.tenant.id)
+      .eq("member_id", context.member.id)
       .eq("client_job_id", data.jobId)
       .maybeSingle();
     if (existing) {
@@ -284,20 +289,20 @@ export const generateInstagramContent = createServerFn({ method: "POST" })
     const paletteMatch = data.informacoesAdicionais.match(/Paleta:\s*(.+)/i);
     const ctaMatch = data.informacoesAdicionais.match(/CTA:\s*(.+)/i);
 
-    const brand = brandMatch?.[1]?.trim() || "marca do cliente";
+    const brand = selectedBrand?.name || brandMatch?.[1]?.trim() || "marca do cliente";
     const product = productMatch?.[1]?.trim() || data.tema;
-    const visualStyle = styleMatch?.[1]?.trim() || "publicidade premium, composição editorial forte, visual de campanha autoral";
-    const palette = paletteMatch?.[1]?.trim() || "paleta coerente com a marca, alto contraste";
+    const visualStyle = selectedBrand?.visualStyle || styleMatch?.[1]?.trim() || "publicidade premium, composição editorial forte, visual de campanha autoral";
+    const palette = selectedBrand ? `${selectedBrand.primaryColor}, ${selectedBrand.secondaryColor}, ${selectedBrand.accentColor}` : paletteMatch?.[1]?.trim() || "paleta coerente com a marca, alto contraste";
     const requestedCta = ctaMatch?.[1]?.trim() || "";
     const denseContentMode = /card[aá]pio|menu|cat[aá]logo|lista|tabela|pre[cç]o|sabores|pizzas|bebidas|tradicionais|doces|promo[cç][aã]o/.test(
       `${data.tema} ${data.informacoesAdicionais} ${product}`.toLowerCase(),
     );
     const allowPeople = explicitHumanVisualRequest(data.tema, data.informacoesAdicionais, product);
 
-    const { data: recentRows } = await sb
+    const { data: recentRows } = await (sb as any)
       .from("generations")
       .select("titulo, slides, created_at")
-      .eq("access_key_id", keyId)
+      .eq("tenant_id", context.tenant.id)
       .neq("client_job_id", data.jobId)
       .order("created_at", { ascending: false })
       .limit(6);
@@ -407,6 +412,8 @@ Antes de responder, revise silenciosamente cada slide e elimine: clichês, repet
     const userPrompt = `Crie o carrossel completo usando apenas os dados abaixo.
 
 BRIEFING AUTORIZADO:
+${selectedBrandPrompt}
+
 Tema: ${data.tema}
 Marca: ${brand === "marca do cliente" ? "não fornecida — não invente nome" : brand}
 Produto ou serviço: ${product}
@@ -474,7 +481,8 @@ Semente de variação criativa: ${Math.random().toString(36).slice(2)}-${Date.no
       !Array.isArray(parsed.hashtags) || !Array.isArray(parsed.slides) || parsed.slides.length === 0
     ) throw new Error("Resposta da Groq não segue o formato esperado.");
 
-    const authorizedBriefing = `Tema: ${data.tema}
+    const authorizedBriefing = `${selectedBrandPrompt}
+Tema: ${data.tema}
 Marca: ${brand}
 Produto: ${product}
 Objetivo: ${data.objetivo}
@@ -510,10 +518,13 @@ Informações: ${data.informacoesAdicionais}`;
     const caption = sanitizeBody(parsed.legenda, true);
     const creativePlan = normalizeCreativePlan(parsed.creativePlan, allowPeople);
 
-    const { data: inserted, error: insErr } = await sb
+    const { data: inserted, error: insErr } = await (sb as any)
       .from("generations")
       .insert({
         access_key_id: keyId,
+        tenant_id: context.tenant.id,
+        member_id: context.member.id,
+        brand_profile_id: selectedBrand?.id || null,
         client_job_id: data.jobId,
         tema: data.tema,
         objetivo: data.objetivo,
@@ -546,22 +557,24 @@ export const updateSlide = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => UpdateSlideInput.parse(d))
   .handler(async ({ data }): Promise<{ ok: true }> => {
     const sb = admin();
-    const keyRow = await requireAccessKey(sb, data.accessKey);
-    const { data: row, error } = await sb
+    const context = await requireTenantContext(sb, data.accessKey);
+    const { data: row, error } = await (sb as any)
       .from("generations")
       .select("slides")
       .eq("id", data.generationId)
-      .eq("access_key_id", keyRow.id)
+      .eq("tenant_id", context.tenant.id)
+      .eq("member_id", context.member.id)
       .single();
     if (error || !row) throw new Error("Geração não encontrada.");
     const slides = (row.slides as unknown as SlideOut[]).map(s =>
       s.numero === data.slideNumero ? { ...s, titulo: data.titulo, texto: data.texto } : s,
     );
-    const { error: upErr } = await sb
+    const { error: upErr } = await (sb as any)
       .from("generations")
-      .update({ slides: slides as unknown as never })
+      .update({ slides })
       .eq("id", data.generationId)
-      .eq("access_key_id", keyRow.id);
+      .eq("tenant_id", context.tenant.id)
+      .eq("member_id", context.member.id);
     if (upErr) throw new Error("Falha ao salvar edições.");
     return { ok: true };
   });
@@ -607,6 +620,7 @@ export const testGroqConnection = createServerFn({ method: "POST" })
 const PromptCreatorInput = z.object({
   accessKey: z.string().trim().min(4).max(64),
   pedido: z.string().trim().min(3).max(500),
+  brandId: z.string().uuid().optional().nullable(),
 });
 
 export type CarouselPromptData = {
@@ -653,7 +667,9 @@ export const generateCarouselPrompt = createServerFn({ method: "POST" })
     if (!apiKey) throw new Error("GROQ_API_KEY não configurada no servidor.");
 
     const sb = admin();
-    await requirePlanFeature(sb, data.accessKey, "criador_prompts");
+    const context = await requirePlanFeature(sb, data.accessKey, "criador_prompts");
+    const selectedBrand = await resolveBrandContext(sb, context, data.brandId);
+    const brandPrompt = brandContextAsPrompt(selectedBrand);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -673,9 +689,11 @@ export const generateCarouselPrompt = createServerFn({ method: "POST" })
           messages: [
             {
               role: "system",
-              content: `Transforme o pedido em dados para um carrossel profissional de Instagram. Retorne SOMENTE JSON válido com as chaves: prompt, tema, empresa, produto, objetivo, publicoAlvo, tom, quantidadeSlides, estilo, paleta, cta, informacoesAdicionais. O campo prompt deve ter no máximo 500 caracteres e resumir tudo de forma clara. objetivo deve ser um destes: vender, educar, engajar, informar, captar clientes. quantidadeSlides deve ser um número entre 1 e 20, normalmente 5. Não invente nome de empresa, preço, telefone, endereço ou informação comercial. Quando o usuário não informar algo, use string vazia, exceto tom, estilo, paleta e quantidadeSlides, que podem receber padrões coerentes.`,
+              content: `Transforme o pedido em dados para um carrossel profissional de Instagram. Retorne SOMENTE JSON válido com as chaves: prompt, tema, empresa, produto, objetivo, publicoAlvo, tom, quantidadeSlides, estilo, paleta, cta, informacoesAdicionais. O campo prompt deve ter no máximo 500 caracteres e resumir tudo de forma clara. objetivo deve ser um destes: vender, educar, engajar, informar, captar clientes. quantidadeSlides deve ser um número entre 1 e 20, normalmente 5. Não invente nome de empresa, preço, telefone, endereço ou informação comercial. Quando o usuário não informar algo, use string vazia, exceto tom, estilo, paleta e quantidadeSlides, que podem receber padrões coerentes. Quando houver Brand Kit, ele é obrigatório e deve definir empresa, tom, estilo, paleta, público e restrições.`,
             },
-            { role: "user", content: data.pedido },
+            { role: "user", content: `${brandPrompt}
+
+Pedido do usuário: ${data.pedido}` },
           ],
         }),
       });
@@ -707,4 +725,49 @@ export const generateCarouselPrompt = createServerFn({ method: "POST" })
     } finally {
       clearTimeout(timeout);
     }
+  });
+
+
+export const generateBrandContentIdeas = createServerFn({ method: "POST" })
+  .inputValidator((value: unknown) => z.object({
+    accessKey: z.string().trim().min(4).max(64),
+    brandId: z.string().uuid().optional().nullable(),
+    objective: z.string().trim().max(200).optional().default("crescer e gerar oportunidades"),
+    quantity: z.number().int().min(3).max(20).optional().default(8),
+  }).parse(value))
+  .handler(async ({ data }): Promise<{ ideas: Array<{ title: string; angle: string; format: string; objective: string; prompt: string }> }> => {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) throw new Error("GROQ_API_KEY não configurada no servidor.");
+    const sb = admin();
+    const context = await requirePlanFeature(sb, data.accessKey, "criador_prompts");
+    const brand = await resolveBrandContext(sb, context, data.brandId);
+    if (!brand) throw new Error("Cadastre ou selecione um Brand Kit para gerar ideias personalizadas.");
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile",
+        temperature: 0.7,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: `Você é estrategista de conteúdo. Retorne somente JSON válido no formato {"ideas":[{"title":"...","angle":"...","format":"carrossel|cartaz|post|story|reel","objective":"...","prompt":"..."}]}. Crie ideias específicas, não genéricas, respeitando integralmente o Brand Kit. Não invente preços, resultados, depoimentos ou fatos da empresa.` },
+          { role: "user", content: `${brandContextAsPrompt(brand)}
+
+Objetivo atual: ${data.objective}
+Quantidade: ${data.quantity}` },
+        ],
+      }),
+    });
+    if (!response.ok) throw new Error(`Não foi possível gerar ideias (${response.status}).`);
+    const json = await response.json() as any;
+    const raw = String(json.choices?.[0]?.message?.content || "{}").replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+    const parsed = JSON.parse(raw) as { ideas?: Array<Record<string, unknown>> };
+    const ideas = (parsed.ideas || []).slice(0, data.quantity).map((idea) => ({
+      title: String(idea.title || "Ideia de conteúdo"),
+      angle: String(idea.angle || ""),
+      format: String(idea.format || "carrossel"),
+      objective: String(idea.objective || data.objective),
+      prompt: String(idea.prompt || idea.title || "").slice(0, 500),
+    }));
+    return { ideas };
   });

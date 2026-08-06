@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
@@ -6,6 +6,10 @@ import type { Database, Json } from "@/integrations/supabase/types";
 import { getPlanDefinition, normalizePlan, planHasFeature, type PlanFeature, type PlanId } from "@/lib/plans";
 
 export type CreditStatus = {
+  tenantId?: string;
+  tenantName?: string;
+  memberId?: string;
+  memberRole?: "owner" | "admin" | "member";
   unlimited: boolean;
   plan: PlanId;
   planName: string;
@@ -134,13 +138,110 @@ export async function requireAccessKey(sb: ReturnType<typeof admin>, key: string
   return row;
 }
 
+export type TenantContext = {
+  access: AccessKeyRow & { tenant_id?: string | null };
+  tenant: {
+    id: string;
+    name: string;
+    plan: PlanId;
+    credits_per_month: number;
+    credits_used_month: number;
+    credits_reset_month: string;
+    unlimited_credits: boolean;
+    active: boolean;
+  };
+  member: {
+    id: string;
+    display_name: string;
+    role: "owner" | "admin" | "member";
+    active: boolean;
+  };
+};
+
+function tenantSlug(id: string) {
+  return `tenant-${id.replace(/-/g, "")}`;
+}
+
+export async function requireTenantContext(sb: ReturnType<typeof admin>, key: string): Promise<TenantContext> {
+  const access = await requireAccessKey(sb, key) as TenantContext["access"];
+  let tenantId = access.tenant_id || null;
+
+  if (!tenantId) {
+    const definition = getPlanDefinition(access.plan);
+    tenantId = access.id;
+    const { error: tenantError } = await (sb as any).from("tenants").upsert({
+      id: tenantId,
+      name: access.label?.trim() || "Conta Zunexi.ai",
+      slug: tenantSlug(tenantId),
+      plan: normalizePlan(access.plan),
+      credits_per_month: Number(access.credits_per_month ?? definition.creditsPerMonth),
+      credits_used_month: Number(access.credits_used_month ?? 0),
+      credits_reset_month: access.credits_reset_month || currentMonthStart(),
+      unlimited_credits: Boolean(access.unlimited_credits),
+      active: Boolean(access.active),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "id" });
+    if (tenantError) throw new Error(`Execute a migração multi-tenant no Supabase: ${tenantError.message}`);
+    const { error: keyError } = await (sb as any).from("access_keys").update({ tenant_id: tenantId }).eq("id", access.id);
+    if (keyError) throw new Error(keyError.message);
+    access.tenant_id = tenantId;
+  }
+
+  const { data: tenant, error: tenantError } = await (sb as any).from("tenants").select("*").eq("id", tenantId).maybeSingle();
+  if (tenantError) throw new Error(`Não foi possível carregar a empresa: ${tenantError.message}`);
+  if (!tenant || !tenant.active) throw new Error("A empresa vinculada a esta chave está desativada.");
+
+  let { data: member, error: memberError } = await (sb as any).from("tenant_members").select("*").eq("access_key_id", access.id).maybeSingle();
+  if (memberError) throw new Error(`Não foi possível carregar o usuário: ${memberError.message}`);
+  if (!member) {
+    const created = await (sb as any).from("tenant_members").insert({
+      tenant_id: tenant.id,
+      access_key_id: access.id,
+      display_name: access.label?.trim() || "Usuário Zunexi.ai",
+      role: "owner",
+      active: true,
+    }).select("*").single();
+    if (created.error) throw new Error(created.error.message);
+    member = created.data;
+  }
+  if (!member.active) throw new Error("Este usuário foi desativado pelo administrador da empresa.");
+
+  return {
+    access,
+    tenant: { ...tenant, plan: normalizePlan(tenant.plan) },
+    member,
+  } as TenantContext;
+}
+
+function statusFromContext(context: TenantContext): CreditStatus {
+  const definition = getPlanDefinition(context.tenant.plan);
+  const resetMonth = context.tenant.credits_reset_month || currentMonthStart();
+  const usedThisMonth = resetMonth === currentMonthStart() ? Number(context.tenant.credits_used_month || 0) : 0;
+  const creditsPerMonth = Number(context.tenant.credits_per_month ?? definition.creditsPerMonth);
+  return {
+    tenantId: context.tenant.id,
+    tenantName: context.tenant.name,
+    memberId: context.member.id,
+    memberRole: context.member.role,
+    unlimited: Boolean(context.tenant.unlimited_credits),
+    plan: context.tenant.plan,
+    planName: definition.name,
+    creditsPerMonth,
+    usedThisMonth,
+    remaining: context.tenant.unlimited_credits ? null : Math.max(creditsPerMonth - usedThisMonth, 0),
+    resetAt: nextMonthStart(),
+    features: definition.features,
+    priorityGeneration: planHasFeature(context.tenant.plan, "prioridade_geracao"),
+  };
+}
+
 export async function requirePlanFeature(sb: ReturnType<typeof admin>, key: string, feature: PlanFeature) {
-  const row = await requireAccessKey(sb, key);
-  if (!planHasFeature(row.plan, feature)) {
+  const context = await requireTenantContext(sb, key);
+  if (!planHasFeature(context.tenant.plan, feature)) {
     const required = feature === "agenda" ? "Profissional ou Agência" : "um plano superior";
     throw new Error(`Este recurso está disponível somente no plano ${required}.`);
   }
-  return row;
+  return context;
 }
 
 function normalizeCreditRpc(data: unknown): CreditStatus & { keyId: string } {
@@ -152,6 +253,10 @@ function normalizeCreditRpc(data: unknown): CreditStatus & { keyId: string } {
   const unlimited = Boolean(raw.unlimited);
   return {
     keyId: String(raw.keyId || ""),
+    tenantId: raw.tenantId ? String(raw.tenantId) : undefined,
+    tenantName: raw.tenantName ? String(raw.tenantName) : undefined,
+    memberId: raw.memberId ? String(raw.memberId) : undefined,
+    memberRole: raw.memberRole === "owner" || raw.memberRole === "admin" ? raw.memberRole : "member",
     unlimited,
     plan,
     planName: definition.name,
@@ -166,11 +271,9 @@ function normalizeCreditRpc(data: unknown): CreditStatus & { keyId: string } {
 
 export async function consumeAccessCredit(sb: ReturnType<typeof admin>, key: string, jobId: string): Promise<CreditStatus & { keyId: string }> {
   const normalized = key.trim().toUpperCase();
-  let response = await sb.rpc("consume_access_credit", { p_key: normalized, p_job_id: jobId });
-
+  const response = await sb.rpc("consume_access_credit", { p_key: normalized, p_job_id: jobId });
   if (response.error && /function|schema cache|p_job_id|PGRST202/i.test(response.error.message)) {
-    const legacy = await (sb as any).rpc("consume_access_credit", { p_key: normalized });
-    if (!legacy.error) response = legacy;
+    throw new Error("Execute a migração 6 de multi-tenant no Supabase antes de publicar esta versão.");
   }
 
   const { data, error } = response;
@@ -186,24 +289,29 @@ export async function consumeAccessCredit(sb: ReturnType<typeof admin>, key: str
 
 export const getAccessCreditStatus = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ key: z.string().trim().min(4).max(64) }).parse(d))
-  .handler(async ({ data }): Promise<CreditStatus> => statusFromRow(await requireAccessKey(admin(), data.key)));
+  .handler(async ({ data }): Promise<CreditStatus> => statusFromContext(await requireTenantContext(admin(), data.key)));
 
 export const verifyAccessKey = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ key: z.string().trim().min(4).max(64) }).parse(d))
   .handler(async ({ data }) => {
     const sb = admin();
-    const normalized = data.key.trim().toUpperCase();
-    const { data: row, error } = await sb.from("access_keys").select("*").eq("key", normalized).maybeSingle();
-    if (error || !row || !row.active) return { ok: false as const };
-
-    await sb.from("access_keys").update({ uses: (row.uses ?? 0) + 1, last_used_at: new Date().toISOString() }).eq("id", row.id);
-    return {
-      ok: true as const,
-      keyId: row.id,
-      name: row.label?.trim() || "Usuário Zunexi.ai",
-      plan: normalizePlan(row.plan),
-      credits: statusFromRow(row),
-    };
+    try {
+      const context = await requireTenantContext(sb, data.key);
+      await sb.from("access_keys").update({ uses: (context.access.uses ?? 0) + 1, last_used_at: new Date().toISOString() }).eq("id", context.access.id);
+      return {
+        ok: true as const,
+        keyId: context.access.id,
+        tenantId: context.tenant.id,
+        tenantName: context.tenant.name,
+        memberId: context.member.id,
+        role: context.member.role,
+        name: context.member.display_name || context.access.label?.trim() || "Usuário Zunexi.ai",
+        plan: context.tenant.plan,
+        credits: statusFromContext(context),
+      };
+    } catch {
+      return { ok: false as const };
+    }
   });
 
 export const adminLogin = createServerFn({ method: "POST" })
@@ -219,9 +327,40 @@ export const adminListKeys = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ token: z.string().min(20) }).parse(d))
   .handler(async ({ data }) => {
     checkAdmin(data.token);
-    const { data: rows, error } = await admin().from("access_keys").select("*").order("created_at", { ascending: false });
+    const sb = admin();
+    const { data: rows, error } = await (sb as any).from("access_keys").select("*").order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return rows ?? [];
+    const tenantIds = Array.from(new Set((rows ?? []).map((row: any) => row.tenant_id).filter(Boolean)));
+    const keyIds = (rows ?? []).map((row: any) => row.id);
+    const tenantsResult = tenantIds.length
+      ? await (sb as any).from("tenants").select("id, name, plan, credits_per_month, credits_used_month, credits_reset_month, unlimited_credits, active").in("id", tenantIds)
+      : { data: [], error: null };
+    if (tenantsResult.error) throw new Error(tenantsResult.error.message);
+    const membersResult = keyIds.length
+      ? await (sb as any).from("tenant_members").select("id, tenant_id, access_key_id, display_name, role, active").in("access_key_id", keyIds)
+      : { data: [], error: null };
+    if (membersResult.error) throw new Error(membersResult.error.message);
+    const tenants = new Map((tenantsResult.data ?? []).map((tenant: any) => [tenant.id, tenant]));
+    const members = new Map((membersResult.data ?? []).map((member: any) => [member.access_key_id, member]));
+    return (rows ?? []).map((row: any) => {
+      const tenant = tenants.get(row.tenant_id) as any;
+      const member = members.get(row.id) as any;
+      return {
+        ...row,
+        tenant_name: tenant?.name ?? row.label ?? "Conta Zunexi.ai",
+        tenant_plan: tenant?.plan ?? row.plan,
+        tenant_active: tenant?.active ?? row.active,
+        member_id: member?.id ?? null,
+        member_role: member?.role ?? "owner",
+        member_active: member?.active ?? row.active,
+        display_name: member?.display_name ?? row.label,
+        plan: tenant?.plan ?? row.plan,
+        credits_per_month: tenant?.credits_per_month ?? row.credits_per_month,
+        credits_used_month: tenant?.credits_used_month ?? row.credits_used_month,
+        credits_reset_month: tenant?.credits_reset_month ?? row.credits_reset_month,
+        unlimited_credits: tenant?.unlimited_credits ?? row.unlimited_credits,
+      };
+    });
   });
 
 const CLOUDFLARE_FREE_NEURONS_PER_DAY = 10_000;
@@ -340,29 +479,85 @@ export const adminCreateKey = createServerFn({ method: "POST" })
     label: z.string().trim().min(2, "Informe para quem a chave será criada.").max(120),
     plan: z.enum(["essencial", "profissional", "agencia"]),
     unlimited: z.boolean(),
+    tenantId: z.string().uuid().optional().nullable(),
+    tenantName: z.string().trim().min(2).max(160).optional(),
+    role: z.enum(["owner", "admin", "member"]).optional().default("owner"),
   }).parse(d))
   .handler(async ({ data }) => {
     checkAdmin(data.token);
+    const sb = admin();
+    let tenantId = data.tenantId || null;
+    let actualPlan = data.plan;
+    let actualUnlimited = data.unlimited;
+    let tenantName = data.tenantName || data.label;
+
+    if (!tenantId) {
+      const id = randomUUID();
+      const definition = getPlanDefinition(actualPlan);
+      const { data: tenant, error } = await (sb as any).from("tenants").insert({
+        id,
+        name: tenantName,
+        slug: tenantSlug(id),
+        plan: actualPlan,
+        credits_per_month: definition.creditsPerMonth,
+        credits_used_month: 0,
+        credits_reset_month: currentMonthStart(),
+        unlimited_credits: actualUnlimited,
+      }).select("*").single();
+      if (error) throw new Error(error.message);
+      tenantId = tenant.id;
+      tenantName = tenant.name;
+    } else {
+      const { data: tenant, error } = await (sb as any).from("tenants").select("id, name, plan, unlimited_credits, active").eq("id", tenantId).single();
+      if (error || !tenant) throw new Error("Empresa não encontrada.");
+      if (!tenant.active) throw new Error("Esta empresa está desativada.");
+      actualPlan = normalizePlan(tenant.plan);
+      actualUnlimited = Boolean(tenant.unlimited_credits);
+      tenantName = tenant.name;
+    }
+
+    const definition = getPlanDefinition(actualPlan);
     const key = randomKey();
-    const definition = getPlanDefinition(data.plan);
-    const { data: row, error } = await admin()
+    const { data: row, error } = await (sb as any)
       .from("access_keys")
       .insert({
         key,
         label: data.label,
-        plan: data.plan,
+        tenant_id: tenantId,
+        plan: actualPlan,
         credits_per_month: definition.creditsPerMonth,
         credits_used_month: 0,
         credits_reset_month: currentMonthStart(),
         credits_per_day: definition.creditsPerMonth,
-        unlimited_credits: data.unlimited,
+        unlimited_credits: actualUnlimited,
         credits_used_today: 0,
         credits_reset_date: brazilDate(),
       })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
-    return row;
+
+    const { data: member, error: memberError } = await (sb as any).from("tenant_members").insert({
+      tenant_id: tenantId,
+      access_key_id: row.id,
+      display_name: data.label,
+      role: data.role,
+      active: true,
+    }).select("*").single();
+    if (memberError) {
+      await (sb as any).from("access_keys").delete().eq("id", row.id);
+      throw new Error(memberError.message);
+    }
+    return {
+      ...row,
+      tenant_name: tenantName,
+      tenant_plan: actualPlan,
+      tenant_active: true,
+      member_id: member.id,
+      member_role: member.role,
+      member_active: member.active,
+      display_name: member.display_name,
+    };
   });
 
 export const adminUpdatePlan = createServerFn({ method: "POST" })
@@ -374,19 +569,31 @@ export const adminUpdatePlan = createServerFn({ method: "POST" })
   }).parse(d))
   .handler(async ({ data }) => {
     checkAdmin(data.token);
+    const sb = admin();
     const definition = getPlanDefinition(data.plan);
-    const { data: row, error } = await admin()
-      .from("access_keys")
-      .update({
-        plan: data.plan,
-        credits_per_month: definition.creditsPerMonth,
-        credits_per_day: definition.creditsPerMonth,
-        unlimited_credits: data.unlimited,
-      })
-      .eq("id", data.id)
-      .select("*")
-      .single();
+    const { data: keyRow, error: keyError } = await (sb as any).from("access_keys").select("*").eq("id", data.id).single();
+    if (keyError) throw new Error(keyError.message);
+    const tenantId = keyRow.tenant_id || keyRow.id;
+    const { error: tenantError } = await (sb as any).from("tenants").update({
+      plan: data.plan,
+      credits_per_month: definition.creditsPerMonth,
+      unlimited_credits: data.unlimited,
+      updated_at: new Date().toISOString(),
+    }).eq("id", tenantId);
+    if (tenantError) throw new Error(tenantError.message);
+    const { data: row, error } = await (sb as any).from("access_keys").update({
+      plan: data.plan,
+      credits_per_month: definition.creditsPerMonth,
+      credits_per_day: definition.creditsPerMonth,
+      unlimited_credits: data.unlimited,
+    }).eq("tenant_id", tenantId).eq("id", data.id).select("*").single();
     if (error) throw new Error(error.message);
+    await (sb as any).from("access_keys").update({
+      plan: data.plan,
+      credits_per_month: definition.creditsPerMonth,
+      credits_per_day: definition.creditsPerMonth,
+      unlimited_credits: data.unlimited,
+    }).eq("tenant_id", tenantId);
     return row;
   });
 
@@ -403,7 +610,14 @@ export const adminDeleteKey = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ token: z.string().min(20), id: z.string().uuid() }).parse(d))
   .handler(async ({ data }) => {
     checkAdmin(data.token);
-    const { error } = await admin().from("access_keys").delete().eq("id", data.id);
+    const sb = admin();
+    const { data: keyRow, error: readError } = await (sb as any).from("access_keys").select("tenant_id").eq("id", data.id).maybeSingle();
+    if (readError) throw new Error(readError.message);
+    const { error } = await (sb as any).from("access_keys").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
+    if (keyRow?.tenant_id) {
+      const { count } = await (sb as any).from("access_keys").select("id", { count: "exact", head: true }).eq("tenant_id", keyRow.tenant_id);
+      if ((count ?? 0) === 0) await (sb as any).from("tenants").delete().eq("id", keyRow.tenant_id);
+    }
     return { ok: true as const };
   });

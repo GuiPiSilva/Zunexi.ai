@@ -393,6 +393,11 @@ export function paletteFromDescription(description: string): string[] {
 }
 
 export function fontPairFromStyle(style: string) {
+  const explicit = style.match(/tipografia(?:\s+(?:obrigatória|obrigatoria|oficial))?\s*:\s*([^;\n]+)/i)?.[1];
+  if (explicit) {
+    const fonts = explicit.split(/[,|/]/).map((font) => font.trim().replace(/["']/g, "")).filter(Boolean).slice(0, 2);
+    if (fonts.length) return { display: fonts[0], body: fonts[1] || fonts[0] };
+  }
   const value = style.toLowerCase();
   if (/luxo|luxury|elegant|elegante|sofistic|editorial|vintage/.test(value)) {
     return { display: "Playfair Display", body: "Inter" };
