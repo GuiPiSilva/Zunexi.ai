@@ -21,7 +21,43 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AcessoRouteImport } from './routes/acesso'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as EditorIdRouteImport } from './routes/editor.$id'
+import { Route as PublicacoesRouteImport } from './routes/publicacoes'
+import { Route as RedesRouteImport } from './routes/redes'
+import { Route as CaixaEntradaRouteImport } from './routes/caixa-entrada'
+import { Route as AnalyticsRouteImport } from './routes/analytics'
+import { Route as AutomacoesRouteImport } from './routes/automacoes'
+import { Route as EquipeRouteImport } from './routes/equipe'
 
+const PublicacoesRoute = PublicacoesRouteImport.update({
+  id: '/publicacoes',
+  path: '/publicacoes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RedesRoute = RedesRouteImport.update({
+  id: '/redes',
+  path: '/redes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CaixaEntradaRoute = CaixaEntradaRouteImport.update({
+  id: '/caixa-entrada',
+  path: '/caixa-entrada',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AnalyticsRoute = AnalyticsRouteImport.update({
+  id: '/analytics',
+  path: '/analytics',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AutomacoesRoute = AutomacoesRouteImport.update({
+  id: '/automacoes',
+  path: '/automacoes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EquipeRoute = EquipeRouteImport.update({
+  id: '/equipe',
+  path: '/equipe',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AgendaRoute = AgendaRouteImport.update({
   id: '/agenda',
   path: '/agenda',
@@ -85,6 +121,12 @@ const EditorIdRoute = EditorIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/publicacoes': typeof PublicacoesRoute
+  '/redes': typeof RedesRoute
+  '/caixa-entrada': typeof CaixaEntradaRoute
+  '/analytics': typeof AnalyticsRoute
+  '/automacoes': typeof AutomacoesRoute
+  '/equipe': typeof EquipeRoute
   '/acesso': typeof AcessoRoute
   '/admin': typeof AdminRoute
   '/agenda': typeof AgendaRoute
@@ -99,6 +141,12 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/publicacoes': typeof PublicacoesRoute
+  '/redes': typeof RedesRoute
+  '/caixa-entrada': typeof CaixaEntradaRoute
+  '/analytics': typeof AnalyticsRoute
+  '/automacoes': typeof AutomacoesRoute
+  '/equipe': typeof EquipeRoute
   '/acesso': typeof AcessoRoute
   '/admin': typeof AdminRoute
   '/agenda': typeof AgendaRoute
@@ -114,6 +162,12 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/publicacoes': typeof PublicacoesRoute
+  '/redes': typeof RedesRoute
+  '/caixa-entrada': typeof CaixaEntradaRoute
+  '/analytics': typeof AnalyticsRoute
+  '/automacoes': typeof AutomacoesRoute
+  '/equipe': typeof EquipeRoute
   '/acesso': typeof AcessoRoute
   '/admin': typeof AdminRoute
   '/agenda': typeof AgendaRoute
@@ -130,6 +184,12 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/publicacoes'
+    | '/redes'
+    | '/caixa-entrada'
+    | '/analytics'
+    | '/automacoes'
+    | '/equipe'
     | '/acesso'
     | '/agenda'
     | '/brand-kit'
@@ -144,6 +204,12 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/publicacoes'
+    | '/redes'
+    | '/caixa-entrada'
+    | '/analytics'
+    | '/automacoes'
+    | '/equipe'
     | '/acesso'
     | '/agenda'
     | '/brand-kit'
@@ -158,6 +224,12 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/publicacoes'
+    | '/redes'
+    | '/caixa-entrada'
+    | '/analytics'
+    | '/automacoes'
+    | '/equipe'
     | '/acesso'
     | '/agenda'
     | '/brand-kit'
@@ -173,6 +245,12 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  PublicacoesRoute: typeof PublicacoesRoute
+  RedesRoute: typeof RedesRoute
+  CaixaEntradaRoute: typeof CaixaEntradaRoute
+  AnalyticsRoute: typeof AnalyticsRoute
+  AutomacoesRoute: typeof AutomacoesRoute
+  EquipeRoute: typeof EquipeRoute
   AcessoRoute: typeof AcessoRoute
   AgendaRoute: typeof AgendaRoute
   BrandKitRoute: typeof BrandKitRoute
@@ -188,6 +266,48 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/publicacoes': {
+      id: '/publicacoes'
+      path: '/publicacoes'
+      fullPath: '/publicacoes'
+      preLoaderRoute: typeof PublicacoesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/redes': {
+      id: '/redes'
+      path: '/redes'
+      fullPath: '/redes'
+      preLoaderRoute: typeof RedesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/caixa-entrada': {
+      id: '/caixa-entrada'
+      path: '/caixa-entrada'
+      fullPath: '/caixa-entrada'
+      preLoaderRoute: typeof CaixaEntradaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/analytics': {
+      id: '/analytics'
+      path: '/analytics'
+      fullPath: '/analytics'
+      preLoaderRoute: typeof AnalyticsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/automacoes': {
+      id: '/automacoes'
+      path: '/automacoes'
+      fullPath: '/automacoes'
+      preLoaderRoute: typeof AutomacoesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/equipe': {
+      id: '/equipe'
+      path: '/equipe'
+      fullPath: '/equipe'
+      preLoaderRoute: typeof EquipeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/agenda': {
       id: '/agenda'
       path: '/agenda'
@@ -277,6 +397,12 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  PublicacoesRoute: PublicacoesRoute,
+  RedesRoute: RedesRoute,
+  CaixaEntradaRoute: CaixaEntradaRoute,
+  AnalyticsRoute: AnalyticsRoute,
+  AutomacoesRoute: AutomacoesRoute,
+  EquipeRoute: EquipeRoute,
   AcessoRoute: AcessoRoute,
   AgendaRoute: AgendaRoute,
   BrandKitRoute: BrandKitRoute,
