@@ -10,7 +10,15 @@ export type PlanFeature =
   | "agenda"
   | "prioridade_geracao"
   | "multiplas_marcas"
-  | "uso_comercial_ampliado";
+  | "uso_comercial_ampliado"
+  | "gestao_redes"
+  | "publicacoes"
+  | "caixa_entrada"
+  | "analytics"
+  | "aprovacoes"
+  | "equipe"
+  | "automacoes"
+  | "social_listening";
 
 export type PlanDefinition = {
   id: PlanId;
@@ -44,6 +52,12 @@ export const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
       "brand_kit",
       "agenda",
       "prioridade_geracao",
+      "gestao_redes",
+      "publicacoes",
+      "caixa_entrada",
+      "analytics",
+      "aprovacoes",
+      "automacoes",
     ],
     highlights: [
       "100 créditos por mês",
@@ -51,6 +65,8 @@ export const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
       "Prioridade na geração",
       "Criador de prompts",
       "Agenda de postagens",
+      "Gestão de redes sociais",
+      "Aprovação e analytics",
     ],
   },
   agencia: {
@@ -69,6 +85,14 @@ export const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
       "prioridade_geracao",
       "multiplas_marcas",
       "uso_comercial_ampliado",
+      "gestao_redes",
+      "publicacoes",
+      "caixa_entrada",
+      "analytics",
+      "aprovacoes",
+      "equipe",
+      "automacoes",
+      "social_listening",
     ],
     highlights: [
       "300 créditos por mês",
@@ -76,6 +100,8 @@ export const PLAN_DEFINITIONS: Record<PlanId, PlanDefinition> = {
       "Uso comercial ampliado",
       "Criador de prompts",
       "Agenda de postagens",
+      "Equipe e aprovação",
+      "Caixa de entrada e social listening",
     ],
   },
 };

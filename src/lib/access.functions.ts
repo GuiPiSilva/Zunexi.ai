@@ -9,7 +9,7 @@ export type CreditStatus = {
   tenantId?: string;
   tenantName?: string;
   memberId?: string;
-  memberRole?: "owner" | "admin" | "member";
+  memberRole?: "owner" | "admin" | "member" | "social" | "designer" | "approver" | "analyst" | "viewer" | "support";
   unlimited: boolean;
   plan: PlanId;
   planName: string;
@@ -153,7 +153,7 @@ export type TenantContext = {
   member: {
     id: string;
     display_name: string;
-    role: "owner" | "admin" | "member";
+    role: "owner" | "admin" | "member" | "social" | "designer" | "approver" | "analyst" | "viewer" | "support";
     active: boolean;
   };
 };
@@ -256,7 +256,7 @@ function normalizeCreditRpc(data: unknown): CreditStatus & { keyId: string } {
     tenantId: raw.tenantId ? String(raw.tenantId) : undefined,
     tenantName: raw.tenantName ? String(raw.tenantName) : undefined,
     memberId: raw.memberId ? String(raw.memberId) : undefined,
-    memberRole: raw.memberRole === "owner" || raw.memberRole === "admin" ? raw.memberRole : "member",
+    memberRole: ["owner", "admin", "member", "social", "designer", "approver", "analyst", "viewer", "support"].includes(String(raw.memberRole)) ? raw.memberRole as CreditStatus["memberRole"] : "member",
     unlimited,
     plan,
     planName: definition.name,
