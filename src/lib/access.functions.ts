@@ -3,13 +3,18 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/integrations/supabase/types";
+import { getPlanDefinition, normalizePlan, planHasFeature, type PlanFeature, type PlanId } from "@/lib/plans";
 
 export type CreditStatus = {
   unlimited: boolean;
-  creditsPerDay: number;
-  usedToday: number;
+  plan: PlanId;
+  planName: string;
+  creditsPerMonth: number;
+  usedThisMonth: number;
   remaining: number | null;
-  resetDate: string;
+  resetAt: string;
+  features: PlanFeature[];
+  priorityGeneration: boolean;
 };
 
 export type CloudflareUsageDay = {
@@ -47,7 +52,7 @@ function randomKey(): string {
   const bytes = randomBytes(12);
   let out = "";
   for (let i = 0; i < 12; i += 1) out += chars[bytes[i] % chars.length];
-  return `INL-${out.slice(0, 4)}-${out.slice(4, 8)}-${out.slice(8, 12)}`;
+  return `ZNX-${out.slice(0, 4)}-${out.slice(4, 8)}-${out.slice(8, 12)}`;
 }
 
 function safeEqual(a: string, b: string) {
@@ -92,34 +97,77 @@ function brazilDate() {
   return `${value.year}-${value.month}-${value.day}`;
 }
 
-function statusFromRow(row: Pick<AccessKeyRow, "unlimited_credits" | "credits_per_day" | "credits_used_today" | "credits_reset_date">): CreditStatus {
-  const usedToday = row.credits_reset_date === brazilDate() ? row.credits_used_today : 0;
+function currentMonthStart() {
+  return `${brazilDate().slice(0, 7)}-01`;
+}
+
+function nextMonthStart() {
+  const [year, month] = currentMonthStart().split("-").map(Number);
+  const date = new Date(Date.UTC(year, month, 1));
+  return date.toISOString().slice(0, 10);
+}
+
+function statusFromRow(row: Partial<AccessKeyRow>): CreditStatus {
+  const plan = normalizePlan(row.plan);
+  const definition = getPlanDefinition(plan);
+  const creditsPerMonth = Number(row.credits_per_month ?? definition.creditsPerMonth);
+  const resetMonth = row.credits_reset_month || currentMonthStart();
+  const usedThisMonth = resetMonth === currentMonthStart() ? Number(row.credits_used_month ?? 0) : 0;
   return {
-    unlimited: row.unlimited_credits,
-    creditsPerDay: row.credits_per_day,
-    usedToday,
-    remaining: row.unlimited_credits ? null : Math.max(row.credits_per_day - usedToday, 0),
-    resetDate: row.credits_reset_date,
+    unlimited: Boolean(row.unlimited_credits),
+    plan,
+    planName: definition.name,
+    creditsPerMonth,
+    usedThisMonth,
+    remaining: row.unlimited_credits ? null : Math.max(creditsPerMonth - usedThisMonth, 0),
+    resetAt: nextMonthStart(),
+    features: definition.features,
+    priorityGeneration: planHasFeature(plan, "prioridade_geracao"),
   };
 }
 
-export async function requireAccessKey(sb: ReturnType<typeof admin>, key: string) {
+export async function requireAccessKey(sb: ReturnType<typeof admin>, key: string): Promise<AccessKeyRow> {
   const normalized = key.trim().toUpperCase();
-  const { data: row } = await sb
-    .from("access_keys")
-    .select("id, active, label, unlimited_credits, credits_per_day, credits_used_today, credits_reset_date")
-    .eq("key", normalized)
-    .maybeSingle();
+  const { data: row, error } = await sb.from("access_keys").select("*").eq("key", normalized).maybeSingle();
+  if (error) throw new Error(`Não foi possível validar a chave de acesso: ${error.message}`);
   if (!row || !row.active) throw new Error("Chave de acesso inválida ou desativada. Peça uma nova ao admin.");
   return row;
+}
+
+export async function requirePlanFeature(sb: ReturnType<typeof admin>, key: string, feature: PlanFeature) {
+  const row = await requireAccessKey(sb, key);
+  if (!planHasFeature(row.plan, feature)) {
+    const required = feature === "agenda" ? "Profissional ou Agência" : "um plano superior";
+    throw new Error(`Este recurso está disponível somente no plano ${required}.`);
+  }
+  return row;
+}
+
+function normalizeCreditRpc(data: unknown): CreditStatus & { keyId: string } {
+  const raw = (data || {}) as Record<string, unknown>;
+  const plan = normalizePlan(raw.plan);
+  const definition = getPlanDefinition(plan);
+  const creditsPerMonth = Number(raw.creditsPerMonth ?? raw.creditsPerDay ?? definition.creditsPerMonth);
+  const usedThisMonth = Number(raw.usedThisMonth ?? raw.usedToday ?? 0);
+  const unlimited = Boolean(raw.unlimited);
+  return {
+    keyId: String(raw.keyId || ""),
+    unlimited,
+    plan,
+    planName: definition.name,
+    creditsPerMonth,
+    usedThisMonth,
+    remaining: unlimited ? null : Number(raw.remaining ?? Math.max(creditsPerMonth - usedThisMonth, 0)),
+    resetAt: String(raw.resetAt ?? raw.resetDate ?? nextMonthStart()),
+    features: definition.features,
+    priorityGeneration: planHasFeature(plan, "prioridade_geracao"),
+  };
 }
 
 export async function consumeAccessCredit(sb: ReturnType<typeof admin>, key: string, jobId: string): Promise<CreditStatus & { keyId: string }> {
   const normalized = key.trim().toUpperCase();
   let response = await sb.rpc("consume_access_credit", { p_key: normalized, p_job_id: jobId });
 
-  // Compatibilidade temporária quando o cache de esquema do Supabase ainda enxerga
-  // a versão antiga da função, com somente o argumento p_key.
   if (response.error && /function|schema cache|p_job_id|PGRST202/i.test(response.error.message)) {
     const legacy = await (sb as any).rpc("consume_access_credit", { p_key: normalized });
     if (!legacy.error) response = legacy;
@@ -128,40 +176,32 @@ export async function consumeAccessCredit(sb: ReturnType<typeof admin>, key: str
   const { data, error } = response;
   if (error) {
     const details = [error.message, error.details, error.hint].filter(Boolean).join(" — ");
-    if (details.includes("CREDITS_EXHAUSTED")) throw new Error("Seus créditos de hoje acabaram. Eles serão renovados automaticamente amanhã.");
+    if (details.includes("CREDITS_EXHAUSTED")) throw new Error("Seus créditos deste mês acabaram. Eles serão renovados automaticamente no próximo mês.");
     if (details.includes("INVALID_ACCESS_KEY")) throw new Error("Chave de acesso inválida ou desativada.");
     console.error("Erro ao consumir crédito", error);
     throw new Error(`Não foi possível verificar os créditos desta conta. ${details}`.trim());
   }
-  const result = data as Json as unknown as CreditStatus & { keyId: string };
-  return result;
+  return normalizeCreditRpc(data as Json);
 }
 
 export const getAccessCreditStatus = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ key: z.string().trim().min(4).max(64) }).parse(d))
-  .handler(async ({ data }): Promise<CreditStatus> => {
-    const row = await requireAccessKey(admin(), data.key);
-    return statusFromRow(row);
-  });
+  .handler(async ({ data }): Promise<CreditStatus> => statusFromRow(await requireAccessKey(admin(), data.key)));
 
 export const verifyAccessKey = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ key: z.string().trim().min(4).max(64) }).parse(d))
   .handler(async ({ data }) => {
     const sb = admin();
     const normalized = data.key.trim().toUpperCase();
-    const { data: row } = await sb
-      .from("access_keys")
-      .select("id, active, uses, label, unlimited_credits, credits_per_day, credits_used_today, credits_reset_date")
-      .eq("key", normalized)
-      .maybeSingle();
-    if (!row || !row.active) return { ok: false as const };
+    const { data: row, error } = await sb.from("access_keys").select("*").eq("key", normalized).maybeSingle();
+    if (error || !row || !row.active) return { ok: false as const };
 
     await sb.from("access_keys").update({ uses: (row.uses ?? 0) + 1, last_used_at: new Date().toISOString() }).eq("id", row.id);
-
     return {
       ok: true as const,
       keyId: row.id,
-      name: row.label?.trim() || "Usuário InLabs",
+      name: row.label?.trim() || "Usuário Zunexi.ai",
+      plan: normalizePlan(row.plan),
       credits: statusFromRow(row),
     };
   });
@@ -179,10 +219,7 @@ export const adminListKeys = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ token: z.string().min(20) }).parse(d))
   .handler(async ({ data }) => {
     checkAdmin(data.token);
-    const { data: rows, error } = await admin()
-      .from("access_keys")
-      .select("id, key, label, active, uses, last_used_at, created_at, credits_per_day, unlimited_credits, credits_used_today, credits_reset_date")
-      .order("created_at", { ascending: false });
+    const { data: rows, error } = await admin().from("access_keys").select("*").order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
     return rows ?? [];
   });
@@ -301,42 +338,53 @@ export const adminCreateKey = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({
     token: z.string().min(20),
     label: z.string().trim().min(2, "Informe para quem a chave será criada.").max(120),
-    creditsPerDay: z.number().int().min(0).max(1_000_000),
+    plan: z.enum(["essencial", "profissional", "agencia"]),
     unlimited: z.boolean(),
   }).parse(d))
   .handler(async ({ data }) => {
     checkAdmin(data.token);
     const key = randomKey();
+    const definition = getPlanDefinition(data.plan);
     const { data: row, error } = await admin()
       .from("access_keys")
       .insert({
         key,
         label: data.label,
-        credits_per_day: data.creditsPerDay,
+        plan: data.plan,
+        credits_per_month: definition.creditsPerMonth,
+        credits_used_month: 0,
+        credits_reset_month: currentMonthStart(),
+        credits_per_day: definition.creditsPerMonth,
         unlimited_credits: data.unlimited,
         credits_used_today: 0,
         credits_reset_date: brazilDate(),
       })
-      .select("id, key, label, active, uses, last_used_at, created_at, credits_per_day, unlimited_credits, credits_used_today, credits_reset_date")
+      .select("*")
       .single();
     if (error) throw new Error(error.message);
     return row;
   });
 
-export const adminUpdateCredits = createServerFn({ method: "POST" })
+export const adminUpdatePlan = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({
     token: z.string().min(20),
     id: z.string().uuid(),
-    creditsPerDay: z.number().int().min(0).max(1_000_000),
+    plan: z.enum(["essencial", "profissional", "agencia"]),
     unlimited: z.boolean(),
   }).parse(d))
   .handler(async ({ data }) => {
     checkAdmin(data.token);
+    const definition = getPlanDefinition(data.plan);
     const { data: row, error } = await admin()
       .from("access_keys")
-      .update({ credits_per_day: data.creditsPerDay, unlimited_credits: data.unlimited })
+      .update({
+        plan: data.plan,
+        credits_per_month: definition.creditsPerMonth,
+        credits_per_day: definition.creditsPerMonth,
+        unlimited_credits: data.unlimited,
+      })
       .eq("id", data.id)
-      .select("id, key, label, active, uses, last_used_at, created_at, credits_per_day, unlimited_credits, credits_used_today, credits_reset_date")
+      .select("*")
       .single();
     if (error) throw new Error(error.message);
     return row;

@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { admin, consumeAccessCredit, requireAccessKey } from "@/lib/access.functions";
+import { planHasFeature } from "@/lib/plans";
 import { explicitHumanVisualRequest } from "@/lib/creative-engine";
 import { LAYOUT_IDS } from "@/lib/layouts";
 
@@ -195,6 +196,7 @@ type ImageProvider = "colab" | "cloudflare";
 type GeneratedImage = { mimeType: string; bytes: Buffer; provider: ImageProvider; model: string };
 
 const ImageInput = z.object({
+  accessKey: z.string().trim().min(4).max(64),
   prompt: z.string().min(1),
   seed: z.string().optional().default(""),
   slideTitle: z.string().optional().default(""),
@@ -556,7 +558,10 @@ function creativeProfile(data: z.infer<typeof ImageInput>) {
 
 export const generateImage = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => ImageInput.parse(d))
-  .handler(async ({ data }): Promise<{ url: string; provider: ImageProvider; model: string }> => {
+  .handler(async ({ data }): Promise<{ url: string; provider: ImageProvider; model: string; priority: boolean }> => {
+    const access = await requireAccessKey(admin(), data.accessKey);
+    const priority = planHasFeature(access.plan, "prioridade_geracao");
+    const effectiveQuality: ImageQuality = priority ? "premium" : "fast";
     const fullPrompt = `CREATE ONLY A SINGLE CONTINUOUS PHOTOGRAPHIC / 3D / ILLUSTRATIVE SCENE FOR A HIGH-END INSTAGRAM CAMPAIGN. Zunexi will apply the final Portuguese copy afterward and flatten everything into the finished image.
 
 ABSOLUTE FORMAT RULES:
@@ -589,9 +594,9 @@ ART-DIRECTION STANDARD:
 
 Unique variation seed: ${data.seed}.`;
 
-    const generated = await generateWithProviderFallback(fullPrompt, data.aspectRatio, data.seed, data.imageQuality);
+    const generated = await generateWithProviderFallback(fullPrompt, data.aspectRatio, data.seed, effectiveQuality);
     const url = await uploadBytesToSupabaseStorage(generated.bytes, generated.mimeType, `slide-${generated.provider}`);
-    return { url, provider: generated.provider, model: generated.model };
+    return { url, provider: generated.provider, model: generated.model, priority };
   });
 
 type ProviderTestStatus = {

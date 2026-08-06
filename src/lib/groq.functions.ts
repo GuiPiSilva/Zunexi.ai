@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { consumeAccessCredit, requireAccessKey } from "@/lib/access.functions";
+import { consumeAccessCredit, requireAccessKey, requirePlanFeature } from "@/lib/access.functions";
 import { explicitHumanVisualRequest } from "@/lib/creative-engine";
 import { LAYOUT_IDS } from "@/lib/layouts";
 
@@ -653,7 +653,7 @@ export const generateCarouselPrompt = createServerFn({ method: "POST" })
     if (!apiKey) throw new Error("GROQ_API_KEY não configurada no servidor.");
 
     const sb = admin();
-    await requireAccessKey(sb, data.accessKey);
+    await requirePlanFeature(sb, data.accessKey, "criador_prompts");
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
