@@ -1,9 +1,10 @@
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
   Bell,
   BellRing,
+  CalendarDays,
   CheckCheck,
   ChevronDown,
   Coins,
@@ -12,9 +13,11 @@ import {
   Images,
   LayoutDashboard,
   Library,
+  LockKeyhole,
   LogOut,
   MessageSquareText,
   Menu,
+  Palette,
   Search,
   Settings,
   Trash2,
@@ -32,22 +35,34 @@ import {
 } from "@/lib/notifications";
 import logoFull from "@/assets/logo-full.png";
 import logoIcon from "@/assets/logo-icon.png";
+import type { PlanFeature } from "@/lib/plans";
 
-const NAV = [
+type NavigationItem = {
+  to: "/" | "/carrossel" | "/cartaz" | "/criador-prompts" | "/agenda" | "/brand-kit" | "/projetos" | "/biblioteca" | "/configuracoes";
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+  feature?: PlanFeature;
+};
+
+const NAV: NavigationItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/carrossel", label: "Criar carrossel", icon: Images },
   { to: "/cartaz", label: "Criar cartaz", icon: ImagePlus },
-  { to: "/criador-prompts", label: "Criador de prompts", icon: MessageSquareText },
+  { to: "/criador-prompts", label: "Criador de prompts", icon: MessageSquareText, feature: "criador_prompts" },
+  { to: "/agenda", label: "Agenda de posts", icon: CalendarDays, feature: "agenda" },
+  { to: "/brand-kit", label: "Brand Kit", icon: Palette, feature: "brand_kit" },
   { to: "/projetos", label: "Meus projetos", icon: FolderOpen },
   { to: "/biblioteca", label: "Biblioteca", icon: Library },
   { to: "/configuracoes", label: "Configurações", icon: Settings },
-] as const;
+];
 
 const PAGE_TITLES: Record<string, string> = {
   "/": "Dashboard",
   "/carrossel": "Criar carrossel",
   "/cartaz": "Criar cartaz",
   "/criador-prompts": "Criador de prompts",
+  "/agenda": "Agenda de postagens",
+  "/brand-kit": "Brand Kit inteligente",
   "/projetos": "Meus projetos",
   "/biblioteca": "Biblioteca",
   "/configuracoes": "Configurações",
@@ -146,8 +161,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground lg:flex">
-      <aside className={`fixed inset-y-0 left-0 z-50 flex w-[264px] flex-col border-r border-sidebar-border bg-sidebar/95 shadow-2xl backdrop-blur-xl transition-transform lg:sticky lg:top-0 lg:h-screen ${open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
+    <div className="app-shell min-h-screen bg-background text-foreground lg:flex">
+      <div className="app-ambient" aria-hidden="true"><i /><i /><i /></div>
+      <aside className={`app-sidebar fixed inset-y-0 left-0 z-50 flex w-[276px] flex-col border-r border-sidebar-border bg-sidebar/95 shadow-2xl backdrop-blur-xl transition-transform lg:sticky lg:top-0 lg:h-screen ${open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
         <div className="flex h-[76px] items-center border-b border-sidebar-border px-4">
           <img src={logoFull} alt="Zunexi.ai" className="brand-logo-full h-14 w-auto max-w-[225px] object-contain" />
         </div>
@@ -155,23 +171,28 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="px-4 pt-5">
           <div className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">Estúdio</div>
           <nav className="space-y-1.5">
-            {NAV.map(({ to, label, icon: Icon }) => (
-              <Link key={to} to={to} activeOptions={{ exact: to === "/" }} className="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition hover:bg-secondary/70 hover:text-foreground data-[status=active]:bg-gradient-to-r data-[status=active]:from-primary/25 data-[status=active]:to-accent/10 data-[status=active]:text-foreground data-[status=active]:shadow-[inset_3px_0_0_0_var(--color-primary)]">
-                <Icon className="h-[18px] w-[18px] text-muted-foreground transition group-hover:text-primary group-data-[status=active]:text-primary" />
-                <span>{label}</span>
-              </Link>
-            ))}
+            {NAV.map((item) => {
+              const Icon = item.icon;
+              const locked = Boolean(item.feature && credits && !credits.features.includes(item.feature));
+              return (
+                <Link key={item.to} to={item.to} activeOptions={{ exact: item.to === "/" }} className="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition hover:bg-secondary/70 hover:text-foreground data-[status=active]:bg-gradient-to-r data-[status=active]:from-primary/25 data-[status=active]:to-accent/10 data-[status=active]:text-foreground data-[status=active]:shadow-[inset_3px_0_0_0_var(--color-primary)]">
+                  <Icon className="h-[18px] w-[18px] text-muted-foreground transition group-hover:text-primary group-data-[status=active]:text-primary" />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  {locked && <LockKeyhole className="h-3.5 w-3.5 text-muted-foreground/70" />}
+                </Link>
+              );
+            })}
           </nav>
         </div>
 
         <div className="mt-auto p-4">
           <div className="mb-3 flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/8 px-3 py-2.5 text-xs">
             <Coins className="h-4 w-4 text-primary" />
-            <span className="font-semibold">{credits?.unlimited ? "Créditos infinitos" : `${credits?.remaining ?? "—"} créditos hoje`}</span>
+            <div className="min-w-0"><div className="font-semibold">{credits?.unlimited ? "Créditos infinitos" : `${credits?.remaining ?? "—"} créditos no mês`}</div><div className="mt-0.5 text-[10px] uppercase tracking-[.14em] text-muted-foreground">Plano {credits?.planName || "—"}</div></div>
           </div>
           <div className="flex items-center gap-3 rounded-xl border border-sidebar-border bg-card/55 p-3">
             <div className="brand-logo-tile grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-primary/25 p-1.5 shadow-[0_0_20px_rgba(139,92,246,0.16)]"><img src={logoIcon} alt="Zunexi.ai" className="brand-logo-icon h-full w-full object-contain" /></div>
-            <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold" title={userName}>{userName}</div><div className="truncate text-[11px] text-muted-foreground">Acesso autorizado</div></div>
+            <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold" title={userName}>{userName}</div><div className="truncate text-[11px] text-muted-foreground">Plano {credits?.planName || "carregando"}</div></div>
             <button onClick={logout} title="Sair" className="rounded-lg p-2 text-muted-foreground transition hover:bg-secondary/70 hover:text-foreground"><LogOut className="h-4 w-4" /></button>
           </div>
         </div>
@@ -179,8 +200,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {open && <button aria-label="Fechar menu" className="fixed inset-0 z-40 bg-black/70 lg:hidden" onClick={() => setOpen(false)} />}
 
-      <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-30 flex h-[76px] items-center gap-3 border-b border-border/80 bg-background/80 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
+      <div className="app-main min-w-0 flex-1">
+        <header className="app-topbar sticky top-0 z-30 flex h-[76px] items-center gap-3 border-b border-border/80 bg-background/75 px-4 backdrop-blur-2xl sm:px-6 lg:px-8">
           <button onClick={() => setOpen(true)} className="rounded-xl border border-border bg-card p-2.5 lg:hidden">{open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}</button>
           <div className="min-w-0"><p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Zunexi.ai</p><h2 className="truncate text-base font-semibold">{pageTitle}</h2></div>
           <div className="ml-auto hidden w-full max-w-sm items-center gap-2 rounded-xl border border-border bg-card/70 px-3 py-2.5 md:flex"><Search className="h-4 w-4 text-muted-foreground" /><input aria-label="Buscar" placeholder="Buscar projetos e conteúdos..." className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground" /><kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">⌘K</kbd></div>
@@ -229,7 +250,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 hover:border-primary/35 hover:bg-secondary/60"
             >
               <div className="brand-logo-tile grid h-8 w-8 place-items-center overflow-hidden rounded-lg border border-primary/25 p-1"><img src={logoIcon} alt="Zunexi.ai" className="brand-logo-icon h-full w-full object-contain" /></div>
-              <div className="text-left"><div className="max-w-[130px] truncate text-xs font-semibold" title={userName}>{userName}</div><div className="text-[10px] text-muted-foreground">{credits?.unlimited ? "Créditos infinitos" : `${credits?.remaining ?? "—"} créditos`}</div></div>
+              <div className="text-left"><div className="max-w-[130px] truncate text-xs font-semibold" title={userName}>{userName}</div><div className="text-[10px] text-muted-foreground">{credits?.planName || "Plano"} · {credits?.unlimited ? "∞" : `${credits?.remaining ?? "—"} créditos`}</div></div>
               <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${profileOpen ? "rotate-180" : ""}`} />
             </button>
 
@@ -237,7 +258,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div role="menu" className="absolute right-0 top-12 z-50 w-60 overflow-hidden rounded-2xl border border-border bg-popover p-2 shadow-2xl">
                 <div className="border-b border-border px-3 py-2.5">
                   <div className="truncate text-sm font-semibold" title={userName}>{userName}</div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">{credits?.unlimited ? "Créditos infinitos" : `${credits?.remaining ?? "—"} créditos disponíveis`}</div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">Plano {credits?.planName || "—"} · {credits?.unlimited ? "Créditos infinitos" : `${credits?.remaining ?? "—"} créditos no mês`}</div>
                 </div>
                 <button
                   type="button"
