@@ -19,6 +19,7 @@ export type Database = {
           active: boolean
           created_at: string
           id: string
+          tenant_id: string
           key: string
           label: string | null
           last_used_at: string | null
@@ -36,6 +37,7 @@ export type Database = {
           active?: boolean
           created_at?: string
           id?: string
+          tenant_id: string
           key: string
           label?: string | null
           last_used_at?: string | null
@@ -53,6 +55,7 @@ export type Database = {
           active?: boolean
           created_at?: string
           id?: string
+          tenant_id?: string
           key?: string
           label?: string | null
           last_used_at?: string | null
@@ -72,6 +75,8 @@ export type Database = {
         Row: {
           id: string
           access_key_id: string
+          tenant_id: string
+          created_by_member_id: string | null
           name: string
           primary_color: string
           secondary_color: string
@@ -80,6 +85,13 @@ export type Database = {
           audience: string
           visual_style: string
           notes: string
+          typography: Json
+          content_pillars: Json
+          prohibited_terms: Json
+          brand_rules: Json
+          guide_summary: string
+          guide_text: string
+          guide_updated_at: string | null
           is_primary: boolean
           created_at: string
           updated_at: string
@@ -87,6 +99,8 @@ export type Database = {
         Insert: {
           id?: string
           access_key_id: string
+          tenant_id: string
+          created_by_member_id?: string | null
           name: string
           primary_color?: string
           secondary_color?: string
@@ -95,6 +109,13 @@ export type Database = {
           audience?: string
           visual_style?: string
           notes?: string
+          typography?: Json
+          content_pillars?: Json
+          prohibited_terms?: Json
+          brand_rules?: Json
+          guide_summary?: string
+          guide_text?: string
+          guide_updated_at?: string | null
           is_primary?: boolean
           created_at?: string
           updated_at?: string
@@ -102,6 +123,8 @@ export type Database = {
         Update: {
           id?: string
           access_key_id?: string
+          tenant_id?: string
+          created_by_member_id?: string | null
           name?: string
           primary_color?: string
           secondary_color?: string
@@ -110,6 +133,13 @@ export type Database = {
           audience?: string
           visual_style?: string
           notes?: string
+          typography?: Json
+          content_pillars?: Json
+          prohibited_terms?: Json
+          brand_rules?: Json
+          guide_summary?: string
+          guide_text?: string
+          guide_updated_at?: string | null
           is_primary?: boolean
           created_at?: string
           updated_at?: string
@@ -128,6 +158,9 @@ export type Database = {
         Row: {
           id: string
           access_key_id: string
+          tenant_id: string
+          owner_member_id: string
+          brand_profile_id: string | null
           title: string
           caption: string
           platform: string
@@ -142,6 +175,9 @@ export type Database = {
         Insert: {
           id?: string
           access_key_id: string
+          tenant_id: string
+          owner_member_id: string
+          brand_profile_id?: string | null
           title: string
           caption?: string
           platform?: string
@@ -156,6 +192,9 @@ export type Database = {
         Update: {
           id?: string
           access_key_id?: string
+          tenant_id?: string
+          owner_member_id?: string
+          brand_profile_id?: string | null
           title?: string
           caption?: string
           platform?: string
@@ -176,6 +215,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      tenants: {
+        Row: { id: string; name: string; slug: string; plan: string; credits_per_month: number; credits_used_month: number; credits_reset_month: string; unlimited_credits: boolean; active: boolean; created_at: string; updated_at: string }
+        Insert: { id?: string; name: string; slug: string; plan?: string; credits_per_month?: number; credits_used_month?: number; credits_reset_month?: string; unlimited_credits?: boolean; active?: boolean; created_at?: string; updated_at?: string }
+        Update: { id?: string; name?: string; slug?: string; plan?: string; credits_per_month?: number; credits_used_month?: number; credits_reset_month?: string; unlimited_credits?: boolean; active?: boolean; created_at?: string; updated_at?: string }
+        Relationships: []
+      }
+      tenant_members: {
+        Row: { id: string; tenant_id: string; access_key_id: string; display_name: string; role: string; active: boolean; created_at: string; updated_at: string }
+        Insert: { id?: string; tenant_id: string; access_key_id: string; display_name?: string; role?: string; active?: boolean; created_at?: string; updated_at?: string }
+        Update: { id?: string; tenant_id?: string; access_key_id?: string; display_name?: string; role?: string; active?: boolean; created_at?: string; updated_at?: string }
+        Relationships: []
+      }
+      brand_documents: {
+        Row: { id: string; tenant_id: string; brand_profile_id: string; uploaded_by_member_id: string | null; file_name: string; storage_path: string; mime_type: string; size_bytes: number; page_count: number; extracted_text: string; extracted_data: Json; created_at: string }
+        Insert: { id?: string; tenant_id: string; brand_profile_id: string; uploaded_by_member_id?: string | null; file_name: string; storage_path: string; mime_type?: string; size_bytes?: number; page_count?: number; extracted_text?: string; extracted_data?: Json; created_at?: string }
+        Update: { id?: string; tenant_id?: string; brand_profile_id?: string; uploaded_by_member_id?: string | null; file_name?: string; storage_path?: string; mime_type?: string; size_bytes?: number; page_count?: number; extracted_text?: string; extracted_data?: Json; created_at?: string }
+        Relationships: []
+      }
+      cloud_projects: {
+        Row: { id: string; tenant_id: string; owner_member_id: string; name: string; project_type: string; payload: Json; created_at: string; updated_at: string }
+        Insert: { id: string; tenant_id: string; owner_member_id: string; name: string; project_type: string; payload?: Json; created_at?: string; updated_at?: string }
+        Update: { id?: string; tenant_id?: string; owner_member_id?: string; name?: string; project_type?: string; payload?: Json; created_at?: string; updated_at?: string }
+        Relationships: []
+      }
+      cloud_library_items: {
+        Row: { id: string; tenant_id: string; owner_member_id: string; name: string; url: string; metadata: Json; created_at: string }
+        Insert: { id: string; tenant_id: string; owner_member_id: string; name: string; url: string; metadata?: Json; created_at?: string }
+        Update: { id?: string; tenant_id?: string; owner_member_id?: string; name?: string; url?: string; metadata?: Json; created_at?: string }
+        Relationships: []
       }
       cloudflare_ai_usage: {
         Row: {
@@ -220,18 +289,24 @@ export type Database = {
         Row: {
           id: string
           access_key_id: string
+          tenant_id: string | null
+          member_id: string | null
           job_id: string
           created_at: string
         }
         Insert: {
           id?: string
           access_key_id: string
+          tenant_id?: string | null
+          member_id?: string | null
           job_id: string
           created_at?: string
         }
         Update: {
           id?: string
           access_key_id?: string
+          tenant_id?: string | null
+          member_id?: string | null
           job_id?: string
           created_at?: string
         }
@@ -248,6 +323,9 @@ export type Database = {
       generations: {
         Row: {
           access_key_id: string | null
+          tenant_id: string | null
+          member_id: string | null
+          brand_profile_id: string | null
           client_job_id: string | null
           created_at: string
           hashtags: Json
@@ -266,6 +344,9 @@ export type Database = {
         }
         Insert: {
           access_key_id?: string | null
+          tenant_id?: string | null
+          member_id?: string | null
+          brand_profile_id?: string | null
           client_job_id?: string | null
           created_at?: string
           hashtags?: Json
@@ -284,6 +365,9 @@ export type Database = {
         }
         Update: {
           access_key_id?: string | null
+          tenant_id?: string | null
+          member_id?: string | null
+          brand_profile_id?: string | null
           client_job_id?: string | null
           created_at?: string
           hashtags?: Json
