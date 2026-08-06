@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
@@ -22,6 +22,7 @@ import { PlanGate } from "@/components/PlanGate";
 import { createScheduledPost, deleteScheduledPost, listScheduledPosts, updateScheduledPost } from "@/lib/planner.functions";
 import { listBrandProfiles } from "@/lib/brand.functions";
 import { getAccessKey } from "@/lib/session";
+import { listContentItems } from "@/lib/social.functions";
 import { loadProjects, subscribeProjects, type Project } from "@/lib/storage";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -31,6 +32,7 @@ export const Route = createFileRoute("/agenda")({
 });
 
 type ScheduledPost = Database["public"]["Tables"]["scheduled_posts"]["Row"];
+type EditorialPost = { id: string; title: string; caption: string; status: string; scheduled_for: string | null; platforms: string[]; content_type: string; project_id: string | null; brand_profile_id: string | null };
 
 type FormState = {
   title: string;
@@ -75,12 +77,15 @@ function AgendaRoute() {
 
 function AgendaPage() {
   const list = useServerFn(listScheduledPosts);
+  const listEditorial = useServerFn(listContentItems);
+  const navigate = useNavigate();
   const create = useServerFn(createScheduledPost);
   const update = useServerFn(updateScheduledPost);
   const remove = useServerFn(deleteScheduledPost);
   const listBrands = useServerFn(listBrandProfiles);
   const [month, setMonth] = useState(startOfMonth(new Date()));
   const [posts, setPosts] = useState<ScheduledPost[]>([]);
+  const [editorialPosts, setEditorialPosts] = useState<EditorialPost[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [brands, setBrands] = useState<Array<{ id: string; name: string; is_primary?: boolean }>>([]);
   const [loading, setLoading] = useState(true);
@@ -100,8 +105,14 @@ function AgendaPage() {
     if (!accessKey) return;
     setLoading(true);
     try {
-      const rows = await list({ data: { accessKey, from: range.start.toISOString(), to: new Date(range.end.getTime() + 86_400_000).toISOString() } });
+      const [rows, editorialRows] = await Promise.all([
+        list({ data: { accessKey, from: range.start.toISOString(), to: new Date(range.end.getTime() + 86_400_000).toISOString() } }),
+        listEditorial({ data: { accessKey, limit: 300 } }),
+      ]);
       setPosts(rows as ScheduledPost[]);
+      const fromTime = range.start.getTime();
+      const toTime = range.end.getTime() + 86_400_000;
+      setEditorialPosts((editorialRows as EditorialPost[]).filter((item) => item.scheduled_for && new Date(item.scheduled_for).getTime() >= fromTime && new Date(item.scheduled_for).getTime() < toTime));
     } catch (error) {
       toast.error((error as Error).message);
     } finally {
@@ -191,7 +202,10 @@ function AgendaPage() {
     }
   }
 
-  const upcoming = posts.filter((post) => parseISO(post.scheduled_for).getTime() >= Date.now()).slice(0, 5);
+  const upcoming = [
+    ...posts.map((post) => ({ ...post, source: "personal" as const, platformLabel: post.platform })),
+    ...editorialPosts.filter((post): post is EditorialPost & { scheduled_for: string } => Boolean(post.scheduled_for)).map((post) => ({ ...post, source: "editorial" as const, platformLabel: post.platforms?.join(", ") || "redes" })),
+  ].filter((post) => parseISO(post.scheduled_for).getTime() >= Date.now()).sort((a, b) => parseISO(a.scheduled_for).getTime() - parseISO(b.scheduled_for).getTime()).slice(0, 5);
 
   return (
     <div className="page-wrap space-y-6">
@@ -201,7 +215,7 @@ function AgendaPage() {
           <div>
             <div className="eyebrow mb-3 flex items-center gap-2"><CalendarDays className="h-3.5 w-3.5 text-primary" /> Planejamento inteligente</div>
             <h1 className="section-title max-w-3xl text-4xl leading-[.98] sm:text-6xl">Seu conteúdo no ritmo certo.</h1>
-            <p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground">Organize o que será publicado, em qual data e horário. Esta agenda pertence somente à sua chave de acesso.</p>
+            <p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground">Visualize o planejamento pessoal e também os conteúdos aprovados ou agendados no fluxo editorial da sua empresa.</p>
           </div>
           <button onClick={() => openCreate()} className="primary-button shrink-0"><Plus className="h-4 w-4" /> Agendar conteúdo</button>
         </div>
@@ -228,13 +242,16 @@ function AgendaPage() {
               {loading ? <div className="grid min-h-[540px] place-items-center"><Loader2 className="h-7 w-7 animate-spin text-primary" /></div> : (
                 <div className="calendar-grid grid grid-cols-7">
                   {days.map((day) => {
-                const dayPosts = posts.filter((post) => isSameDay(parseISO(post.scheduled_for), day));
+                const dayPosts = [
+                  ...posts.filter((post) => isSameDay(parseISO(post.scheduled_for), day)).map((post) => ({ ...post, source: "personal" as const, platformLabel: post.platform })),
+                  ...editorialPosts.filter((post): post is EditorialPost & { scheduled_for: string } => Boolean(post.scheduled_for) && isSameDay(parseISO(post.scheduled_for), day)).map((post) => ({ ...post, source: "editorial" as const, platformLabel: post.platforms?.join(", ") || "redes" })),
+                ].sort((a, b) => parseISO(a.scheduled_for).getTime() - parseISO(b.scheduled_for).getTime());
                 return (
                   <button key={day.toISOString()} onClick={() => openCreate(day)} className={`calendar-day min-h-28 border-b border-r border-border/70 p-2 text-left transition hover:bg-primary/[.055] sm:min-h-32 ${!isSameMonth(day, month) ? "opacity-35" : ""}`}>
                     <span className={`grid h-7 w-7 place-items-center rounded-full text-xs ${isSameDay(day, new Date()) ? "bg-primary text-white" : "text-muted-foreground"}`}>{format(day, "d")}</span>
                     <div className="mt-2 space-y-1.5">
                       {dayPosts.slice(0, 3).map((post) => (
-                        <span key={post.id} onClick={(event) => { event.stopPropagation(); openEdit(post); }} className={`block truncate rounded-md border px-2 py-1 text-[10px] font-medium ${statusClass(post.status)}`} title={post.title}>{format(parseISO(post.scheduled_for), "HH:mm")} · {post.title}</span>
+                        <span key={`${post.source}-${post.id}`} onClick={(event) => { event.stopPropagation(); if (post.source === "editorial") navigate({ to: "/publicacoes" }); else openEdit(post); }} className={`block truncate rounded-md border px-2 py-1 text-[10px] font-medium ${statusClass(post.status)}`} title={post.title}>{format(parseISO(post.scheduled_for), "HH:mm")} · {post.source === "editorial" ? "● " : ""}{post.title}</span>
                       ))}
                       {dayPosts.length > 3 && <span className="block text-[10px] text-muted-foreground">+{dayPosts.length - 3} conteúdos</span>}
                     </div>
@@ -260,9 +277,9 @@ function AgendaPage() {
             <p className="mt-1 text-[11px] text-muted-foreground">O que você separou para publicar.</p>
             <div className="mt-4 space-y-3">
               {upcoming.length === 0 ? <p className="rounded-xl border border-dashed border-border p-4 text-xs text-muted-foreground">Nenhuma postagem futura neste período.</p> : upcoming.map((post) => (
-                <button key={post.id} onClick={() => openEdit(post)} className="flex w-full items-start gap-3 rounded-xl border border-border p-3 text-left hover:border-primary/35 hover:bg-primary/[.035]">
+                <button key={`${post.source}-${post.id}`} onClick={() => post.source === "editorial" ? navigate({ to: "/publicacoes" }) : openEdit(post)} className="flex w-full items-start gap-3 rounded-xl border border-border p-3 text-left hover:border-primary/35 hover:bg-primary/[.035]">
                   <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-secondary text-primary"><CalendarDays className="h-4 w-4" /></div>
-                  <div className="min-w-0"><div className="truncate text-xs font-semibold">{post.title}</div><div className="mt-1 text-[10px] text-muted-foreground">{format(parseISO(post.scheduled_for), "dd/MM · HH:mm")} · {post.platform}</div>{post.project_id && <div className="mt-1 truncate text-[10px] text-primary/80">{projectName(post.project_id)}</div>}</div>
+                  <div className="min-w-0"><div className="truncate text-xs font-semibold">{post.title}</div><div className="mt-1 text-[10px] text-muted-foreground">{format(parseISO(post.scheduled_for), "dd/MM · HH:mm")} · {post.platformLabel}</div><div className="mt-1 truncate text-[10px] text-primary/80">{post.source === "editorial" ? "Fluxo editorial" : post.project_id ? projectName(post.project_id) : "Planejamento pessoal"}</div></div>
                 </button>
               ))}
             </div>

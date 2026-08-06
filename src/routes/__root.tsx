@@ -86,10 +86,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Zunexi.ai— Estúdio criativo de conteúdo para Instagram" },
-      { name: "description", content: "Crie carrosséis e cartazes para Instagram com IA, texto aplicado e layouts sempre diferentes." },
+      { title: "Zunexi.ai — Criação e gestão de redes sociais com IA" },
+      { name: "description", content: "Crie, organize, aprove, agende, publique e analise conteúdo para redes sociais com inteligência artificial." },
       { property: "og:title", content: "Zunexi.ai" },
-      { property: "og:description", content: "IA para criar artes prontas para Instagram." },
+      { property: "og:description", content: "Criação e gestão de conteúdo para redes sociais com IA." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],

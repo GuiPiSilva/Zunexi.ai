@@ -4,16 +4,20 @@ import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { format, parseISO, startOfMonth, endOfMonth, addMonths } from "date-fns";
 import {
   ArrowRight,
+  BarChart3,
   CalendarDays,
   Clock3,
   FileText,
   FolderOpen,
   ImagePlus,
+  Inbox,
   Images,
   Library,
   LockKeyhole,
   MoreHorizontal,
   Palette,
+  Send,
+  Share2,
   Plus,
   Sparkles,
   WandSparkles,
@@ -22,6 +26,7 @@ import {
 import { AppShell } from "@/components/AppShell";
 import { getAccessCreditStatus, type CreditStatus } from "@/lib/access.functions";
 import { listScheduledPosts } from "@/lib/planner.functions";
+import { getSocialDashboardSummary } from "@/lib/social.functions";
 import { getAccessKey, getAccessUserName } from "@/lib/session";
 import { loadLibrary, loadProjects, subscribeLibrary, subscribeProjects, type Project } from "@/lib/storage";
 import type { Database } from "@/integrations/supabase/types";
@@ -41,11 +46,13 @@ type ScheduledPost = Database["public"]["Tables"]["scheduled_posts"]["Row"];
 function Dashboard() {
   const getStatus = useServerFn(getAccessCreditStatus);
   const getSchedule = useServerFn(listScheduledPosts);
+  const getSocialSummary = useServerFn(getSocialDashboardSummary);
   const [projects, setProjects] = useState<Project[]>([]);
   const [imageCount, setImageCount] = useState(0);
   const [status, setStatus] = useState<CreditStatus | null>(null);
   const [upcoming, setUpcoming] = useState<ScheduledPost[]>([]);
   const [userName, setUserName] = useState("Usuário Zunexi.ai");
+  const [social, setSocial] = useState<{ connectedAccounts: number; scheduledNext7Days: number; pendingReview: number; openInbox: number } | null>(null);
 
   useEffect(() => {
     const refreshProjects = () => setProjects(loadProjects());
@@ -63,11 +70,16 @@ function Dashboard() {
     if (!key) return;
     getStatus({ data: { key } }).then(async (nextStatus) => {
       setStatus(nextStatus);
-      if (!nextStatus.features.includes("agenda")) return;
-      const now = new Date();
-      const end = addMonths(endOfMonth(now), 2);
-      const rows = await getSchedule({ data: { accessKey: key, from: startOfMonth(now).toISOString(), to: end.toISOString() } });
-      setUpcoming((rows as ScheduledPost[]).filter((item) => parseISO(item.scheduled_for).getTime() >= Date.now()).slice(0, 4));
+      const tasks: Promise<unknown>[] = [];
+      if (nextStatus.features.includes("agenda")) {
+        const now = new Date();
+        const end = addMonths(endOfMonth(now), 2);
+        tasks.push(getSchedule({ data: { accessKey: key, from: startOfMonth(now).toISOString(), to: end.toISOString() } }).then((rows) => setUpcoming((rows as ScheduledPost[]).filter((item) => parseISO(item.scheduled_for).getTime() >= Date.now()).slice(0, 4))));
+      }
+      if (nextStatus.features.includes("gestao_redes")) {
+        tasks.push(getSocialSummary({ data: { accessKey: key } }).then((summary) => setSocial(summary)));
+      }
+      await Promise.allSettled(tasks);
     }).catch(() => undefined);
   }, []);
 
@@ -98,16 +110,27 @@ function Dashboard() {
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Metric icon={FolderOpen} value={projects.length} label="Projetos" note="salvos neste dispositivo" />
-          <Metric icon={Images} value={imageCount} label="Imagens" note="na sua biblioteca" />
-          <Metric icon={FileText} value={slides} label="Conteúdos" note="páginas e slides criados" />
-          <Metric icon={Clock3} value={`${Math.max(1, Math.round(slides * 0.18))}h`} label="Tempo economizado" note="estimativa de produção" />
+          {status?.features.includes("gestao_redes") ? <>
+            <Metric icon={Share2} value={social?.connectedAccounts ?? 0} label="Contas conectadas" note="redes prontas para sincronizar" />
+            <Metric icon={Send} value={social?.scheduledNext7Days ?? 0} label="Próximas publicações" note="nos próximos sete dias" />
+            <Metric icon={FileText} value={social?.pendingReview ?? 0} label="Aguardando revisão" note="conteúdos no fluxo editorial" />
+            <Metric icon={Inbox} value={social?.openInbox ?? 0} label="Atendimentos abertos" note="mensagens e comentários" />
+          </> : <>
+            <Metric icon={FolderOpen} value={projects.length} label="Projetos" note="salvos neste dispositivo" />
+            <Metric icon={Images} value={imageCount} label="Imagens" note="na sua biblioteca" />
+            <Metric icon={FileText} value={slides} label="Conteúdos" note="páginas e slides criados" />
+            <Metric icon={Clock3} value={`${Math.max(1, Math.round(slides * 0.18))}h`} label="Tempo economizado" note="estimativa de produção" />
+          </>}
         </section>
 
         <section className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_390px]">
           <div>
             <div className="mb-4"><h2 className="section-title text-xl">Ações rápidas</h2><p className="mt-1 text-sm text-muted-foreground">Escolha o próximo movimento.</p></div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {status?.features.includes("publicacoes") && <ActionCard to="/publicacoes" icon={Send} title="Publicações" description="Revise, aprove, agende e publique em um fluxo editorial completo." />}
+              {status?.features.includes("gestao_redes") && <ActionCard to="/redes" icon={Share2} title="Redes conectadas" description="Gerencie contas, tokens, marcas e o estado de cada conexão." />}
+              {status?.features.includes("caixa_entrada") && <ActionCard to="/caixa-entrada" icon={Inbox} title="Caixa de entrada" description="Responda mensagens e comentários em uma tela centralizada." />}
+              {status?.features.includes("analytics") && <ActionCard to="/analytics" icon={BarChart3} title="Analytics" description="Sincronize métricas e gere recomendações estratégicas com IA." />}
               <ActionCard to="/carrossel" icon={Images} title="Carrossel" description="Crie sequências com narrativa, texto e imagens gerados por IA." />
               <ActionCard to="/cartaz" icon={ImagePlus} title="Cartaz" description="Monte artes de eventos e campanhas com composição profissional." />
               <ActionCard to="/biblioteca" icon={Library} title="Biblioteca" description="Organize imagens, uploads e referências da sua produção." />
@@ -134,6 +157,6 @@ function Dashboard() {
 
 function Metric({ icon: Icon, value, label, note }: { icon: ComponentType<{ className?: string }>; value: string | number; label: string; note: string }) { return <div className="panel metric-card p-5"><div className="flex items-start gap-4"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-primary/30 to-accent/15 text-primary"><Icon className="h-5 w-5" /></div><div><div className="text-2xl font-bold tracking-tight">{value}</div><div className="text-sm font-medium">{label}</div><div className="mt-1 text-[11px] text-muted-foreground">{note}</div></div></div></div>; }
 
-function ActionCard({ to, icon: Icon, title, description, locked }: { to: "/carrossel" | "/cartaz" | "/biblioteca" | "/agenda" | "/brand-kit" | "/criador-prompts"; icon: ComponentType<{ className?: string }>; title: string; description: string; locked?: boolean }) { return <Link to={to} className="panel action-card group relative overflow-hidden p-5 hover:-translate-y-0.5 hover:border-primary/45"><div className="absolute -right-12 -top-12 h-32 w-32 rounded-full bg-primary/15 blur-2xl opacity-0 transition group-hover:opacity-100" /><div className="relative flex items-start gap-4"><div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-primary/30 to-accent/20 text-primary"><Icon className="h-5 w-5" /></div><div className="min-w-0"><div className="flex items-center gap-2"><h3 className="font-semibold">{title}</h3>{locked && <LockKeyhole className="h-3.5 w-3.5 text-muted-foreground" />}</div><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p><span className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-primary">{locked ? "Ver planos" : "Começar"} <ArrowRight className="h-3.5 w-3.5" /></span></div></div></Link>; }
+function ActionCard({ to, icon: Icon, title, description, locked }: { to: "/publicacoes" | "/redes" | "/caixa-entrada" | "/analytics" | "/carrossel" | "/cartaz" | "/biblioteca" | "/agenda" | "/brand-kit" | "/criador-prompts"; icon: ComponentType<{ className?: string }>; title: string; description: string; locked?: boolean }) { return <Link to={to} className="panel action-card group relative overflow-hidden p-5 hover:-translate-y-0.5 hover:border-primary/45"><div className="absolute -right-12 -top-12 h-32 w-32 rounded-full bg-primary/15 blur-2xl opacity-0 transition group-hover:opacity-100" /><div className="relative flex items-start gap-4"><div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-primary/30 to-accent/20 text-primary"><Icon className="h-5 w-5" /></div><div className="min-w-0"><div className="flex items-center gap-2"><h3 className="font-semibold">{title}</h3>{locked && <LockKeyhole className="h-3.5 w-3.5 text-muted-foreground" />}</div><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p><span className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-primary">{locked ? "Ver planos" : "Começar"} <ArrowRight className="h-3.5 w-3.5" /></span></div></div></Link>; }
 
 function formatRelative(timestamp: number) { const diffHours = Math.floor((Date.now() - timestamp) / 3_600_000); if (diffHours < 1) return "agora"; if (diffHours < 24) return `há ${diffHours}h`; return `há ${Math.floor(diffHours / 24)}d`; }
