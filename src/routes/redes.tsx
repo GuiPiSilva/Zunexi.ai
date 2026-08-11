@@ -12,6 +12,7 @@ import {
   Facebook,
   Instagram,
   KeyRound,
+  LogIn,
   Linkedin,
   Loader2,
   Music2,
@@ -28,7 +29,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { PlanGate } from "@/components/PlanGate";
 import { listBrandProfiles } from "@/lib/brand.functions";
-import { deleteSocialAccount, listSocialAccounts, saveSocialAccount, testSocialAccount } from "@/lib/social.functions";
+import { createMetaOAuthUrl, deleteSocialAccount, listSocialAccounts, saveSocialAccount, testSocialAccount } from "@/lib/social.functions";
 import { getAccessKey } from "@/lib/session";
 
 export const Route = createFileRoute("/redes")({
@@ -103,6 +104,7 @@ function RedesRoute() {
 function RedesPage() {
   const accessKey = getAccessKey() || "";
   const getAccounts = useServerFn(listSocialAccounts);
+  const startMetaOAuth = useServerFn(createMetaOAuthUrl);
   const saveAccount = useServerFn(saveSocialAccount);
   const testAccount = useServerFn(testSocialAccount);
   const removeAccount = useServerFn(deleteSocialAccount);
@@ -112,6 +114,7 @@ function RedesPage() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [oauthBusy, setOauthBusy] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [showToken, setShowToken] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY);
@@ -133,6 +136,20 @@ function RedesPage() {
   }
 
   useEffect(() => { void refresh(); }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const oauth = params.get("oauth");
+    if (!oauth) return;
+    if (oauth === "success") {
+      const connected = Number(params.get("connected") || 0);
+      toast.success(connected > 1 ? `${connected} contas Meta conectadas automaticamente.` : "Conta Meta conectada automaticamente.");
+      void refresh();
+    } else {
+      toast.error(params.get("message") || "Não foi possível concluir o login com a Meta.");
+    }
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
 
   const counts = useMemo(() => ({
     connected: accounts.filter((item) => item.status === "connected").length,
@@ -163,6 +180,19 @@ function RedesPage() {
     });
     setShowToken(false);
     setModalOpen(true);
+  }
+
+  async function connectMeta() {
+    if (oauthBusy) return;
+    setOauthBusy(true);
+    try {
+      const brandId = brands.find((brand) => brand.is_primary)?.id || brands[0]?.id || null;
+      const result = await startMetaOAuth({ data: { accessKey, brandId } });
+      window.location.assign(result.url);
+    } catch (error) {
+      toast.error((error as Error).message || "Não foi possível iniciar o login com a Meta.");
+      setOauthBusy(false);
+    }
   }
 
   async function submit(event: FormEvent) {
@@ -231,7 +261,7 @@ function RedesPage() {
             <h1 className="section-title text-3xl sm:text-5xl">Redes conectadas</h1>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-muted-foreground">Conecte cada perfil à marca correta. Os tokens ficam criptografados no servidor e nunca são enviados de volta ao navegador.</p>
           </div>
-          <button onClick={() => openCreate()} className="primary-button justify-center"><Plus className="h-4 w-4" /> Conectar rede</button>
+          <div className="flex flex-col gap-2 sm:flex-row"><button onClick={() => void connectMeta()} disabled={oauthBusy} className="primary-button justify-center disabled:opacity-60">{oauthBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />} Conectar Instagram / Facebook</button><button onClick={() => openCreate()} className="secondary-button justify-center"><Plus className="h-4 w-4" /> Conexão manual</button></div>
         </div>
       </section>
 
@@ -250,7 +280,7 @@ function RedesPage() {
           <div className="grid min-h-56 place-items-center"><Loader2 className="h-7 w-7 animate-spin text-primary" /></div>
         ) : accounts.length === 0 ? (
           <div className="grid min-h-64 place-items-center rounded-2xl border border-dashed border-border p-8 text-center">
-            <div><Network className="mx-auto h-9 w-9 text-primary" /><h3 className="mt-4 font-semibold">Nenhuma rede conectada</h3><p className="mt-2 max-w-md text-sm text-muted-foreground">Comece pelo Instagram profissional ou pela Página do Facebook que será usada para publicar.</p><button onClick={() => openCreate()} className="primary-button mx-auto mt-5"><Plus className="h-4 w-4" /> Conectar primeira conta</button></div>
+            <div><Network className="mx-auto h-9 w-9 text-primary" /><h3 className="mt-4 font-semibold">Nenhuma rede conectada</h3><p className="mt-2 max-w-md text-sm text-muted-foreground">Comece pelo Instagram profissional ou pela Página do Facebook que será usada para publicar.</p><button onClick={() => void connectMeta()} disabled={oauthBusy} className="primary-button mx-auto mt-5 disabled:opacity-60">{oauthBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />} Entrar com Instagram / Facebook</button></div>
           </div>
         ) : (
           <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
@@ -279,11 +309,12 @@ function RedesPage() {
 
       <section className="panel p-5 sm:p-6">
         <h2 className="section-title text-xl">Adicionar outro canal</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Cadastre os canais que farão parte do calendário e do fluxo de aprovação.</p>
+        <p className="mt-1 text-xs text-muted-foreground">Instagram e Facebook podem ser conectados por login automático. Os demais canais continuam com cadastro manual até configurarmos o aplicativo OAuth de cada plataforma.</p>
         <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {(Object.entries(PLATFORM_META) as [Platform, (typeof PLATFORM_META)[Platform]][]).map(([platform, meta]) => {
             const Icon = meta.icon;
-            return <button key={platform} onClick={() => openCreate(platform)} className="rounded-2xl border border-border p-4 text-left transition hover:border-primary/40 hover:bg-primary/5"><Icon className="h-5 w-5 text-primary" /><div className="mt-3 text-sm font-semibold">{meta.label}</div><p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{meta.description}</p></button>;
+            const isMeta = platform === "instagram" || platform === "facebook";
+            return <button key={platform} onClick={() => isMeta ? void connectMeta() : openCreate(platform)} disabled={isMeta && oauthBusy} className="rounded-2xl border border-border p-4 text-left transition hover:border-primary/40 hover:bg-primary/5 disabled:opacity-60"><Icon className="h-5 w-5 text-primary" /><div className="mt-3 flex items-center gap-2 text-sm font-semibold">{meta.label}{isMeta && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] uppercase tracking-wider text-primary">Login automático</span>}</div><p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{meta.description}</p></button>;
           })}
         </div>
       </section>
@@ -304,7 +335,7 @@ function RedesPage() {
               <Field label="Expiração do token"><input type="datetime-local" className="app-input" value={form.tokenExpiresAt} onChange={(event) => setForm({ ...form, tokenExpiresAt: event.target.value })} /></Field>
               <Field label="Status"><select className="app-input" value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as FormState["status"] })}><option value="connected">Conectada</option><option value="attention">Precisa de atenção</option><option value="disconnected">Desconectada</option></select></Field>
             </div>
-            <div className="mt-5 rounded-xl border border-primary/20 bg-primary/7 p-4 text-xs leading-relaxed text-muted-foreground"><ShieldCheck className="mr-2 inline h-4 w-4 text-primary" />O token será criptografado antes de ser gravado no Supabase. Para Instagram e Facebook, use o token da Página com as permissões aprovadas no aplicativo da Meta.</div>
+            <div className="mt-5 rounded-xl border border-primary/20 bg-primary/7 p-4 text-xs leading-relaxed text-muted-foreground"><ShieldCheck className="mr-2 inline h-4 w-4 text-primary" />O token será criptografado antes de ser gravado no Supabase. Para Instagram e Facebook, prefira o botão de login automático; esta tela fica disponível como alternativa manual e para manutenção.</div>
             <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setModalOpen(false)} className="secondary-button">Cancelar</button><button disabled={saving} className="primary-button disabled:opacity-60">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4" />} {form.id ? "Salvar configuração" : "Conectar conta"}</button></div>
           </form>
         </div>
