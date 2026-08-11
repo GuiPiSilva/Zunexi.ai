@@ -977,15 +977,34 @@ export const generateBrandContentIdeas = createServerFn({ method: "POST" })
     const context = await requirePlanFeature(sb, data.accessKey, "criador_prompts");
     const brand = await resolveBrandContext(sb, context, data.brandId);
     if (!brand) throw new Error("Cadastre ou selecione um Brand Kit para gerar ideias personalizadas.");
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile",
-        temperature: 0.7,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: `Você é estrategista editorial e diretor criativo sênior da Zunexi.ai. Retorne somente JSON válido no formato {"ideas":[{"title":"...","angle":"...","format":"carrossel|cartaz|post|story|reel","objective":"...","prompt":"..."}]}.
+    const fallbackIdeas = () => {
+      const pillars = brand.contentPillars.length ? brand.contentPillars : ["autoridade", "produto ou serviço", "educação", "objeções", "relacionamento"];
+      const audience = brand.audience || "público da marca";
+      const voice = brand.toneOfVoice || "claro, profissional e humano";
+      const templates = [
+        ["O que seu público ainda não percebeu", "carrossel", "educativo"],
+        ["O erro que atrasa a decisão de compra", "post", "objeção"],
+        ["Antes de escolher, compare isto", "carrossel", "comparação"],
+        ["Como a marca resolve isso na prática", "reel", "demonstração"],
+        ["Por trás de uma escolha melhor", "story", "bastidor"],
+        ["O benefício que muda a experiência", "post", "comercial"],
+        ["Uma dúvida comum, respondida sem enrolação", "carrossel", "autoridade"],
+        ["Do problema ao próximo passo", "reel", "relacionamento"],
+      ];
+      return templates.slice(0, data.quantity).map(([title, format, angleType], index) => {
+        const pillar = pillars[index % pillars.length];
+        const angle = `Use o pilar “${pillar}” para falar com ${audience}. Trabalhe um ângulo de ${angleType}, mantendo o tom ${voice} e sem inventar dados da marca.`;
+        const prompt = `Crie um conteúdo de formato ${format} para ${brand.name}, alinhado ao pilar “${pillar}” e ao objetivo “${data.objective}”. Gancho: ${title}. Público: ${audience}. Tom: ${voice}. Estruture a copy com uma ideia central clara, desenvolvimento curto e CTA coerente. Direção visual: ${brand.visualStyle || "visual profissional alinhado ao Brand Kit"}; use as cores ${brand.primaryColor}, ${brand.secondaryColor} e ${brand.accentColor}. Não gere texto dentro da imagem e não invente preços, números, depoimentos ou funcionalidades.`;
+        return { title, angle, format, objective: data.objective, prompt: prompt.slice(0, 1200) };
+      });
+    };
+
+    const requestBody = {
+      model: process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile",
+      temperature: 0.62,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: `Você é estrategista editorial e diretor criativo sênior da Zunexi.ai. Retorne somente JSON válido no formato {"ideas":[{"title":"...","angle":"...","format":"carrossel|cartaz|post|story|reel","objective":"...","prompt":"..."}]}.
 
 REGRAS DE QUALIDADE:
 - Cada ideia deve nascer de um insight, dor, objeção, desejo, comparação, bastidor, demonstração, prova permitida ou oportunidade específica do público descrito no Brand Kit.
@@ -998,23 +1017,46 @@ REGRAS DE QUALIDADE:
 - Respeite integralmente o Brand Kit e o objetivo atual.
 - Não invente preços, resultados, depoimentos, estatísticas, clientes, funcionalidades, garantias ou fatos da empresa.
 - Pessoas e interfaces só devem ser sugeridas quando o briefing/Brand Kit exigir explicitamente.` },
-          { role: "user", content: `${brandContextAsPrompt(brand)}
+        { role: "user", content: `${brandContextAsPrompt(brand)}
 
 Objetivo atual: ${data.objective}
 Quantidade: ${data.quantity}` },
-        ],
-      }),
-    });
-    if (!response.ok) throw new Error(`Não foi possível gerar ideias (${response.status}).`);
-    const json = await response.json() as any;
-    const raw = String(json.choices?.[0]?.message?.content || "{}").replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
-    const parsed = JSON.parse(raw) as { ideas?: Array<Record<string, unknown>> };
-    const ideas = (parsed.ideas || []).slice(0, data.quantity).map((idea) => ({
-      title: String(idea.title || "Ideia de conteúdo"),
-      angle: String(idea.angle || ""),
-      format: String(idea.format || "carrossel"),
-      objective: String(idea.objective || data.objective),
-      prompt: String(idea.prompt || idea.title || "").slice(0, 1200),
-    }));
-    return { ideas };
+      ],
+    };
+
+    let response: Response | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify(requestBody),
+      });
+      if (response.ok) break;
+      if (response.status !== 429 && response.status < 500) break;
+      const retryAfter = Number(response.headers.get("retry-after") || "0");
+      const delayMs = retryAfter > 0 ? retryAfter * 1000 : Math.min(1100 * (2 ** attempt) + Math.floor(Math.random() * 500), 6000);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+
+    if (!response?.ok) {
+      console.warn(`[brand-ideas] Groq indisponível (${response?.status || "sem resposta"}); usando fallback local baseado no Brand Kit.`);
+      return { ideas: fallbackIdeas() };
+    }
+
+    try {
+      const json = await response.json() as any;
+      const raw = String(json.choices?.[0]?.message?.content || "{}").replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+      const parsed = JSON.parse(raw) as { ideas?: Array<Record<string, unknown>> };
+      const ideas = (parsed.ideas || []).slice(0, data.quantity).map((idea) => ({
+        title: String(idea.title || "Ideia de conteúdo"),
+        angle: String(idea.angle || ""),
+        format: String(idea.format || "carrossel"),
+        objective: String(idea.objective || data.objective),
+        prompt: String(idea.prompt || idea.title || "").slice(0, 1200),
+      })).filter((idea) => idea.title.trim().length > 0);
+      return { ideas: ideas.length ? ideas : fallbackIdeas() };
+    } catch (error) {
+      console.warn("[brand-ideas] Resposta inválida da Groq; usando fallback local.", error);
+      return { ideas: fallbackIdeas() };
+    }
   });
