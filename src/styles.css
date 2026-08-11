@@ -284,3 +284,68 @@
   .primary-button, .secondary-button { width: 100%; }
   .app-topbar .primary-button, .app-topbar .secondary-button { width: auto; }
 }
+
+/* Responsividade estrutural — mantém navegação e ações acessíveis em telas baixas e notebooks. */
+@layer components {
+  .app-sidebar-nav {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+  }
+  .app-sidebar-nav::-webkit-scrollbar { width: 5px; }
+  .app-sidebar-nav::-webkit-scrollbar-thumb { background: color-mix(in oklab, var(--scrollbar-thumb) 72%, transparent); }
+  .app-sidebar-link { min-height: 38px; }
+  .app-topbar > * { min-width: 0; }
+  .page-wrap > * { min-width: 0; }
+}
+
+/* Notebooks estreitos: preserva área útil do conteúdo sem esconder controles do topo. */
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .page-wrap { padding-inline: 1.35rem; }
+  .app-topbar { padding-inline: 1.15rem; }
+  .dashboard-cinematic { padding: 2rem; }
+  .dashboard-cinematic h1 { font-size: clamp(4rem, 6.3vw, 5.35rem); }
+}
+
+/* Notebooks com pouca altura: compacta a barra lateral e deixa a lista rolar sozinha. */
+@media (min-width: 1024px) and (max-height: 760px) {
+  .app-sidebar-brand { height: 60px; }
+  .app-sidebar-brand .brand-logo-full { height: 44px; }
+  .app-sidebar-nav { padding-top: .55rem; padding-bottom: .45rem; }
+  .app-sidebar-label { margin-bottom: .3rem; font-size: 9px; }
+  .app-sidebar-nav nav { display: flex; flex-direction: column; gap: .08rem; }
+  .app-sidebar-link { min-height: 30px; gap: .6rem; border-radius: .65rem; padding: .34rem .65rem; font-size: .78rem; }
+  .app-sidebar-link svg { width: 16px; height: 16px; }
+  .app-sidebar-footer { padding: .55rem .7rem .65rem; }
+  .app-sidebar-credits { margin-bottom: .45rem; padding: .42rem .6rem; }
+  .app-sidebar-profile { gap: .55rem; padding: .5rem .6rem; }
+  .app-sidebar-profile .brand-logo-tile { width: 2rem; height: 2rem; border-radius: .55rem; padding: .3rem; }
+  .app-sidebar-profile button { padding: .35rem; }
+  .app-topbar { height: 64px; }
+  .app-main > main { min-height: calc(100dvh - 64px); }
+  .page-wrap { padding-top: 1.15rem; padding-bottom: 1.5rem; }
+}
+
+/* Em alturas realmente curtas, o cartão de créditos deixa de ocupar espaço fixo;
+   os créditos continuam visíveis no perfil do topo e no dashboard. */
+@media (min-width: 1024px) and (max-height: 700px) {
+  .app-sidebar-credits { display: none; }
+  .app-sidebar-footer { padding: .45rem .7rem .55rem; }
+  .app-sidebar-nav { padding-top: .4rem; padding-bottom: .3rem; }
+  .app-sidebar-link { min-height: 28px; padding-top: .24rem; padding-bottom: .24rem; font-size: .75rem; }
+  .app-sidebar-nav nav { gap: 0; }
+}
+
+/* Tablet/mobile: nenhum painel deve forçar largura maior que a janela. */
+@media (max-width: 1023px) {
+  .app-sidebar { height: 100dvh; max-width: min(86vw, 300px); }
+  .app-sidebar-nav { -webkit-overflow-scrolling: touch; }
+  .page-wrap { max-width: 100%; }
+  .dashboard-cinematic h1 { font-size: clamp(3.35rem, 12vw, 5.5rem); }
+}
+
+@media (max-width: 767px) {
+  .app-topbar { gap: .55rem; }
+  .app-topbar > div:first-of-type { max-width: min(44vw, 190px); }
+  .dashboard-plan-card { border-radius: 1rem; }
+  .dashboard-plan-card .text-4xl { font-size: 1.9rem; }
+}
