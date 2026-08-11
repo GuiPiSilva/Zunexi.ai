@@ -5,8 +5,9 @@ import { BookOpenText, Check, FileText, Loader2, Palette, Plus, Save, Sparkles, 
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { PlanGate } from "@/components/PlanGate";
-import { deleteBrandProfile, listBrandDocuments, listBrandProfiles, saveBrandProfile, uploadBrandGuidePdf } from "@/lib/brand.functions";
+import { deleteBrandProfile, listBrandDocuments, listBrandProfiles, prepareBrandGuidePdfUpload, processUploadedBrandGuidePdf, saveBrandProfile } from "@/lib/brand.functions";
 import { getAccessKey } from "@/lib/session";
+import { supabase } from "@/integrations/supabase/client";
 import type { PlanId } from "@/lib/plans";
 
 export const Route = createFileRoute("/brand-kit")({
@@ -57,7 +58,8 @@ function BrandKitPage() {
   const list = useServerFn(listBrandProfiles);
   const save = useServerFn(saveBrandProfile);
   const remove = useServerFn(deleteBrandProfile);
-  const uploadPdf = useServerFn(uploadBrandGuidePdf);
+  const preparePdfUpload = useServerFn(prepareBrandGuidePdfUpload);
+  const processPdfUpload = useServerFn(processUploadedBrandGuidePdf);
   const getDocuments = useServerFn(listBrandDocuments);
   const accessKey = getAccessKey() || "";
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -127,13 +129,27 @@ function BrandKitPage() {
     if (file.size > 15 * 1024 * 1024) return toast.error("O PDF deve ter no máximo 15 MB.");
     setImporting(true);
     try {
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ""));
-        reader.onerror = () => reject(new Error("Não foi possível ler o PDF."));
-        reader.readAsDataURL(file);
-      });
-      const result = await uploadPdf({ data: { accessKey, brandId: selected, fileName: file.name, mimeType: "application/pdf", base64 } });
+      const prepared = await preparePdfUpload({ data: {
+        accessKey,
+        brandId: selected,
+        fileName: file.name,
+        mimeType: "application/pdf",
+        fileSize: file.size,
+      } });
+
+      const { error: uploadError } = await supabase.storage
+        .from("brand-documents")
+        .uploadToSignedUrl(prepared.storagePath, prepared.token, file, { contentType: "application/pdf" });
+      if (uploadError) throw new Error(`Falha ao enviar o PDF: ${uploadError.message}`);
+
+      const result = await processPdfUpload({ data: {
+        accessKey,
+        brandId: selected,
+        fileName: file.name,
+        mimeType: "application/pdf",
+        storagePath: prepared.storagePath,
+        fileSize: file.size,
+      } });
       toast.success(`Manual analisado: ${result.totalPages} página(s). O Brand Kit foi preenchido automaticamente.`);
       await refresh(result.brand.id);
     } catch (error) { toast.error((error as Error).message); }
