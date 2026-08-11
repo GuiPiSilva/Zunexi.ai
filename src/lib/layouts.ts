@@ -29,11 +29,17 @@ export type ElementDesc =
 export interface LayoutInput {
   title: string;
   body?: string;
+  cta?: string;
   imageUrl?: string;
   palette: string[];
   width: number;
   height: number;
   fonts: { display: string; body: string };
+  slideNumber?: number;
+  slideTotal?: number;
+  brandName?: string;
+  theme?: string;
+  styleHint?: string;
 }
 
 const rnd = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
@@ -48,6 +54,13 @@ export const LAYOUT_IDS = [
   "center-text",
   "diagonal",
   "menu-board",
+  "social-hero",
+  "social-editorial",
+  "social-workflow",
+  "social-feature-grid",
+  "social-cards",
+  "social-minimal",
+  "social-cta",
 ] as const;
 
 export type LayoutId = typeof LAYOUT_IDS[number];
@@ -137,6 +150,397 @@ function parseRichBody(body: string): RichLine[] {
 
 function addBrandAccent(els: ElementDesc[], x: number, y: number, width: number, accent: string) {
   els.push({ kind: "rect", x, y, w: width, h: 8, fill: accent, rx: 4, selectable: false });
+}
+
+function campaignSource(input: LayoutInput) {
+  return `${input.brandName || ""}
+${input.theme || ""}
+${input.title}
+${input.body || ""}
+${input.styleHint || ""}`.toLowerCase();
+}
+
+function isTechCampaign(input: LayoutInput) {
+  return /zunexi|\bia\b|artificial|software|saas|plataforma|sistema|app|aplicativo|conte[uú]do|cri(a|á)r|carrossel|post|branding|agenda|publica[cç][aã]o|calend[aá]rio|analytics|automa[cç][aã]o|templates?|legendas?|copy|marketing/.test(campaignSource(input));
+}
+
+function slideCounter(input: LayoutInput) {
+  if (!input.slideNumber || !input.slideTotal) return "";
+  return `${String(input.slideNumber).padStart(2, "0")}/${String(input.slideTotal).padStart(2, "0")}`;
+}
+
+function cleanBrandName(input: LayoutInput) {
+  return (input.brandName || "").trim();
+}
+
+function techBodyChunks(body: string | undefined, limit = 4) {
+  const raw = String(body || "")
+    .replace(/\r/g, "")
+    .split(/\n+/)
+    .flatMap((line) => line.split(/(?<=[.!?])\s+/))
+    .map((line) => line.replace(/^[•\-–—]\s*/, "").trim())
+    .filter(Boolean);
+  const unique: string[] = [];
+  for (const item of raw) {
+    if (!unique.includes(item)) unique.push(item);
+  }
+  return unique.slice(0, limit);
+}
+
+function addTechHeader(els: ElementDesc[], input: LayoutInput, dark: boolean, accent: string) {
+  const brand = cleanBrandName(input);
+  const counter = slideCounter(input);
+  if (brand) {
+    els.push({ kind: "text", x: 62, y: 76, w: 520, text: brand, size: 32, color: dark ? "#f8fafc" : "#111827", align: "left", weight: 760, font: input.fonts.display, lineHeight: 1, charSpacing: -2, name: "Marca", role: "brand" });
+  }
+  if (counter) {
+    els.push({ kind: "text", x: input.width - 200, y: 76, w: 140, text: counter, size: 28, color: dark ? accent : accent, align: "right", weight: 700, font: input.fonts.body, lineHeight: 1, name: "Contador", role: "meta" });
+  }
+}
+
+function addTechPill(els: ElementDesc[], x: number, y: number, w: number, text: string, dark: boolean, accent: string, fonts: { display: string; body: string }) {
+  els.push({ kind: "rect", x, y, w, h: 92, fill: dark ? "#ffffff" : "#ffffff", opacity: dark ? 0.16 : 0.9, rx: 28, selectable: false, name: "Card", role: "panel" });
+  if (!dark) els.push({ kind: "rect", x, y: y + 90, w, h: 2, fill: "#e5e7eb", selectable: false, name: "Base", role: "separator" });
+  els.push({ kind: "circle", cx: x + 34, cy: y + 46, r: 10, fill: accent, selectable: false, name: "Marcador", role: "accent" });
+  els.push({ kind: "text", x: x + 58, y: y + 56, w: w - 78, text: fitTextToLines(text, w - 78, 24, 2), size: 24, color: dark ? "#ffffff" : "#111827", align: "left", weight: 560, font: fonts.body, lineHeight: 1.08, name: "Item", role: "body" });
+}
+
+function addTechShowcase(els: ElementDesc[], x: number, y: number, w: number, h: number, imageUrl: string | undefined, accent: string, dark: boolean) {
+  els.push({ kind: "rect", x, y, w, h, fill: dark ? "#0b1020" : "#eef2ff", opacity: 0.92, rx: 34, selectable: false, name: "Mockup", role: "panel" });
+  els.push({ kind: "rect", x: x + 18, y: y + 18, w: w - 36, h: h - 36, fill: dark ? "#0f172a" : "#ffffff", opacity: 0.96, rx: 26, selectable: false, name: "Tela", role: "panel" });
+  if (imageUrl) {
+    els.push({ kind: "image", x: x + 36, y: y + 72, w: w - 72, h: h - 130, url: imageUrl, name: "Visual", role: "hero" });
+  } else {
+    els.push({ kind: "rect", x: x + 40, y: y + 86, w: w - 80, h: 22, fill: accent, opacity: 0.18, rx: 11, selectable: false, name: "Barra", role: "accent" });
+    els.push({ kind: "rect", x: x + 40, y: y + 126, w: w * 0.42, h: 150, fill: accent, opacity: 0.16, rx: 20, selectable: false, name: "Card 1", role: "panel" });
+    els.push({ kind: "rect", x: x + 40 + w * 0.46, y: y + 126, w: w * 0.32, h: 150, fill: dark ? "#111827" : "#e0e7ff", opacity: 0.92, rx: 20, selectable: false, name: "Card 2", role: "panel" });
+    els.push({ kind: "rect", x: x + 40, y: y + 298, w: w - 80, h: 170, fill: dark ? "#111827" : "#f8fafc", opacity: 0.95, rx: 24, selectable: false, name: "Grid", role: "panel" });
+  }
+  els.push({ kind: "circle", cx: x + 52, cy: y + 44, r: 5, fill: "#fb7185", selectable: false, name: "Dot", role: "accent" });
+  els.push({ kind: "circle", cx: x + 70, cy: y + 44, r: 5, fill: "#facc15", selectable: false, name: "Dot", role: "accent" });
+  els.push({ kind: "circle", cx: x + 88, cy: y + 44, r: 5, fill: "#34d399", selectable: false, name: "Dot", role: "accent" });
+}
+
+function buildTechLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
+  const { title, body, imageUrl, palette, width: W, height: H, fonts } = input;
+  const [bg, primary, accent, text] = palette;
+  const els: ElementDesc[] = [];
+  const dark = (input.slideNumber || 1) % 2 === 1;
+  const bgColor = dark ? (bg || "#0a0f1f") : "#f6f7fb";
+  const textColor = dark ? "#f8fafc" : "#0f172a";
+  const secondaryText = dark ? "rgba(248,250,252,0.88)" : "#334155";
+  const brandAccent = accent || primary || "#8b5cf6";
+  const limeAccent = dark ? brandAccent : primary || brandAccent;
+  const pagePad = 64;
+
+  els.push({ kind: "rect", x: 0, y: 0, w: W, h: H, fill: bgColor, selectable: false, name: "Fundo", role: "background" });
+  els.push({ kind: "circle", cx: W * 0.92, cy: H * 0.12, r: W * 0.18, fill: brandAccent, opacity: dark ? 0.16 : 0.08, selectable: false, name: "Glow", role: "accent" });
+  els.push({ kind: "circle", cx: W * 0.08, cy: H * 0.9, r: W * 0.13, fill: primary || brandAccent, opacity: dark ? 0.14 : 0.06, selectable: false, name: "Glow", role: "accent" });
+  addTechHeader(els, input, dark, brandAccent);
+
+  const chunks = techBodyChunks(body, 4);
+  const titleWidth = W * 0.72;
+
+  if (id === "center-text") {
+    const titleSize = fittedTitleSize(title, W * 0.7, W * 0.09, W * 0.05, 3);
+    els.push({ kind: "text", x: W * 0.15, y: H * 0.27, w: W * 0.7, text: title, size: titleSize, color: textColor, align: "center", weight: 780, font: fonts.display, lineHeight: 0.95, charSpacing: -5, name: "Título", role: "title" });
+    if (body) {
+      els.push({ kind: "text", x: W * 0.22, y: H * 0.52, w: W * 0.56, text: fitTextToLines(body, W * 0.56, 30, 4), size: 30, color: secondaryText, align: "center", weight: 450, font: fonts.body, lineHeight: 1.16, name: "Texto", role: "body" });
+    }
+    els.push({ kind: "rect", x: W * 0.23, y: H * 0.74, w: W * 0.54, h: 92, fill: primary || brandAccent, rx: 46, selectable: false, name: "CTA", role: "accent" });
+    els.push({ kind: "text", x: W * 0.26, y: H * 0.8, w: W * 0.48, text: "Conhecer agora", size: 34, color: dark ? "#ffffff" : "#0f172a", align: "center", weight: 700, font: fonts.display, lineHeight: 1, name: "CTA texto", role: "body" });
+    return els;
+  }
+
+  if (id === "hero-image") {
+    const titleSize = fittedTitleSize(title, W * 0.42, W * 0.072, W * 0.045, 3);
+    els.push({ kind: "text", x: pagePad, y: H * 0.22, w: W * 0.42, text: title, size: titleSize, color: textColor, align: "left", weight: 770, font: fonts.display, lineHeight: 0.95, charSpacing: -4, name: "Título", role: "title" });
+    if (body) {
+      els.push({ kind: "text", x: pagePad, y: H * 0.47, w: W * 0.36, text: fitTextToLines(body, W * 0.36, 28, 5), size: 28, color: secondaryText, align: "left", weight: 440, font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
+    }
+    addTechShowcase(els, W * 0.52, H * 0.18, W * 0.36, H * 0.54, imageUrl, brandAccent, dark);
+    const stats = chunks.length ? chunks.slice(0, 3) : ["Planejamento", "Conteúdo", "Publicação"];
+    stats.forEach((item, index) => {
+      const x = pagePad + index * (W * 0.25);
+      els.push({ kind: "rect", x, y: H * 0.78, w: W * 0.21, h: 120, fill: dark ? "#0f172a" : "#ffffff", opacity: 0.96, rx: 24, selectable: false, name: "Métrica", role: "panel" });
+      els.push({ kind: "text", x: x + 20, y: H * 0.82, w: W * 0.17, text: fitTextToLines(item, W * 0.17, 22, 2), size: 22, color: textColor, align: "left", weight: 650, font: fonts.body, lineHeight: 1.08, name: "Métrica", role: "body" });
+    });
+    return els;
+  }
+
+  if (id === "bottom-text") {
+    const titleSize = fittedTitleSize(title, W * 0.82, W * 0.082, W * 0.048, 3);
+    if (imageUrl) addTechShowcase(els, W * 0.2, H * 0.11, W * 0.6, H * 0.34, imageUrl, brandAccent, dark);
+    els.push({ kind: "text", x: pagePad, y: H * 0.56, w: W * 0.78, text: title, size: titleSize, color: textColor, align: "left", weight: 780, font: fonts.display, lineHeight: 0.95, charSpacing: -4, name: "Título", role: "title" });
+    if (body) els.push({ kind: "text", x: pagePad, y: H * 0.7, w: W * 0.74, text: fitTextToLines(body, W * 0.74, 30, 4), size: 30, color: secondaryText, align: "left", weight: 440, font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
+    return els;
+  }
+
+  if (id === "side-text" || id === "diagonal") {
+    const titleSize = fittedTitleSize(title, W * 0.56, W * 0.08, W * 0.046, 3);
+    els.push({ kind: "text", x: pagePad, y: H * 0.2, w: W * 0.56, text: title, size: titleSize, color: textColor, align: "left", weight: 780, font: fonts.display, lineHeight: 0.95, charSpacing: -5, name: "Título", role: "title" });
+    if (body) els.push({ kind: "text", x: pagePad, y: H * 0.38, w: W * 0.52, text: fitTextToLines(body, W * 0.52, 28, 4), size: 28, color: secondaryText, align: "left", weight: 440, font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
+    const pillItems = chunks.length ? chunks : ["Modelo profissional", "Visual consistente", "Pronto para publicar"];
+    pillItems.slice(0, 4).forEach((item, index) => addTechPill(els, pagePad, H * 0.54 + index * 108, W * 0.62, item, dark, brandAccent, fonts));
+    if (imageUrl && id === "diagonal") addTechShowcase(els, W * 0.62, H * 0.54, W * 0.26, H * 0.24, imageUrl, brandAccent, dark);
+    return els;
+  }
+
+  // cover / default tech slide
+  const titleSize = fittedTitleSize(title, titleWidth, W * 0.095, W * 0.058, 3);
+  els.push({ kind: "text", x: pagePad, y: H * 0.22, w: titleWidth, text: title, size: titleSize, color: textColor, align: "left", weight: 800, font: fonts.display, lineHeight: 0.93, charSpacing: -6, name: "Título", role: "title" });
+  addBrandAccent(els, pagePad, H * 0.19, W * 0.12, brandAccent);
+  if (body) els.push({ kind: "text", x: pagePad, y: H * 0.68, w: W * 0.48, text: fitTextToLines(body, W * 0.48, 30, 4), size: 30, color: secondaryText, align: "left", weight: 440, font: fonts.body, lineHeight: 1.16, name: "Texto", role: "body" });
+  if (imageUrl) {
+    addTechShowcase(els, W * 0.56, H * 0.44, W * 0.3, H * 0.34, imageUrl, brandAccent, dark);
+  } else {
+    els.push({ kind: "rect", x: W * 0.68, y: H * 0.76, w: W * 0.22, h: 4, fill: brandAccent, selectable: false, name: "Acento", role: "accent" });
+  }
+  return els;
+}
+
+function shortBodyItems(body: string | undefined, wanted: number) {
+  const source = String(body || "")
+    .replace(/\r/g, "")
+    .split(/\n+/)
+    .flatMap((line) => line.split(/(?<=[.!?])\s+/))
+    .map((line) => line.replace(/^[•\-–—\d.)\s]+/, "").trim())
+    .filter(Boolean);
+  const output: string[] = [];
+  for (const item of source) {
+    const clean = fitTextToLines(item, 360, 25, 2);
+    if (clean && !output.includes(clean)) output.push(clean);
+  }
+  return output.slice(0, wanted);
+}
+
+function addSocialHeader(
+  els: ElementDesc[],
+  input: LayoutInput,
+  textColor: string,
+  accent: string,
+) {
+  const brand = cleanBrandName(input);
+  const counter = slideCounter(input);
+  if (brand) {
+    els.push({
+      kind: "text",
+      x: 64,
+      y: 64,
+      w: input.width * 0.55,
+      text: brand,
+      size: 30,
+      color: textColor,
+      align: "left",
+      weight: 760,
+      font: input.fonts.display,
+      lineHeight: 1,
+      charSpacing: -2,
+      name: "Marca",
+      role: "brand",
+    });
+  }
+  if (counter) {
+    els.push({
+      kind: "text",
+      x: input.width - 210,
+      y: 64,
+      w: 146,
+      text: counter,
+      size: 26,
+      color: accent,
+      align: "right",
+      weight: 720,
+      font: input.fonts.body,
+      lineHeight: 1,
+      name: "Contador",
+      role: "meta",
+    });
+  }
+}
+
+function addDotCluster(
+  els: ElementDesc[],
+  x: number,
+  y: number,
+  accent: string,
+  columns = 5,
+  rows = 4,
+  gap = 22,
+) {
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < columns; col += 1) {
+      els.push({
+        kind: "circle",
+        cx: x + col * gap,
+        cy: y + row * gap,
+        r: 4,
+        fill: accent,
+        opacity: 0.85,
+        selectable: false,
+        name: "Ponto",
+        role: "accent",
+      });
+    }
+  }
+}
+
+function addSocialCard(
+  els: ElementDesc[],
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  text: string,
+  fill: string,
+  textColor: string,
+  accent: string,
+  fonts: { display: string; body: string },
+  index: number,
+) {
+  els.push({ kind: "rect", x, y, w, h, fill, opacity: 0.98, rx: 28, selectable: false, name: "Card", role: "panel" });
+  els.push({ kind: "circle", cx: x + 46, cy: y + 48, r: 22, fill: accent, opacity: 0.92, selectable: false, name: "Ícone", role: "accent" });
+  els.push({ kind: "text", x: x + 32, y: y + 59, w: 28, text: String(index + 1), size: 20, color: "#ffffff", align: "center", weight: 800, font: fonts.body, lineHeight: 1, name: "Número", role: "meta" });
+  els.push({ kind: "text", x: x + 78, y: y + 58, w: w - 104, text: fitTextToLines(text, w - 104, 24, 2), size: 24, color: textColor, align: "left", weight: 640, font: fonts.body, lineHeight: 1.08, name: "Item", role: "body" });
+}
+
+function buildSocialLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
+  const { title, body, cta, imageUrl, palette, width: W, height: H, fonts } = input;
+  const [bg, primary, accent] = palette;
+  const slide = input.slideNumber || 1;
+  const brandAccent = accent || primary || "#7c3aed";
+  const primaryAccent = primary || "#4d6bff";
+  const darkBase = luminance(bg || "#09090b") < 0.42 ? (bg || "#09090b") : "#0a0b12";
+  const lightBase = "#f7f7f4";
+  const dark = id === "social-hero" || id === "social-cards" || id === "social-feature-grid"
+    ? true
+    : id === "social-workflow" || id === "social-cta"
+      ? false
+      : slide % 2 === 1;
+  const minimalBrandSurface = id === "social-minimal" && slide % 3 === 0 ? primaryAccent : undefined;
+  const background = minimalBrandSurface || (dark ? darkBase : lightBase);
+  const minimalSurfaceDark = minimalBrandSurface ? luminance(minimalBrandSurface) < 0.52 : dark;
+  const textColor = minimalSurfaceDark ? "#ffffff" : "#0f172a";
+  const secondary = minimalSurfaceDark ? "#e5e7eb" : "#334155";
+  const els: ElementDesc[] = [];
+
+  els.push({ kind: "rect", x: 0, y: 0, w: W, h: H, fill: background, selectable: false, name: "Fundo", role: "background" });
+  if (id !== "social-minimal") {
+    els.push({ kind: "circle", cx: W * 0.92, cy: H * 0.12, r: W * 0.2, fill: primaryAccent, opacity: dark ? 0.12 : 0.06, selectable: false, name: "Glow", role: "accent" });
+    els.push({ kind: "circle", cx: W * 0.06, cy: H * 0.92, r: W * 0.16, fill: brandAccent, opacity: dark ? 0.1 : 0.05, selectable: false, name: "Glow", role: "accent" });
+  }
+  addSocialHeader(els, input, textColor, brandAccent);
+
+  if (id === "social-minimal") {
+    const titleSize = fittedTitleSize(title, W * 0.66, W * 0.1, W * 0.056, 3);
+    els.push({ kind: "text", x: W * 0.17, y: H * 0.36, w: W * 0.66, text: title, size: titleSize, color: textColor, align: "center", weight: 820, font: fonts.display, lineHeight: 0.92, charSpacing: -7, name: "Título", role: "title" });
+    els.push({ kind: "rect", x: W * 0.4, y: H * 0.59, w: W * 0.2, h: 7, fill: brandAccent, rx: 4, selectable: false, name: "Sublinhado", role: "accent" });
+    if (body) els.push({ kind: "text", x: W * 0.24, y: H * 0.66, w: W * 0.52, text: fitTextToLines(body, W * 0.52, 26, 2), size: 26, color: secondary, align: "center", weight: 430, font: fonts.body, lineHeight: 1.14, name: "Texto", role: "body" });
+    addDotCluster(els, W * 0.07, H * 0.86, brandAccent, 5, 4, 20);
+    return els;
+  }
+
+  if (id === "social-cta") {
+    const titleSize = fittedTitleSize(title, W * 0.72, W * 0.082, W * 0.048, 3);
+    els.push({ kind: "text", x: W * 0.14, y: H * 0.28, w: W * 0.72, text: title, size: titleSize, color: textColor, align: "center", weight: 800, font: fonts.display, lineHeight: 0.94, charSpacing: -5, name: "Título", role: "title" });
+    els.push({ kind: "rect", x: W * 0.39, y: H * 0.57, w: W * 0.22, h: 7, fill: brandAccent, rx: 4, selectable: false, name: "Acento", role: "accent" });
+    if (body) els.push({ kind: "text", x: W * 0.22, y: H * 0.64, w: W * 0.56, text: fitTextToLines(body, W * 0.56, 28, 3), size: 28, color: secondary, align: "center", weight: 440, font: fonts.body, lineHeight: 1.16, name: "Texto", role: "body" });
+    if (cta) {
+      els.push({ kind: "rect", x: W * 0.24, y: H * 0.82, w: W * 0.52, h: 92, fill: brandAccent, rx: 46, selectable: false, name: "CTA", role: "accent" });
+      els.push({ kind: "text", x: W * 0.28, y: H * 0.877, w: W * 0.44, text: fitTextToLines(cta, W * 0.44, 30, 1), size: 30, color: "#ffffff", align: "center", weight: 780, font: fonts.display, lineHeight: 1, name: "CTA texto", role: "body" });
+    }
+    return els;
+  }
+
+  if (id === "social-workflow") {
+    const titleSize = fittedTitleSize(title, W * 0.74, W * 0.077, W * 0.046, 2);
+    els.push({ kind: "text", x: 72, y: H * 0.2, w: W * 0.74, text: title, size: titleSize, color: textColor, align: "left", weight: 800, font: fonts.display, lineHeight: 0.95, charSpacing: -5, name: "Título", role: "title" });
+    addBrandAccent(els, 72, H * 0.18, W * 0.13, brandAccent);
+    if (body) els.push({ kind: "text", x: 72, y: H * 0.42, w: W * 0.72, text: fitTextToLines(body, W * 0.72, 28, 3), size: 28, color: secondary, align: "left", weight: 430, font: fonts.body, lineHeight: 1.16, name: "Texto", role: "body" });
+    const items = shortBodyItems(body, 3);
+    const labels = items.length >= 3 ? items : [title.split(/\s+/).slice(0, 3).join(" ") || "Sua ideia", "IA organiza", "Conteúdo pronto"];
+    const y = H * 0.72;
+    const xs = [W * 0.2, W * 0.5, W * 0.8];
+    xs.forEach((cx, index) => {
+      els.push({ kind: "circle", cx, cy: y, r: 76, fill: index === 1 ? brandAccent : "#ece9ff", opacity: 0.98, selectable: false, name: "Etapa", role: "panel" });
+      els.push({ kind: "text", x: cx - 30, y: y + 12, w: 60, text: String(index + 1), size: 28, color: index === 1 ? "#ffffff" : brandAccent, align: "center", weight: 800, font: fonts.display, lineHeight: 1, name: "Etapa", role: "meta" });
+      els.push({ kind: "text", x: cx - 120, y: y + 120, w: 240, text: fitTextToLines(labels[index] || "", 240, 23, 2), size: 23, color: textColor, align: "center", weight: 620, font: fonts.body, lineHeight: 1.08, name: "Rótulo", role: "body" });
+      if (index < 2) {
+        els.push({ kind: "rect", x: cx + 86, y: y - 2, w: W * 0.13, h: 4, fill: brandAccent, opacity: 0.5, rx: 2, selectable: false, name: "Conector", role: "accent" });
+      }
+    });
+    return els;
+  }
+
+  if (id === "social-feature-grid") {
+    const titleSize = fittedTitleSize(title, W * 0.72, W * 0.076, W * 0.045, 3);
+    els.push({ kind: "text", x: 72, y: H * 0.19, w: W * 0.72, text: title, size: titleSize, color: textColor, align: "left", weight: 800, font: fonts.display, lineHeight: 0.94, charSpacing: -5, name: "Título", role: "title" });
+    addBrandAccent(els, 72, H * 0.17, W * 0.11, brandAccent);
+    if (body) els.push({ kind: "text", x: 72, y: H * 0.43, w: W * 0.72, text: fitTextToLines(body, W * 0.72, 27, 3), size: 27, color: secondary, align: "left", weight: 430, font: fonts.body, lineHeight: 1.15, name: "Texto", role: "body" });
+    const items = shortBodyItems(body, 4);
+    const fallback = ["Visual consistente", "Criação mais rápida", "Identidade preservada", "Conteúdo profissional"];
+    const list = [...items, ...fallback].slice(0, 4);
+    const cardW = W * 0.39;
+    const cardH = H * 0.14;
+    list.forEach((item, index) => {
+      const col = index % 2;
+      const row = Math.floor(index / 2);
+      const x = 72 + col * (cardW + W * 0.055);
+      const y = H * 0.62 + row * (cardH + H * 0.035);
+      const cardFill = dark ? (index % 2 === 0 ? "#11182a" : "#151a2c") : "#ffffff";
+      addSocialCard(els, x, y, cardW, cardH, item, cardFill, dark ? "#ffffff" : "#111827", index % 2 === 0 ? brandAccent : primaryAccent, fonts, index);
+    });
+    return els;
+  }
+
+  if (id === "social-cards") {
+    const titleSize = fittedTitleSize(title, W * 0.76, W * 0.078, W * 0.047, 2);
+    els.push({ kind: "text", x: 72, y: H * 0.2, w: W * 0.76, text: title, size: titleSize, color: textColor, align: "left", weight: 800, font: fonts.display, lineHeight: 0.94, charSpacing: -5, name: "Título", role: "title" });
+    if (body) els.push({ kind: "text", x: 72, y: H * 0.42, w: W * 0.72, text: fitTextToLines(body, W * 0.72, 27, 3), size: 27, color: secondary, align: "left", weight: 430, font: fonts.body, lineHeight: 1.15, name: "Texto", role: "body" });
+    const items = shortBodyItems(body, 3);
+    const list = [...items, "Estratégia que conecta", "Ideias em movimento", "Resultado com identidade"].slice(0, 3);
+    const cardW = W * 0.26;
+    list.forEach((item, index) => {
+      const x = 74 + index * (cardW + W * 0.04);
+      const y = H * (0.64 + (index % 2) * 0.035);
+      els.push({ kind: "rect", x, y, w: cardW, h: H * 0.25, fill: index === 1 ? "#f8fafc" : index === 2 ? primaryAccent : "#0e172a", opacity: 0.98, rx: 28, selectable: false, name: "Card", role: "panel" });
+      els.push({ kind: "rect", x: x + 24, y: y + 24, w: cardW - 48, h: 6, fill: brandAccent, rx: 3, selectable: false, name: "Acento", role: "accent" });
+      els.push({ kind: "text", x: x + 26, y: y + 84, w: cardW - 52, text: fitTextToLines(item, cardW - 52, 26, 4), size: 26, color: index === 1 ? "#111827" : "#ffffff", align: "left", weight: 680, font: fonts.display, lineHeight: 1.02, name: "Texto card", role: "body" });
+    });
+    return els;
+  }
+
+  if (id === "social-hero") {
+    if (imageUrl) {
+      els.push({ kind: "image", x: W * 0.5, y: H * 0.12, w: W * 0.5, h: H * 0.72, url: imageUrl, name: "Imagem principal", role: "hero" });
+      els.push({ kind: "rect", x: W * 0.48, y: 0, w: W * 0.22, h: H, fill: background, opacity: 0.45, selectable: false, name: "Transição", role: "scrim" });
+    } else {
+      addTechShowcase(els, W * 0.57, H * 0.24, W * 0.34, H * 0.45, undefined, brandAccent, true);
+    }
+    const titleSize = fittedTitleSize(title, W * 0.49, W * 0.082, W * 0.049, 3);
+    els.push({ kind: "text", x: 62, y: H * 0.2, w: W * 0.49, text: title, size: titleSize, color: textColor, align: "left", weight: 820, font: fonts.display, lineHeight: 0.92, charSpacing: -6, shadow: "soft", name: "Título", role: "title" });
+    addBrandAccent(els, 62, H * 0.18, W * 0.1, brandAccent);
+    if (body) els.push({ kind: "text", x: 62, y: H * 0.53, w: W * 0.42, text: fitTextToLines(body, W * 0.42, 27, 5), size: 27, color: secondary, align: "left", weight: 440, font: fonts.body, lineHeight: 1.16, name: "Texto", role: "body" });
+    if (cta) {
+      els.push({ kind: "rect", x: 62, y: H * 0.78, w: W * 0.34, h: 82, fill: brandAccent, rx: 41, selectable: false, name: "CTA", role: "accent" });
+      els.push({ kind: "text", x: 84, y: H * 0.832, w: W * 0.3, text: fitTextToLines(cta, W * 0.3, 27, 1), size: 27, color: "#ffffff", align: "center", weight: 760, font: fonts.display, lineHeight: 1, name: "CTA texto", role: "body" });
+    }
+    return els;
+  }
+
+  // social-editorial
+  const titleSize = fittedTitleSize(title, W * 0.8, W * 0.092, W * 0.052, 3);
+  els.push({ kind: "text", x: 68, y: H * 0.24, w: W * 0.8, text: title, size: titleSize, color: textColor, align: "left", weight: 820, font: fonts.display, lineHeight: 0.93, charSpacing: -6, name: "Título", role: "title" });
+  addBrandAccent(els, 68, H * 0.21, W * 0.12, brandAccent);
+  if (body) els.push({ kind: "text", x: 68, y: H * 0.58, w: W * 0.66, text: fitTextToLines(body, W * 0.66, 30, 4), size: 30, color: secondary, align: "left", weight: 440, font: fonts.body, lineHeight: 1.16, name: "Texto", role: "body" });
+  addDotCluster(els, W * 0.8, H * 0.74, brandAccent, 6, 6, 18);
+  els.push({ kind: "rect", x: W * 0.92, y: H * 0.18, w: 7, h: H * 0.46, fill: primaryAccent, opacity: 0.78, rx: 4, selectable: false, name: "Linha editorial", role: "accent" });
+  els.push({ kind: "circle", cx: W * 0.86, cy: H * 0.61, r: W * 0.09, fill: primaryAccent, opacity: 0.12, selectable: false, name: "Forma", role: "accent" });
+  return els;
+}
+
+export function layoutNeedsGeneratedImage(id: LayoutId) {
+  return ["text-over-image", "side-text", "bottom-text", "hero-image", "diagonal", "menu-board", "social-hero"].includes(id);
 }
 
 function addLeftScrim(els: ElementDesc[], W: number, H: number) {
@@ -238,8 +642,18 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
   const els: ElementDesc[] = [];
   const P = px(W * 0.065);
   const denseMode = isDenseCopy(title, body);
+  const requestedSocial = String(id).startsWith("social-");
   const bodySize = px(clamp(denseMode ? W * 0.024 : W * 0.032, denseMode ? 20 : 27, denseMode ? 31 : 38));
-  const effectiveId: LayoutId = denseMode ? "menu-board" : id;
+  const effectiveId: LayoutId = denseMode && !requestedSocial ? "menu-board" : id;
+  const techMode = !denseMode && isTechCampaign(input);
+
+  if (String(effectiveId).startsWith("social-")) {
+    return buildSocialLayout(effectiveId, input);
+  }
+
+  if (techMode) {
+    return buildTechLayout(effectiveId, input);
+  }
 
   els.push({ kind: "rect", x: 0, y: 0, w: W, h: H, fill: bg, selectable: false, name: "Fundo", role: "background" });
 
@@ -417,14 +831,30 @@ export function fontPairFromStyle(style: string) {
 export function layoutForSlide(index: number, kind: string, title = "", body = ""): LayoutId {
   const role = kind.toLowerCase();
   if (isDenseCopy(title, body)) return "menu-board";
-  if (role.includes("capa")) return "text-over-image";
-  if (role.includes("cta")) return "center-text";
-  const sequence: LayoutId[] = ["text-over-image", "side-text", "hero-image", "bottom-text", "diagonal"];
+  if (role.includes("capa")) return "social-hero";
+  if (role.includes("cta")) return "social-cta";
+  const sequence: LayoutId[] = [
+    "social-workflow",
+    "social-cards",
+    "social-feature-grid",
+    "social-editorial",
+    "social-minimal",
+    "social-hero",
+  ];
   return sequence[Math.max(0, index - 1) % sequence.length];
 }
 
 export function compositionForLayout(layout: LayoutId): string {
   switch (layout) {
+    case "social-hero":
+      return "Use one relevant hero visual on the right half or lower-right. Keep the left 45% calm and dark for a bold headline. Do not generate any text inside the image.";
+    case "social-editorial":
+    case "social-minimal":
+    case "social-workflow":
+    case "social-feature-grid":
+    case "social-cards":
+    case "social-cta":
+      return "This slide uses a graphic-design template rendered by Zunexi. If an auxiliary image is generated, keep it simple, isolated and text-free; typography and cards are added later by the renderer.";
     case "bottom-text":
       return "Keep the hero subject in the upper 55% with clear separation. Preserve the lower 35% as a darker, calmer copy-safe area without artificial blank panels.";
     case "side-text":

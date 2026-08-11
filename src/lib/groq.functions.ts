@@ -39,6 +39,7 @@ export interface SlideOut {
   numero: number;
   titulo: string;
   texto: string;
+  cta?: string;
   promptImagem: string;
   tipo: string;
   layout?: string;
@@ -62,7 +63,8 @@ export interface CarrosselOut {
 const TIMEOUT_MS = 45_000;
 
 const PLACEHOLDER_LINE = /(?:\[(?:inserir|adicione|preencha|coloque)[^\]]*\]|<(?:inserir|adicione|preencha|coloque)[^>]*>|\b(?:a definir|não informado|nao informado|não fornecido|nao fornecido|exemplo|seu telefone|seu endereço|seu endereco)\b)/i;
-const WEAK_COPY = /^(?:bem[- ]?vindo|conheça|descubra|aproveite|saiba mais|qualidade que|sabor que|uma experiência|experiência única|o melhor para você|feito para você|não perca)(?:\b|[!.:]|$)/i;
+const WEAK_COPY = /^(?:bem[- ]?vindo|conheça|descubra|aproveite|saiba mais|qualidade que|sabor que|uma experiência|experiência única|o melhor para você|feito para você|não perca|crie agora|crie melhor|desbloqueie o poder|eleve sua marca|leve sua marca)(?:\b|[!.:]|$)/i;
+const GENERIC_COPY = /\b(?:desbloqueie o poder|potencialize sua criatividade|crie melhor|crie agora|qualidade previsível|autonomia criativa|leve sua marca ao próximo nível|transforme seu negócio|solução completa|inovação que transforma|resultados incríveis)\b/i;
 
 function compactWhitespace(value: string) {
   return value
@@ -110,13 +112,14 @@ function sanitizeBody(value: unknown, dense: boolean) {
   const cleaned = compactWhitespace(removePlaceholderLines(stripMarkdown(String(value ?? ""))))
     .replace(/(^|\n)(?:texto|descrição|descricao|copy)\s*:\s*/gi, "$1")
     .trim();
-  return trimAtWord(cleaned, dense ? 1300 : 190);
+  return trimAtWord(cleaned, dense ? 900 : 150);
 }
 
 function sanitizePromptImage(value: unknown) {
   return compactWhitespace(String(value ?? ""))
     .replace(/```/g, "")
-    .replace(/\b(?:add|include|render|write|display)\s+(?:the\s+)?(?:text|title|headline|words?|letters?|logo|price|phone|watermark)[^.;]*[.;]?/gi, "")
+    .replace(/\b(?:add|include|render|write|display|place|show)\s+(?:the\s+)?(?:text|title|headline|subtitle|copy|words?|letters?|logo|price|phone|watermark)[^.;]*[.;]?/gi, "")
+    .replace(/\b(?:no|without)\s+(?:text|typography|letters?|words?|captions?)\b/gi, "")
     .trim();
 }
 
@@ -137,12 +140,23 @@ function copyQualityWarnings(slides: SlideOut[]) {
   slides.forEach((slide) => {
     if (!slide.titulo) warnings.push(`slide ${slide.numero} sem título`);
     if (PLACEHOLDER_LINE.test(`${slide.titulo}\n${slide.texto}`)) warnings.push(`slide ${slide.numero} com placeholder`);
-    if (WEAK_COPY.test(slide.titulo)) warnings.push(`slide ${slide.numero} com título genérico`);
+    if (WEAK_COPY.test(slide.titulo) || GENERIC_COPY.test(`${slide.titulo} ${slide.texto}`)) warnings.push(`slide ${slide.numero} com copy genérica`);
+    if ((slide.texto || "").length > 220) warnings.push(`slide ${slide.numero} com texto longo demais`);
   });
 
   const normalizedTitles = slides.map((slide) => slide.titulo.toLowerCase().replace(/[^a-z0-9áéíóúãõâêôç ]/gi, "").trim());
   normalizedTitles.forEach((title, index) => {
     if (title && normalizedTitles.indexOf(title) !== index) warnings.push(`slide ${slides[index].numero} repete um título anterior`);
+  });
+
+  const repeatedStarts = new Map<string, number[]>();
+  normalizedTitles.forEach((title, index) => {
+    const start = title.split(/\s+/).slice(0, 2).join(" ");
+    if (!start) return;
+    repeatedStarts.set(start, [...(repeatedStarts.get(start) || []), slides[index].numero]);
+  });
+  repeatedStarts.forEach((nums, start) => {
+    if (nums.length >= 3) warnings.push(`muitos títulos começam com "${start}"`);
   });
 
   const layouts = slides.map((slide) => slide.layout).filter(Boolean);
@@ -178,6 +192,7 @@ function normalizeSlide(value: SlideOut, index: number, total: number, dense: bo
     numero: index + 1,
     titulo: sanitizeTitle(value.titulo),
     texto: sanitizeBody(value.texto, dense),
+    cta: sanitizeCta(value.cta),
     promptImagem: sanitizePromptImage(value.promptImagem),
     tipo: String(value.tipo ?? (index === 0 ? "capa" : index === total - 1 ? "cta" : "conteudo")),
     layout,
@@ -189,6 +204,25 @@ function normalizeSlide(value: SlideOut, index: number, total: number, dense: bo
     allowPeople,
     reviewScore: typeof value.reviewScore === "number" ? Math.max(0, Math.min(100, Math.round(value.reviewScore))) : undefined,
   };
+}
+
+function applyReferenceLayoutSequence(slides: SlideOut[], softwareCampaign: boolean, dense: boolean, allowInterfaces: boolean) {
+  if (!softwareCampaign || dense || !slides.length) return slides;
+  const middle: Array<SlideOut["layout"]> = [
+    "social-workflow",
+    "social-cards",
+    "social-feature-grid",
+    "social-editorial",
+    "social-minimal",
+  ];
+  return slides.map((slide, index) => {
+    if (index === 0) {
+      const imageLed = allowInterfaces && /(?:mockup|dashboard|interface|tela|site|app|produto)/i.test(`${slide.visualConcept || ""} ${slide.promptImagem || ""}`);
+      return { ...slide, layout: imageLed ? "social-hero" : "social-editorial" };
+    }
+    if (index === slides.length - 1) return { ...slide, layout: "social-cta" };
+    return { ...slide, layout: middle[(index - 1) % middle.length] };
+  });
 }
 
 async function reviewCampaignWithGroq({
@@ -220,7 +254,7 @@ async function reviewCampaignWithGroq({
         messages: [
           {
             role: "system",
-            content: `Você é o revisor final da Zunexi. Receba um carrossel em JSON e devolva o MESMO formato JSON, corrigido e pronto para produção. Não explique nada. Preserve somente fatos autorizados pelo briefing. Elimine clichês, repetição de títulos, repetição de layouts, prompts visuais genéricos, placeholders e dados inventados. Cada slide deve ter layout válido entre: ${LAYOUT_IDS.join(", ")}. Garanta que promptImagem esteja em inglês e descreva somente a cena sem texto. Pessoas estão ${allowPeople ? "permitidas porque foram solicitadas explicitamente" : "PROIBIDAS; remova pessoas, rostos, mãos, corpos e silhuetas de todos os prompts"}. Dê reviewScore de 0 a 100 para cada slide depois das correções.`,
+            content: `Você é o revisor final da Zunexi. Receba um carrossel em JSON e devolva o MESMO formato JSON, corrigido e pronto para produção. Não explique nada. Preserve somente fatos autorizados pelo briefing. Elimine clichês, repetição de títulos, repetição de layouts, prompts visuais genéricos, placeholders e dados inventados. Reescreva qualquer copy que pareça slogan genérico de IA; prefira linguagem de anúncio clara, concreta e curta. Cada slide deve ter layout válido entre: ${LAYOUT_IDS.join(", ")}. Garanta que promptImagem esteja em inglês e descreva somente a cena sem texto. Pessoas estão ${allowPeople ? "permitidas porque foram solicitadas explicitamente" : "PROIBIDAS; remova pessoas, rostos, mãos, corpos e silhuetas de todos os prompts"}. Se a campanha for de software, IA, Zunexi ou conteúdo digital, elimine slogans vazios como “Crie melhor”, “Desbloqueie o poder”, “Autonomia criativa”, “Qualidade previsível” e equivalentes. Reescreva títulos para ficarem específicos, curtos e úteis; cada slide deve comunicar uma função, problema, mecanismo ou benefício diferente. Para layouts social-workflow, social-cards e social-feature-grid, preserve linhas curtas separadas por quebra de linha para alimentar os elementos gráficos. Troque prompts abstratos por metáforas visuais relevantes como cards, calendário, analytics, fluxo de publicação, mídia organizada e assets de marca. Dê reviewScore de 0 a 100 para cada slide depois das correções.`,
           },
           {
             role: "user",
@@ -299,6 +333,33 @@ export const generateInstagramContent = createServerFn({ method: "POST" })
     );
     const allowPeople = explicitHumanVisualRequest(data.tema, data.informacoesAdicionais, product);
     const allowInterfaces = explicitInterfaceVisualRequest(data.tema, data.informacoesAdicionais, product);
+    const softwareCampaign = /zunexi|\bia\b|software|saas|app|aplicativo|plataforma|sistema|conte[uú]do|carrossel|posts?|publica[cç][aã]o|calend[aá]rio|agenda|automa[cç][aã]o|branding|analytics|marketing/i.test(`${data.tema}
+${data.informacoesAdicionais}
+${product}
+${brand}`);
+    const softwareCopyRule = softwareCampaign
+      ? `
+REGRAS ESPECIAIS PARA SOFTWARE / IA / ZUNEXI:
+- A capa deve funcionar como headline de anúncio ou editorial: uma ideia específica, clara e memorável. Evite “mais que criar”, “crie melhor”, “desbloqueie o poder”, “autonomia criativa”, “qualidade previsível”, “potencialize sua criatividade” e qualquer slogan que serviria para qualquer SaaS.
+- Prefira títulos concretos que nomeiem a função, o problema ou o ganho: ex. “Ideia + IA”, “Templates inteligentes”, “Texto que já nasce pronto”, “Publique sem perder o ritmo”, “Seu calendário em ordem”. Não copie estes exemplos literalmente; use a lógica.
+- Cada slide intermediário deve trabalhar UMA função ou benefício por vez. Não repita “IA”, “conteúdo”, “criar” ou o nome da marca em todos os títulos.
+- Para social-workflow: o campo texto deve ter 3 linhas curtas, uma etapa por linha, sem marcadores.
+- Para social-cards: o campo texto deve ter 3 linhas curtas, uma ideia/benefício por linha.
+- Para social-feature-grid: o campo texto deve ter 4 linhas curtas, um benefício por linha.
+- Para social-editorial e social-minimal: use uma única frase curta de apoio; deixe a headline ser protagonista.
+- Para social-cta: use CTA específico no campo cta, com 2 a 5 palavras. O campo texto deve explicar o benefício final em uma frase.
+- Não escreva parágrafos longos. Não descreva a empresa de forma genérica. Mostre utilidade prática.
+- Evite promessas vagas como “transforme seu negócio”, “leve sua marca ao próximo nível”, “inovação que transforma” e equivalentes.`
+      : "";
+    const softwareVisualRule = softwareCampaign
+      ? `
+DIREÇÃO VISUAL ESPECIAL PARA SOFTWARE / IA / ZUNEXI:
+- A referência é design editorial premium de Instagram/SaaS: tipografia grande, grids, cards, contadores, acentos de cor, alternância dark/light e bastante respiro.
+- NÃO transforme todos os slides em imagens 3D. Slides de conceito, processo, lista, benefício e CTA devem preferir os layouts social-* que o renderer monta sem IA de imagem.
+- Use social-editorial ou social-minimal para mensagens fortes; social-workflow para processos; social-cards para 3 ideias; social-feature-grid para 4 benefícios; social-cta para fechamento.
+- Use social-hero com imagem somente quando existir um assunto visual real que ajude a mensagem (produto, ambiente, objeto, mockup explicitamente solicitado).
+- Se uma imagem for necessária, ela deve mostrar um objeto/ambiente semanticamente ligado ao slide. Proibido cristal, escultura, símbolo 3D ou forma abstrata aleatória apenas para “parecer tecnologia”.`
+      : "";
 
     const { data: recentRows } = await (sb as any)
       .from("generations")
@@ -321,13 +382,40 @@ export const generateInstagramContent = createServerFn({ method: "POST" })
       };
     });
 
+    const socialLayoutSequence = [
+      "social-hero",
+      "social-workflow",
+      "social-cards",
+      "social-feature-grid",
+      "social-editorial",
+      "social-minimal",
+      "social-cta",
+    ] as const;
+
     const slideRoles = Array.from({ length: data.quantidadeSlides }, (_, index) => {
-      if (index == 0) return `Slide 1: CAPA — interromper o scroll, apresentar a promessa principal e estabelecer a identidade visual.`;
-      if (index == data.quantidadeSlides - 1) return `Slide ${index + 1}: CTA — concluir a narrativa, reforçar a oferta e indicar uma ação clara.`;
+      const isFirst = index === 0;
+      const isLast = index === data.quantidadeSlides - 1;
+      const layout = isFirst
+        ? "social-hero"
+        : isLast
+          ? "social-cta"
+          : socialLayoutSequence[Math.min(index, socialLayoutSequence.length - 2)];
+      const formatRule = layout === "social-workflow"
+        ? "O campo texto deve conter 3 etapas curtas em linhas separadas, sem bullets."
+        : layout === "social-feature-grid"
+          ? "O campo texto deve conter 4 benefícios/itens curtos em linhas separadas, sem bullets."
+          : layout === "social-cards"
+            ? "O campo texto deve conter 3 ideias/benefícios curtos em linhas separadas."
+            : "Use uma frase secundária curta e específica.";
+      if (isFirst) return `Slide 1: CAPA — use layout ${layout}. Interrompa o scroll com promessa forte, específica e visualmente grande. ${formatRule}`;
+      if (isLast) return `Slide ${index + 1}: CTA — use layout ${layout}. Feche a narrativa com benefício claro e ação simples. ${formatRule}`;
+      if (index === 1) return `Slide ${index + 1}: CONTEXTO / FLUXO — use layout ${layout}. Mostre uma sequência, transformação ou mecanismo em 3 passos. ${formatRule}`;
+      if (index === 2) return `Slide ${index + 1}: SOLUÇÃO / POSSIBILIDADES — use layout ${layout}. Mostre 3 possibilidades, recursos ou resultados diferentes. ${formatRule}`;
+      if (index === 3) return `Slide ${index + 1}: BENEFÍCIOS — use layout ${layout}. Mostre 4 benefícios concretos e curtos. ${formatRule}`;
       if (data.objetivo.toLowerCase().includes("vender")) {
-        return `Slide ${index + 1}: VENDA — apresentar benefício, produto, prova, oferta, diferencial, preço ou condição de compra sem repetir o slide anterior.`;
+        return `Slide ${index + 1}: DIFERENCIAL DE VENDA — use layout ${layout}. Aprofunde uma vantagem concreta sem repetir o slide anterior. ${formatRule}`;
       }
-      return `Slide ${index + 1}: CONTEÚDO — desenvolver uma ideia específica, útil e visualmente distinta, mantendo continuidade de campanha.`;
+      return `Slide ${index + 1}: BENEFÍCIO / DETALHE — use layout ${layout}. Desenvolva uma ideia concreta e visualmente distinta. ${formatRule}`;
     }).join("\n");
 
     const systemPrompt = `Você é um diretor de criação e copywriter sênior de campanhas para Instagram. Crie conteúdo que pareça escrito para ESTA marca e ESTE pedido, não um texto genérico reutilizável. O resultado será aplicado diretamente em uma arte profissional; por isso, toda frase precisa ser útil, específica, curta e visualmente legível.
@@ -349,9 +437,10 @@ Retorne SOMENTE JSON válido, sem cercas de código, no formato EXATO:
       "numero": 1,
       "titulo": "Texto principal do slide",
       "texto": "Texto secundário do slide",
+      "cta": "CTA curto somente quando fizer sentido; vazio nos demais slides",
       "promptImagem": "Direção de arte em inglês, somente para a imagem sem texto",
       "tipo": "capa",
-      "layout": "text-over-image",
+      "layout": "social-hero",
       "visualConcept": "conceito visual específico deste slide",
       "textZone": "left",
       "subjectZone": "right",
@@ -374,40 +463,52 @@ PROCESSO CRIATIVO OBRIGATÓRIO:
 - O último slide deve encerrar a ideia e indicar uma ação coerente. Use o CTA fornecido quando existir.
 - Defina uma creativePlan antes dos slides. Ela deve unir a campanha sem tornar as composições iguais.
 - Escolha para cada slide um layout válido entre: ${LAYOUT_IDS.join(", ")}. Nunca repita o mesmo layout em slides consecutivos, exceto menu-board quando o conteúdo realmente for denso.
+- Priorize a nova família social-* para posts e carrosséis. Ela foi criada para peças com hierarquia forte, cards, etapas, grids e alternância entre slides claros e escuros.
+- Use social-hero para anúncio com um visual realmente relevante; social-workflow para processo em 3 etapas; social-cards para 3 ideias; social-feature-grid para 4 benefícios; social-editorial para headline forte; social-minimal para uma mensagem de alto impacto com muito respiro; social-cta para fechamento.
+- Em campanhas de software/IA, a capa deve preferir social-editorial ou social-minimal. Use social-hero na capa somente se houver um produto visual, interface/mockup solicitado ou objeto concreto que enriqueça a mensagem.
+- Os layouts social-workflow, social-cards, social-feature-grid, social-editorial, social-minimal e social-cta são construídos pelo renderer e NÃO dependem de uma imagem de IA. Por isso, o texto precisa ser bom o bastante para ser o protagonista.
 - textZone e subjectZone devem ser opostos ou claramente separados para proteger a legibilidade.
+
+REFERÊNCIA DE DIREÇÃO DE ARTE:
+- Busque o nível de acabamento de posts premium de tecnologia, marketing e SaaS: tipografia grande, contraste forte, muito respiro, pequenos acentos de cor, cards limpos, contadores 01/06, alternância dark/light e composição de anúncio.
+- Evite o visual de "imagem de IA com texto por cima". A peça deve parecer design gráfico criado por um diretor de arte.
+- Nem todo slide precisa de fotografia ou 3D. Em slides de conceito, processo, lista e CTA, prefira design tipográfico e elementos gráficos simples.
+- Varie entre: headline editorial em fundo sólido; fluxo em 3 etapas; cards modulares; grade 2x2 de benefícios; anúncio com visual à direita; fechamento centralizado com CTA. Isso deve criar ritmo de carrossel sem perder a identidade.
 
 REGRAS DE COPY — PRIORIDADE MÁXIMA:
 - Escreva em português brasileiro natural, correto e contemporâneo.
-- Títulos: de 2 a 8 palavras, preferencialmente até 55 caracteres. Varie a construção sintática entre os slides.
-- Texto secundário padrão: 1 a 3 frases curtas, com aproximadamente 60 a 180 caracteres no total.
+- Títulos: de 2 a 6 palavras, preferencialmente entre 16 e 44 caracteres. Devem soar como headline de anúncio, não como frase de IA. Evite slogans vagos. Varie a construção sintática entre os slides.
+- Texto secundário padrão: 1 frase curta ou até 3 linhas objetivas, com aproximadamente 35 a 110 caracteres no total. Prefira clareza e impacto a explicações longas.
 - Para cardápio, catálogo, lista ou preços realmente fornecidos, organize o texto em linhas simples e legíveis. Não use Markdown, #, **, tabelas ou blocos de código.
 - PROIBIDO usar placeholders ou campos fictícios, como “[inserir endereço]”, “[telefone]”, “a definir”, “não informado” ou “seu contato”. Quando um dado não foi fornecido, simplesmente não o mencione.
 - PROIBIDO inventar preço, desconto, sabor, ingrediente, número, endereço, telefone, data, depoimento, resultado, garantia ou condição comercial.
 - PROIBIDO escrever títulos vazios ou clichês como “Bem-vindo”, “Conheça”, “Descubra”, “Aproveite”, “Saiba mais”, “Qualidade que você merece”, “Sabor que conquista”, “Experiência única” e variações, salvo quando a frase receber informação específica que a torne indispensável.
 - Não use linguagem de bastidor (“neste slide”, “o objetivo é”, “a marca deve”). Escreva somente a copy que aparecerá ao público.
 - Não repita palavras-chave em todos os títulos. Não comece vários slides do mesmo jeito.
+- Evite repetir a assinatura verbal da marca em todos os slides. Uma mesma frase não deve sustentar mais de um slide.
 - Se o briefing tiver poucos dados, trabalhe com posicionamento e benefícios plausíveis da categoria, sem fingir fatos específicos sobre a empresa.
-- Hashtags: 8 a 15, relevantes, sem # no JSON e sem termos aleatórios.
+- Campo cta: deixe vazio em slides normais. No fechamento, use somente uma ação curta, específica e coerente com o briefing. Nunca invente telefone, link, preço ou condição.
+- Hashtags: 8 a 15, relevantes, sem # no JSON e sem termos aleatórios.${softwareCopyRule}
 
 PADRÃO DE QUALIDADE VISUAL:
 - Pense como diretor de arte de uma campanha real. Cada slide precisa ter um conceito visual deliberado, não apenas “uma foto bonita”.
 - O produto, serviço ou assunto deve ser o herói. Evite cenas genéricas de escritório, restaurante, cidade ou pessoas sorrindo sem função narrativa.
 - Não faça todos os slides com o mesmo enquadramento. Preserve a assinatura visual da campanha, mas varie câmera, distância, perspectiva e posição do assunto.
 - Em alimentação, use fotografia gastronômica de campanha: produto dominante, textura real, luz controlada, profundidade e cores naturais dos ingredientes. Não aplique filtro laranja ou bege global.
-- Em tecnologia, use key visual de lançamento com materiais precisos, luz escultural, composição limpa e sofisticada; evite hologramas e circuitos clichês sem motivo.
+- Em tecnologia, use key visual de lançamento com materiais precisos, luz escultural, composição limpa e sofisticada. Prefira metáforas visuais relevantes para criação de conteúdo, publicação, organização, fluxo criativo, camadas de mídia, brand assets e produção digital; evite símbolo 3D aleatório, hologramas genéricos e circuitos clichês sem motivo.
 - Em automotivo, preserve proporções e use linguagem de campanha automotiva, não foto comum de concessionária.
 - A paleta da marca deve aparecer como acentos controlados, nunca como banho monocromático sobre toda a imagem.
 
 REGRAS DO promptImagem:
 - Escreva em inglês, com direção de arte específica.
 - Descreva SOMENTE o visual principal: hero subject, environment, camera, lens, lighting, materials, depth, color treatment and composition.
-- Indique claramente o herói, posição no quadro, luz, distância/ângulo de câmera, textura/material e estética de campanha.
-- NÃO solicite texto, tipografia, letras, números, logotipo, preço, telefone, watermark, moldura ou palavras dentro da imagem.
+- Indique claramente o herói, posição no quadro, luz, distância/ângulo de câmera, textura/material e estética de campanha. O herói deve representar a mensagem do slide, não apenas ser um objeto bonito.
+- NÃO solicite texto, tipografia, letras, números, logotipo, preço, telefone, watermark, moldura ou palavras dentro da imagem. O motor deve gerar SOMENTE o fundo/cena.
 - Interfaces, dashboards, telas, browser windows e mockups de dispositivos estão ${allowInterfaces ? "permitidos SOMENTE porque foram pedidos explicitamente; ainda assim, evite pseudo-texto e use a interface como elemento secundário" : "PROIBIDOS. Para temas de tecnologia/software, traduza o conceito em objetos, luz, materiais, geometria e ambiente — nunca invente uma tela de app"}.
-- Reserve negative space natural para a copy; não crie painel branco vazio ou cartão artificial.
+- Reserve negative space natural para a copy; não crie painel branco vazio, faixa sólida, cartão artificial ou metade branca sem motivo.
 - Use cores locais naturais e acentos controlados da marca.
 - Evite stock photo, generic modern interior, generic smiling person, objetos duplicados, mãos deformadas e fundos poluídos.
-- Em alimentação ou produto físico, faça o produto ocupar cerca de 35–55% da cena quando adequado.
+- Em alimentação ou produto físico, faça o produto ocupar cerca de 35–55% da cena quando adequado.${softwareVisualRule}
 
 Antes de responder, revise silenciosamente cada slide e elimine: clichês, repetição, placeholders, dados inventados, Markdown e frases que poderiam servir para qualquer empresa.`;
 
@@ -434,6 +535,8 @@ MEMÓRIA CRIATIVA RECENTE — não copie títulos, conceitos, enquadramentos ou 
 ${recentCreativeMemory.length ? JSON.stringify(recentCreativeMemory) : "nenhuma criação anterior disponível"}
 
 Faça uma campanha contínua e específica. Não use saudações de abertura, texto de apresentação genérico, placeholders ou dados que não estejam no briefing. O promptImagem de cada slide deve gerar somente a fotografia/ilustração principal sem texto.
+Se o tema envolver Zunexi, software, IA, conteúdo, criação, agenda, publicação, branding ou automação, traduza cada slide em uma metáfora visual coerente com o assunto: content cards, publishing flow, organized brand assets, modular creative blocks, media layers, scheduling cues ou structured digital production. Evite símbolo 3D aleatório ou ícone abstrato sem relação clara com a mensagem.
+${softwareCampaign ? "Para esse tipo de campanha, privilegie copy curta, visualmente forte e orientada a benefício. A composição final pode parecer mais editorial e gráfica do que fotográfica." : ""}
 ${denseContentMode ? "MODO DENSO: use conteúdo mais completo apenas quando os itens e dados estiverem presentes no briefing. Organize em linhas simples, sem Markdown." : "MODO PADRÃO: mantenha a copy enxuta, forte e com informação real em todos os slides."}
 Semente de variação criativa: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
@@ -450,8 +553,8 @@ Semente de variação criativa: ${Math.random().toString(36).slice(2)}-${Date.no
         signal: controller.signal,
         body: JSON.stringify({
           model: process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile",
-          temperature: 0.7,
-          top_p: 0.9,
+          temperature: 0.55,
+          top_p: 0.86,
           max_tokens: 6500,
           response_format: { type: "json_object" },
           messages: [
@@ -502,9 +605,10 @@ Informações: ${data.informacoesAdicionais}`;
       allowPeople,
     });
 
-    const slides = parsed.slides.slice(0, data.quantidadeSlides).map((slide, index) =>
+    let slides = parsed.slides.slice(0, data.quantidadeSlides).map((slide, index) =>
       normalizeSlide(slide, index, data.quantidadeSlides, denseContentMode, allowPeople),
     );
+    slides = applyReferenceLayoutSequence(slides, softwareCampaign, denseContentMode, allowInterfaces);
 
     const warnings = copyQualityWarnings(slides);
     if (warnings.some((warning) => warning.includes("sem título"))) {

@@ -662,11 +662,13 @@ function creativeProfile(data: z.infer<typeof ImageInput>) {
   }
 
   if (/tech|tecnolog|software|app|ia|ai |digital|saas|plataforma|zunexi/.test(haystack)) {
-    return `TECH LAUNCH POSTER DIRECTION:
-- Use a deep black background with controlled electric-blue, violet and magenta light fields, luminous dot-matrix/halftone waves, digital particles and sculptural glow.
-- Keep a premium black center or deliberate negative-space area for logo/headline placement later.
-- Build strong depth with luminous data-like surfaces around the edges, elegant gradients and high contrast; avoid fake UI screens and cliché circuitry.
-- The result should feel like a major AI/software launch campaign: minimal, dramatic, futuristic and expensive.`;
+    return `TECH / CONTENT CREATION CAMPAIGN DIRECTION:
+- Make the visual meaning obvious. Use concrete editorial metaphors for the function: organized media cards, modular content tiles, calendar/scheduling blocks, publishing connections, brand-asset layers, image/text creation tools or analytics objects.
+- Use a deep black or brand-led background with controlled electric-blue/violet accents, subtle dot matrices, restrained particles and premium material detail.
+- Keep deliberate negative space for the renderer.
+- Do NOT generate random glass sculptures, crystals, meaningless 3D symbols, generic AI brains, holograms or cliché circuitry.
+- Avoid fake UI screens unless the user explicitly requested an interface.
+- The result should feel like a premium SaaS campaign art asset with a clear connection to the message, not generic 'AI art'.`;
   }
 
   if (/carro|automot|vehicle|car |suv|sedan|concession/.test(haystack)) {
@@ -690,7 +692,7 @@ function cloudflareDomainDirection(data: z.infer<typeof ImageInput>) {
     return "Premium food advertising photography. Make the food the large appetizing hero (about half of the frame), realistic ingredients, rich texture, controlled highlights, cinematic side/rim light, shallow-to-medium depth of field, subtle steam or atmosphere when natural, dark stone/wood/table surfaces when appropriate.";
   }
   if (/tech|tecnolog|software|app|ia|ai |digital|saas|plataforma|zunexi/.test(haystack)) {
-    return "Premium technology launch visual. Use sculptural abstract forms, glass/metal materials, controlled blue-violet light, elegant particles or data-like geometry, deep dimensional space and expensive cinematic lighting. Prefer physical/abstract metaphors over fake software screens.";
+    return "Premium technology launch visual. Build a relevant metaphor for digital creation, publishing flow, content organization or AI-assisted production. Prefer layered media cards, modular asset blocks, refined device-adjacent objects, structured digital surfaces and purposeful spatial geometry over random symbols. Use controlled blue-violet light, elegant particles, dimensional depth and expensive cinematic lighting. Avoid fake software screens and avoid isolated abstract logo-like sculptures.";
   }
   if (/carro|automot|vehicle|car |suv|sedan|concession/.test(haystack)) {
     return "Premium automotive launch photography. Accurate vehicle geometry, dominant three-quarter hero angle, low camera, controlled reflections, dramatic rim lighting, subtle haze, believable environment and strong product separation.";
@@ -729,6 +731,35 @@ function cleanCloudflareSourceBrief(value: string) {
     .slice(0, 1_650);
 }
 
+function slideMeaningDirection(data: z.infer<typeof ImageInput>) {
+  const haystack = `${data.slideTitle} ${data.slideBody} ${data.prompt} ${data.slideKind}`.toLowerCase();
+
+  if (/rapid|rápid|agil|veloc|minutes|minutos|instant|aceler/.test(haystack)) {
+    return "Translate the idea into speed and momentum: layered media panels, directional light trails, modular cards in forward motion, fast publishing cues and elegant visual acceleration. Avoid generic speed icons.";
+  }
+  if (/planej|agenda|organiz|fluxo|process|workflow|etapas|publica[cç][aã]o|schedule/.test(haystack)) {
+    return "Translate the idea into organization and publishing flow: structured content blocks, modular creative assets, calendar-like markers without readable text, sequencing cues and orderly composition.";
+  }
+  if (/qualidade|consist|padr[aã]o|previs[ií]vel|confi|controle|precis[aã]o/.test(haystack)) {
+    return "Translate the idea into consistency and control: precise alignment, repeated modular forms with elegant variation, stable geometry, trustworthy spacing, crisp material finish and visual order.";
+  }
+  if (/criativ|ideias|inspira[cç][aã]o|autonomia|liberdade|cria[rç][aã]o/.test(haystack)) {
+    return "Translate the idea into creative freedom and ideation: layered brand assets, floating media fragments, modular composition pieces, expressive but disciplined motion and clear visual hierarchy.";
+  }
+  if (/profission|marca|brand|identidade|visual|premium/.test(haystack)) {
+    return "Translate the idea into professionalism and brand craft: refined editorial composition, brand-asset metaphors, premium finishing, calm hierarchy and polished commercial presentation.";
+  }
+  return "Choose a hero scene that literally or metaphorically represents the message of the slide. The visual should explain the claim, not merely decorate it.";
+}
+
+function slideRoleDirection(data: z.infer<typeof ImageInput>) {
+  const haystack = `${data.slideKind} ${data.slideTitle}`.toLowerCase();
+  if (/capa|cover/.test(haystack)) return "Cover-slide behavior: one unmistakable hero subject, strong first-glance impact, broad clean copy-safe area and bold but simple hierarchy.";
+  if (/cta|call/.test(haystack)) return "CTA-slide behavior: cleaner closure composition, high contrast, confident subject placement, more breathing room and a sense of conclusion.";
+  if (/menu|lista|catalog|cat[aá]logo/.test(haystack)) return "List/menu behavior: multiple items may appear only when required by the brief, arranged with clear grouping and deliberate separation, while preserving clean areas for overlay copy.";
+  return "Content-slide behavior: the scene should communicate one concrete benefit or idea with a focused hero and enough breathing room for overlay copy.";
+}
+
 function buildCloudflarePrompt(data: z.infer<typeof ImageInput>) {
   const source = cleanCloudflareSourceBrief(data.prompt);
   const interfaceRule = data.allowInterfaces
@@ -744,8 +775,12 @@ MAIN VISUAL IDEA:
 ${source || "Create a premium visual interpretation of the supplied campaign concept."}
 
 COMPOSITION:
+${slideRoleDirection(data)}
 ${data.slideKind || "Keep one dominant hero subject and preserve a naturally calm copy-safe area."}
 ${cloudflareVariation(data)}
+
+MESSAGE INTERPRETATION:
+${slideMeaningDirection(data)}
 
 ART DIRECTION:
 ${cloudflareDomainDirection(data)}
@@ -758,7 +793,7 @@ Professional campaign photography / refined 3D / polished illustration as approp
 CLEAN OUTPUT RULES:
 ${humanRule}
 ${interfaceRule}
-Keep surfaces clean and unlabeled. No readable words, random letters, numbers, logos, watermarks, prices, signs, badges or fake brand names. No poster/card/template layout, no split colored panel, no giant blank white rectangle, no collage. Do not duplicate the hero object or warp product geometry. Natural copy-safe space must come from composition, depth, shadow, lighting and low-detail environment.
+Keep surfaces clean and unlabeled. No readable words, random letters, word fragments, glyphs, numbers, logos, watermarks, prices, signs, badges or fake brand names. No poster/card/template layout, no split colored panel, no giant blank white rectangle, no collage. Avoid irrelevant abstract logo-like sculptures, crystals, rings, random metallic glyphs and decorative objects that do not explain the slide message. For software/content topics, every hero object must map to a real idea such as planning, creation, publishing, analytics, organization or brand assets. Do not duplicate the hero object or warp product geometry. Natural copy-safe space must come from composition, depth, shadow, lighting and low-detail environment.
 
 Output only the visual scene; Zunexi adds all typography and graphic elements afterward.`;
 }
@@ -798,8 +833,9 @@ ART-DIRECTION STANDARD:
 - Keep copy-safe space exactly where the slide-role instruction requests it. Do not place important faces/products under that area.
 - No text, letters, numbers, typography, captions, logo text, prices, phone numbers, watermark, poster mockup, social-media template, split graphic panel or fake signage. ${data.allowInterfaces ? "If an interface was explicitly requested, keep it realistic and non-readable; do not invent labels or pseudo-copy." : "No UI, dashboard, browser chrome, device screen or fake software interface."}
 - Avoid oversized empty white areas. Negative space must look intentional and integrated into the scene, with texture, light or environmental depth.
-- No duplicate objects, melted anatomy, extra fingers, warped product geometry, meaningless symbols or pseudo-writing.
+- No duplicate objects, melted anatomy, extra fingers, warped product geometry, meaningless symbols, pseudo-writing or unrelated abstract logo-like sculptures.
 - Do not invent visible brand names. Brand identity comes from art direction, palette accents and supplied reference imagery only.
+- For software, AI or content-creation themes, prefer visual metaphors tied to content production, scheduling, branding, media layers and organized creative flow instead of generic futuristic ornaments.
 
 Unique variation seed: ${data.seed}.`;
 
