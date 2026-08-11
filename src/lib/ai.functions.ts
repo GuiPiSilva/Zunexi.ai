@@ -3,7 +3,7 @@ import { z } from "zod";
 import { admin, consumeAccessCredit, requireAccessKey, requireTenantContext } from "@/lib/access.functions";
 import { brandContextAsPrompt, resolveBrandContext } from "@/lib/brand.functions";
 import { planHasFeature } from "@/lib/plans";
-import { explicitHumanVisualRequest } from "@/lib/creative-engine";
+import { explicitHumanVisualRequest, explicitInterfaceVisualRequest } from "@/lib/creative-engine";
 import { LAYOUT_IDS } from "@/lib/layouts";
 
 const GROQ_TEXT_TIMEOUT_MS = 45_000;
@@ -120,13 +120,15 @@ export const generateCartaz = createServerFn({ method: "POST" })
     const brandPrompt = brandContextAsPrompt(brand);
     await consumeAccessCredit(sb, data.accessKey, data.jobId);
     const allowPeople = explicitHumanVisualRequest(data.title, data.kind, data.style, data.extra);
+    const allowInterfaces = explicitInterfaceVisualRequest(data.title, data.kind, data.style, data.extra);
     const sys = `Você é diretor de arte especializado em cartazes profissionais para Instagram. Retorne apenas JSON válido: { "title": "...", "body": "...", "imagePrompt": "...", "layout": "text-over-image", "visualConcept": "...", "textZone": "left", "subjectZone": "right", "allowPeople": false, "reviewScore": 95 }.
 
 REGRAS:
 - title: chamada principal curta e impactante em português.
 - body: organize somente as informações reais fornecidas pelo usuário de forma clara e bem escrita; inclua data, horário e local apenas quando existirem. Quando o pedido indicar cardápio, lista, catálogo, sabores, preços ou itens detalhados, o body pode ser mais completo, com quebras de linha, seções e itens no estilo "## Seção" e "**Item — preço**".
 - imagePrompt: em inglês, descreva SOMENTE o visual principal do cartaz: fotografia ou ilustração coerente com o evento, cenário, assunto, iluminação, textura, profundidade, enquadramento e direção de arte.
-- NÃO peça texto, tipografia, letras, números, logotipo, preço, telefone, watermark, moldura ou UI dentro da imagem. A Zunexi adicionará todas as informações depois e achatará a composição na arte final.
+- NÃO peça texto, tipografia, letras, números, logotipo, preço, telefone, watermark ou moldura dentro da imagem. A Zunexi adicionará todas as informações depois e achatará a composição na arte final.
+- Telas, dashboards, apps e mockups estão ${allowInterfaces ? "permitidos somente quando indispensáveis ao pedido explícito; não peça pseudo-texto ou labels inventados" : "PROIBIDOS. Se o tema for tecnologia, represente-o com direção de arte abstrata/espacial, objetos, luz e materiais, não com uma interface falsa"}.
 - O visual deve parecer produzido para uma campanha de agência, com composição forte e áreas de respiro naturais para receber o layout.
 - Não invente preço, telefone, endereço, atrações, datas, logotipo ou qualquer informação que não foi enviada.
 - Adapte a direção visual ao tipo do evento: igreja deve ser elegante e inspiradora; música deve ser energética; palestra deve ser sofisticada; promoção deve ser comercial e clara.
@@ -195,10 +197,15 @@ const COLAB_IMAGE_API_KEY = (process.env.COLAB_IMAGE_API_KEY || "").trim();
 const COLAB_IMAGE_MODEL = (process.env.COLAB_IMAGE_MODEL || "zunexi-colab-image-engine").trim();
 const COLAB_IMAGE_TIMEOUT_MS = Number(process.env.COLAB_IMAGE_TIMEOUT_MS || 240_000);
 
+const LOVABLE_API_KEY = (process.env.LOVABLE_API_KEY || "").trim();
+const LOVABLE_IMAGE_MODEL = (process.env.LOVABLE_IMAGE_MODEL || "openai/gpt-image-2").trim();
+const LOVABLE_IMAGE_TIMEOUT_MS = Number(process.env.LOVABLE_IMAGE_TIMEOUT_MS || 180_000);
+
 const PROVIDER_TEST_TIMEOUT_MS = 15_000;
 
 type ImageQuality = "fast" | "premium";
-type ImageProvider = "colab" | "cloudflare";
+type ImageProvider = "colab" | "cloudflare" | "lovable";
+type ImageProviderChoice = "auto" | ImageProvider;
 type GeneratedImage = { mimeType: string; bytes: Buffer; provider: ImageProvider; model: string };
 
 const ImageInput = z.object({
@@ -215,7 +222,9 @@ const ImageInput = z.object({
   style: z.string().optional().default(""),
   aspectRatio: z.enum(["1:1", "4:5", "9:16"]).optional().default("1:1"),
   imageQuality: z.enum(["fast", "premium"]).optional().default("premium"),
+  imageProvider: z.enum(["auto", "colab", "cloudflare", "lovable"]).optional().default("auto"),
   allowPeople: z.boolean().optional().default(false),
+  allowInterfaces: z.boolean().optional().default(false),
 });
 
 const ReferenceImageInput = z.object({
@@ -304,15 +313,15 @@ function colabHeaders(json = false): Record<string, string> {
 }
 
 function imageProviderOrder(): ImageProvider[] {
-  const allowed = new Set<ImageProvider>(["colab", "cloudflare"]);
-  const raw = (process.env.IMAGE_PROVIDER_ORDER || "colab,cloudflare")
+  const allowed = new Set<ImageProvider>(["colab", "cloudflare", "lovable"]);
+  const raw = (process.env.IMAGE_PROVIDER_ORDER || "colab,cloudflare,lovable")
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter((item): item is ImageProvider => allowed.has(item as ImageProvider));
 
-  const order = [...new Set(raw.length ? raw : ["colab", "cloudflare"])] as ImageProvider[];
+  const order = [...new Set(raw.length ? raw : ["colab", "cloudflare", "lovable"])] as ImageProvider[];
   // Evita excluir acidentalmente um provedor que está configurado no Vercel.
-  for (const fallback of ["colab", "cloudflare"] as ImageProvider[]) {
+  for (const fallback of ["colab", "cloudflare", "lovable"] as ImageProvider[]) {
     if (providerConfigured(fallback) && !order.includes(fallback)) order.push(fallback);
   }
   return order;
@@ -320,7 +329,8 @@ function imageProviderOrder(): ImageProvider[] {
 
 function providerConfigured(provider: ImageProvider) {
   if (provider === "colab") return Boolean(normalizedColabBaseUrl());
-  return Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN);
+  if (provider === "cloudflare") return Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN);
+  return Boolean(LOVABLE_API_KEY);
 }
 
 function cloudflareModelFor(quality: ImageQuality) {
@@ -482,22 +492,106 @@ async function callColabImage(
   }
 }
 
+async function callLovableImage(
+  prompt: string,
+  aspectRatio: "1:1" | "4:5" | "9:16",
+  _seed: string,
+  _quality: ImageQuality,
+): Promise<GeneratedImage> {
+  if (!LOVABLE_API_KEY) throw new Error("Lovable AI não configurada: falta LOVABLE_API_KEY.");
+
+  // O projeto criado no Lovable usa exatamente o gateway abaixo com openai/gpt-image-2.
+  // Para 4:5 e 9:16 usamos o tamanho vertical aceito pelo motor, mantendo a proporção desejada no prompt.
+  const size = aspectRatio === "1:1" ? "1024x1024" : "1024x1536";
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), LOVABLE_IMAGE_TIMEOUT_MS);
+  try {
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/images/generations", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: LOVABLE_IMAGE_MODEL,
+        prompt: compactImagePrompt(`${prompt}\n\nRequested canvas aspect ratio: ${aspectRatio}.`),
+        size,
+        quality: "medium",
+        n: 1,
+      }),
+    });
+
+    const raw = await response.text();
+    let json: any = {};
+    try { json = raw ? JSON.parse(raw) : {}; } catch {
+      throw new Error(`Lovable AI retornou uma resposta inválida (${response.status}): ${raw.slice(0, 500)}`);
+    }
+
+    if (!response.ok) {
+      const detail = json?.error?.message || json?.message || raw.slice(0, 500) || "erro sem detalhes";
+      if (response.status === 402) throw new Error("Lovable AI sem créditos disponíveis.");
+      if (response.status === 429) throw new Error("Limite do Lovable AI atingido. Tente novamente em instantes.");
+      throw new Error(`Lovable AI ${response.status}: ${detail}`);
+    }
+
+    const encoded =
+      json?.b64_json ||
+      json?.image?.b64_json ||
+      json?.data?.[0]?.b64_json ||
+      json?.partial_image_b64 ||
+      "";
+    if (encoded) {
+      const decoded = decodeBase64Image(encoded, "image/png");
+      return { ...decoded, provider: "lovable", model: LOVABLE_IMAGE_MODEL };
+    }
+
+    const imageUrl = json?.url || json?.data?.[0]?.url || json?.image?.url || "";
+    if (imageUrl) {
+      const downloaded = await fetchImageUrl(imageUrl);
+      return { ...downloaded, provider: "lovable", model: LOVABLE_IMAGE_MODEL };
+    }
+
+    throw new Error("Lovable AI respondeu sem imagem reconhecível.");
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Lovable AI excedeu ${Math.round(LOVABLE_IMAGE_TIMEOUT_MS / 1000)}s.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function generateWithProviderFallback(
   prompt: string,
   aspectRatio: "1:1" | "4:5" | "9:16",
   seed: string,
   quality: ImageQuality,
+  preferredProvider: ImageProviderChoice = "auto",
 ): Promise<GeneratedImage> {
   const configured = imageProviderOrder().filter(providerConfigured);
   if (!configured.length) {
-    throw new Error("Nenhum provedor de imagem está configurado no Vercel. Configure o Colab e/ou a Cloudflare.");
+    throw new Error("Nenhum provedor de imagem está configurado no Vercel. Configure Colab, Cloudflare e/ou LOVABLE_API_KEY.");
+  }
+
+  const providers: ImageProvider[] = preferredProvider === "auto"
+    ? configured
+    : providerConfigured(preferredProvider)
+      ? [preferredProvider]
+      : [];
+
+  if (!providers.length && preferredProvider !== "auto") {
+    const providerName = preferredProvider === "colab" ? "Colab" : preferredProvider === "cloudflare" ? "Cloudflare" : "Lovable / GPT Image 2";
+    throw new Error(`O motor ${providerName} foi selecionado, mas não está configurado no servidor.`);
   }
 
   const failures: string[] = [];
-  for (const provider of configured) {
+  for (const provider of providers) {
     try {
       if (provider === "colab") return await callColabImage(prompt, aspectRatio, seed, quality);
-      return await callCloudflareImage(prompt, aspectRatio, seed, quality);
+      if (provider === "cloudflare") return await callCloudflareImage(prompt, aspectRatio, seed, quality);
+      return await callLovableImage(prompt, aspectRatio, seed, quality);
     } catch (error) {
       const detail = providerErrorMessage(error);
       console.error(`[image-provider:${provider}]`, detail);
@@ -505,6 +599,9 @@ async function generateWithProviderFallback(
     }
   }
 
+  if (preferredProvider !== "auto") {
+    throw new Error(`O motor selecionado falhou. ${failures.join(" | ")}`);
+  }
   throw new Error(`Todos os provedores de imagem configurados falharam. ${failures.join(" | ")}`);
 }
 
@@ -567,12 +664,13 @@ export const generateImage = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<{ url: string; provider: ImageProvider; model: string; priority: boolean }> => {
     const access = await requireAccessKey(admin(), data.accessKey);
     const priority = planHasFeature(access.plan, "prioridade_geracao");
-    const effectiveQuality: ImageQuality = priority ? "premium" : "fast";
+    const effectiveQuality: ImageQuality = data.imageQuality === "premium" && priority ? "premium" : "fast";
     const fullPrompt = `CREATE ONLY A SINGLE CONTINUOUS PHOTOGRAPHIC / 3D / ILLUSTRATIVE SCENE FOR A HIGH-END INSTAGRAM CAMPAIGN. Zunexi will apply the final Portuguese copy afterward and flatten everything into the finished image.
 
 ABSOLUTE FORMAT RULES:
 - This output is NOT the finished Instagram post and NOT a graphic-design template.
-- Do NOT design a poster, social-media card, split layout, colored copy panel, banner, collage, magazine page, UI screen, presentation slide or mockup.
+- Do NOT design a poster, social-media card, split layout, colored copy panel, banner, collage, magazine page or presentation slide.
+- INTERFACE POLICY: ${data.allowInterfaces ? "A device/interface may appear only because the original user brief explicitly requested it. Keep it secondary, realistic, free of invented readable copy and never turn the whole result into a UI screenshot." : "ABSOLUTELY NO UI: no dashboard, app screen, browser window, phone/laptop screen, social-media interface or software mockup. If software/AI is the subject, represent the idea with premium abstract technology, objects, spatial light, materials and data-like geometry."}
 - Do NOT render any headline, subtitle, label, caption, logo wordmark, pseudo-text, random letters, numbers or signage.
 - The image must remain one coherent edge-to-edge scene. Copy-safe space must come from natural composition, lighting, depth and uncluttered background — never from a blank rectangle or colored panel.
 - HUMAN POLICY: ${data.allowPeople ? "People are allowed only when required by the supplied brief; keep anatomy natural and purposeful." : "ABSOLUTELY NO PEOPLE: no humans, faces, portraits, bodies, hands, silhouettes, crowds, models or human-like figures."}
@@ -594,13 +692,14 @@ ART-DIRECTION STANDARD:
 - Create subject/background separation using contrast, light, depth and composition instead of a flat monochrome filter.
 - Favor poster-scale hierarchy, oversized hero subjects, editorial cropping, real campaign framing, textures, atmospheric effects and strong contrast. Avoid timid compositions with a small subject floating in empty space.
 - Keep copy-safe space exactly where the slide-role instruction requests it. Do not place important faces/products under that area.
-- No text, letters, numbers, typography, captions, logo text, prices, phone numbers, watermark, UI, poster mockup, social-media template, split graphic panel or fake signage.
+- No text, letters, numbers, typography, captions, logo text, prices, phone numbers, watermark, poster mockup, social-media template, split graphic panel or fake signage. ${data.allowInterfaces ? "If an interface was explicitly requested, keep it realistic and non-readable; do not invent labels or pseudo-copy." : "No UI, dashboard, browser chrome, device screen or fake software interface."}
+- Avoid oversized empty white areas. Negative space must look intentional and integrated into the scene, with texture, light or environmental depth.
 - No duplicate objects, melted anatomy, extra fingers, warped product geometry, meaningless symbols or pseudo-writing.
 - Do not invent visible brand names. Brand identity comes from art direction, palette accents and supplied reference imagery only.
 
 Unique variation seed: ${data.seed}.`;
 
-    const generated = await generateWithProviderFallback(fullPrompt, data.aspectRatio, data.seed, effectiveQuality);
+    const generated = await generateWithProviderFallback(fullPrompt, data.aspectRatio, data.seed, effectiveQuality, data.imageProvider);
     const url = await uploadBytesToSupabaseStorage(generated.bytes, generated.mimeType, `slide-${generated.provider}`);
     return { url, provider: generated.provider, model: generated.model, priority };
   });
@@ -665,23 +764,36 @@ async function testColabProvider(): Promise<ProviderTestStatus> {
   } finally { clearTimeout(timeoutId); }
 }
 
+async function testLovableProvider(): Promise<ProviderTestStatus> {
+  if (!LOVABLE_API_KEY) return { provider: "lovable", configured: false, ok: false, model: LOVABLE_IMAGE_MODEL, message: "não configurada" };
+  return {
+    provider: "lovable",
+    configured: true,
+    ok: true,
+    model: LOVABLE_IMAGE_MODEL,
+    message: "LOVABLE_API_KEY configurada; validação real ocorre na primeira geração",
+  };
+}
+
 export const testImageProvidersConnection = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => z.object({ imageQuality: z.enum(["fast", "premium"]).optional().default("premium") }).parse(d ?? {}))
+  .inputValidator((d: unknown) => z.object({ imageQuality: z.enum(["fast", "premium"]).optional().default("premium"), imageProvider: z.enum(["auto", "colab", "cloudflare", "lovable"]).optional().default("auto") }).parse(d ?? {}))
   .handler(async ({ data }): Promise<{ ok: boolean; message: string; providers: ProviderTestStatus[]; order: ImageProvider[] }> => {
     const providers = await Promise.all([
       testColabProvider(),
       testCloudflareProvider(data.imageQuality),
+      testLovableProvider(),
     ]);
     const order = imageProviderOrder();
     const usable = providers.filter((item) => item.ok);
     const configured = providers.filter((item) => item.configured);
     const summary = providers.map((item) => `${item.provider}: ${item.ok ? "OK" : item.message}`).join(" • ");
+    const selected = data.imageProvider === "auto" ? `automático (${order.join(" → ")})` : data.imageProvider;
     return {
       ok: usable.length > 0,
       providers,
       order,
       message: usable.length
-        ? `${usable.length} provedor(es) pronto(s). Ordem de fallback: ${order.join(" → ")}. ${summary}`
+        ? `${usable.length} provedor(es) pronto(s). Motor selecionado: ${selected}. Ordem de fallback: ${order.join(" → ")}. ${summary}`
         : configured.length
           ? `Nenhum provedor de imagem está pronto. ${summary}`
           : "Nenhum provedor de imagem foi configurado no Vercel.",

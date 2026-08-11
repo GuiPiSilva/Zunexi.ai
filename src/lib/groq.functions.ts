@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { consumeAccessCredit, requirePlanFeature, requireTenantContext } from "@/lib/access.functions";
 import { brandContextAsPrompt, resolveBrandContext } from "@/lib/brand.functions";
-import { explicitHumanVisualRequest } from "@/lib/creative-engine";
+import { explicitHumanVisualRequest, explicitInterfaceVisualRequest } from "@/lib/creative-engine";
 import { LAYOUT_IDS } from "@/lib/layouts";
 
 function admin() {
@@ -298,6 +298,7 @@ export const generateInstagramContent = createServerFn({ method: "POST" })
       `${data.tema} ${data.informacoesAdicionais} ${product}`.toLowerCase(),
     );
     const allowPeople = explicitHumanVisualRequest(data.tema, data.informacoesAdicionais, product);
+    const allowInterfaces = explicitInterfaceVisualRequest(data.tema, data.informacoesAdicionais, product);
 
     const { data: recentRows } = await (sb as any)
       .from("generations")
@@ -401,7 +402,8 @@ REGRAS DO promptImagem:
 - Escreva em inglês, com direção de arte específica.
 - Descreva SOMENTE o visual principal: hero subject, environment, camera, lens, lighting, materials, depth, color treatment and composition.
 - Indique claramente o herói, posição no quadro, luz, distância/ângulo de câmera, textura/material e estética de campanha.
-- NÃO solicite texto, tipografia, letras, números, logotipo, preço, telefone, watermark, UI, moldura ou palavras dentro da imagem.
+- NÃO solicite texto, tipografia, letras, números, logotipo, preço, telefone, watermark, moldura ou palavras dentro da imagem.
+- Interfaces, dashboards, telas, browser windows e mockups de dispositivos estão ${allowInterfaces ? "permitidos SOMENTE porque foram pedidos explicitamente; ainda assim, evite pseudo-texto e use a interface como elemento secundário" : "PROIBIDOS. Para temas de tecnologia/software, traduza o conceito em objetos, luz, materiais, geometria e ambiente — nunca invente uma tela de app"}.
 - Reserve negative space natural para a copy; não crie painel branco vazio ou cartão artificial.
 - Use cores locais naturais e acentos controlados da marca.
 - Evite stock photo, generic modern interior, generic smiling person, objetos duplicados, mãos deformadas e fundos poluídos.
@@ -426,6 +428,7 @@ Paleta: ${palette}
 CTA fornecido: ${requestedCta || "não fornecido — crie apenas uma ação genérica coerente, sem telefone, endereço ou link"}
 Informações adicionais: ${data.informacoesAdicionais || "nenhuma"}
 Política de pessoas: ${allowPeople ? "Pessoas permitidas porque o pedido visual as solicitou explicitamente." : "SEM PESSOAS. Não use pessoas, rostos, mãos, corpos, silhuetas ou multidões."}
+Política de interfaces: ${allowInterfaces ? "Tela/interface permitida porque o usuário pediu explicitamente; não invente texto legível." : "SEM TELAS OU UI. Não crie dashboard, app, navegador, smartphone com interface, screenshot ou mockup de software."}
 
 MEMÓRIA CRIATIVA RECENTE — não copie títulos, conceitos, enquadramentos ou sequências de layout abaixo:
 ${recentCreativeMemory.length ? JSON.stringify(recentCreativeMemory) : "nenhuma criação anterior disponível"}
@@ -619,8 +622,9 @@ export const testGroqConnection = createServerFn({ method: "POST" })
 
 const PromptCreatorInput = z.object({
   accessKey: z.string().trim().min(4).max(64),
-  pedido: z.string().trim().min(3).max(500),
+  pedido: z.string().trim().min(3).max(1200),
   brandId: z.string().uuid().optional().nullable(),
+  textProvider: z.enum(["groq", "lovable"]).optional().default("groq"),
 });
 
 export type CarouselPromptData = {
@@ -645,7 +649,7 @@ function normalizePromptData(value: Partial<CarouselPromptData>): CarouselPrompt
     : "informar";
 
   return {
-    prompt: String(value.prompt || "").trim().slice(0, 500),
+    prompt: String(value.prompt || "").trim().slice(0, 2400),
     tema: String(value.tema || "").trim(),
     empresa: String(value.empresa || "").trim(),
     produto: String(value.produto || "").trim(),
@@ -660,16 +664,141 @@ function normalizePromptData(value: Partial<CarouselPromptData>): CarouselPrompt
   };
 }
 
+const PROMPT_CREATOR_SYSTEM = `Você é o estrategista criativo sênior da Zunexi.ai. Transforme o pedido do usuário em um briefing realmente utilizável para criar um carrossel profissional de Instagram, sem frases genéricas e sem inventar fatos.
+
+O campo prompt pode ter até 2400 caracteres e deve ser um briefing operacional completo, escrito em português, contendo naturalmente: objetivo específico; promessa/ideia central; público; ângulo criativo; sequência narrativa sugerida; direção visual; composição; tratamento de imagem; orientação de copy; CTA; restrições e dados que NÃO podem ser inventados.
+
+QUALIDADE OBRIGATÓRIA:
+- Seja específico ao negócio, produto e pedido. Não gere um texto que serviria para qualquer empresa.
+- Evite clichês como “transforme sua presença digital”, “leve sua marca para o próximo nível”, “desperte seu potencial”, “inove hoje” e variações vazias.
+- A primeira tela deve ter um gancho concreto e visualmente forte; os slides seguintes devem avançar a história, não repetir a mesma ideia.
+- Direção visual deve descrever hierarquia, foco, atmosfera, enquadramento e espaço natural para a copy.
+- Nunca peça para o motor de imagem escrever textos, logos, preços, números, telas de app ou pseudo-interfaces dentro da imagem. A Zunexi aplica o texto depois.
+- Pessoas só devem aparecer quando o pedido do usuário exigir explicitamente. Caso contrário, prefira objetos, produto, arquitetura, geometria, luz, textura e elementos abstratos coerentes.
+- objetivo deve ser um destes: vender, educar, engajar, informar, captar clientes.
+- quantidadeSlides deve ser entre 1 e 20; escolha a quantidade que realmente faz sentido, normalmente entre 5 e 8.
+- Não invente nome de empresa, preço, telefone, endereço, resultados, depoimentos ou qualquer informação comercial.
+- Quando houver Brand Kit, ele é obrigatório e deve definir empresa, tom, estilo, paleta, público e restrições.
+- Quando um dado não existir, deixe vazio em vez de inventar.`;
+
+const PROMPT_CREATOR_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    prompt: { type: "string" },
+    tema: { type: "string" },
+    empresa: { type: "string" },
+    produto: { type: "string" },
+    objetivo: { type: "string", enum: ["vender", "educar", "engajar", "informar", "captar clientes"] },
+    publicoAlvo: { type: "string" },
+    tom: { type: "string" },
+    quantidadeSlides: { type: "integer", minimum: 1, maximum: 20 },
+    estilo: { type: "string" },
+    paleta: { type: "string" },
+    cta: { type: "string" },
+    informacoesAdicionais: { type: "string" },
+  },
+  required: ["prompt", "tema", "empresa", "produto", "objetivo", "publicoAlvo", "tom", "quantidadeSlides", "estilo", "paleta", "cta", "informacoesAdicionais"],
+} as const;
+
+async function callLovablePromptCreator(pedido: string, brandPrompt: string): Promise<string> {
+  const key = (process.env.LOVABLE_API_KEY || "").trim();
+  if (!key) throw new Error("LOVABLE_API_KEY não configurada no servidor.");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  try {
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Lovable-API-Key": key,
+        "X-Lovable-AIG-SDK": "fetch",
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: process.env.LOVABLE_TEXT_MODEL || "openai/gpt-5.6-sol",
+        stream: true,
+        input: [
+          { role: "system", content: [{ type: "input_text", text: PROMPT_CREATOR_SYSTEM }] },
+          { role: "user", content: [{ type: "input_text", text: `${brandPrompt}\n\nPedido do usuário: ${pedido}` }] },
+        ],
+        reasoning: { effort: "low", summary: "auto" },
+        text: {
+          format: {
+            type: "json_schema",
+            name: "zunexi_carousel_briefing",
+            strict: true,
+            schema: PROMPT_CREATOR_SCHEMA,
+          },
+        },
+        store: false,
+      }),
+    });
+
+    if (!response.ok || !response.body) {
+      const raw = await response.text().catch(() => "");
+      if (response.status === 402) throw new Error("Créditos do Lovable AI esgotados.");
+      if (response.status === 429) throw new Error("Limite do Lovable AI atingido. Tente novamente em instantes.");
+      if (response.status === 401 || response.status === 403) throw new Error("LOVABLE_API_KEY inválida ou sem permissão.");
+      throw new Error(raw || `Lovable AI retornou erro ${response.status}.`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let out = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (!data || data === "[DONE]") continue;
+        try {
+          const event = JSON.parse(data) as { type?: string; delta?: string; response?: { output_text?: string } };
+          if (event.type === "response.output_text.delta" && typeof event.delta === "string") out += event.delta;
+          else if (event.type === "response.completed" && event.response?.output_text && !out) out = event.response.output_text;
+        } catch { /* ignora frame SSE parcial */ }
+      }
+    }
+    if (!out.trim()) throw new Error("O Lovable GPT-5.6 Sol retornou um prompt vazio.");
+    return out.trim();
+  } catch (error) {
+    if ((error as Error).name === "AbortError") throw new Error("Tempo esgotado ao chamar o Lovable GPT-5.6 Sol.");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export const generateCarouselPrompt = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => PromptCreatorInput.parse(d))
   .handler(async ({ data }): Promise<CarouselPromptData> => {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) throw new Error("GROQ_API_KEY não configurada no servidor.");
-
     const sb = admin();
     const context = await requirePlanFeature(sb, data.accessKey, "criador_prompts");
     const selectedBrand = await resolveBrandContext(sb, context, data.brandId);
     const brandPrompt = brandContextAsPrompt(selectedBrand);
+
+    if (data.textProvider === "lovable") {
+      const content = await callLovablePromptCreator(data.pedido, brandPrompt);
+      let parsed: Partial<CarouselPromptData>;
+      try {
+        parsed = JSON.parse(content) as Partial<CarouselPromptData>;
+      } catch {
+        parsed = { prompt: content, tema: data.pedido };
+      }
+      const normalized = normalizePromptData(parsed);
+      if (!normalized.prompt) normalized.prompt = data.pedido.slice(0, 2400);
+      if (!normalized.tema) normalized.tema = normalized.prompt;
+      return normalized;
+    }
+
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) throw new Error("GROQ_API_KEY não configurada no servidor.");
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -689,7 +818,9 @@ export const generateCarouselPrompt = createServerFn({ method: "POST" })
           messages: [
             {
               role: "system",
-              content: `Transforme o pedido em dados para um carrossel profissional de Instagram. Retorne SOMENTE JSON válido com as chaves: prompt, tema, empresa, produto, objetivo, publicoAlvo, tom, quantidadeSlides, estilo, paleta, cta, informacoesAdicionais. O campo prompt deve ter no máximo 500 caracteres e resumir tudo de forma clara. objetivo deve ser um destes: vender, educar, engajar, informar, captar clientes. quantidadeSlides deve ser um número entre 1 e 20, normalmente 5. Não invente nome de empresa, preço, telefone, endereço ou informação comercial. Quando o usuário não informar algo, use string vazia, exceto tom, estilo, paleta e quantidadeSlides, que podem receber padrões coerentes. Quando houver Brand Kit, ele é obrigatório e deve definir empresa, tom, estilo, paleta, público e restrições.`,
+              content: `${PROMPT_CREATOR_SYSTEM}
+
+Retorne SOMENTE JSON válido com as chaves: prompt, tema, empresa, produto, objetivo, publicoAlvo, tom, quantidadeSlides, estilo, paleta, cta, informacoesAdicionais.`,
             },
             { role: "user", content: `${brandPrompt}
 
@@ -716,7 +847,7 @@ Pedido do usuário: ${data.pedido}` },
       }
 
       const normalized = normalizePromptData(parsed);
-      if (!normalized.prompt) normalized.prompt = data.pedido.slice(0, 500);
+      if (!normalized.prompt) normalized.prompt = data.pedido.slice(0, 2400);
       if (!normalized.tema) normalized.tema = normalized.prompt;
       return normalized;
     } catch (error) {
@@ -750,7 +881,19 @@ export const generateBrandContentIdeas = createServerFn({ method: "POST" })
         temperature: 0.7,
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: `Você é estrategista de conteúdo. Retorne somente JSON válido no formato {"ideas":[{"title":"...","angle":"...","format":"carrossel|cartaz|post|story|reel","objective":"...","prompt":"..."}]}. Crie ideias específicas, não genéricas, respeitando integralmente o Brand Kit. Não invente preços, resultados, depoimentos ou fatos da empresa.` },
+          { role: "system", content: `Você é estrategista editorial e diretor criativo sênior da Zunexi.ai. Retorne somente JSON válido no formato {"ideas":[{"title":"...","angle":"...","format":"carrossel|cartaz|post|story|reel","objective":"...","prompt":"..."}]}.
+
+REGRAS DE QUALIDADE:
+- Cada ideia deve nascer de um insight, dor, objeção, desejo, comparação, bastidor, demonstração, prova permitida ou oportunidade específica do público descrito no Brand Kit.
+- Não use títulos genéricos como “5 dicas”, “Você sabia?”, “Conheça nossos serviços”, “Transforme sua marca”, “Saiba mais” ou variações sem um ângulo concreto.
+- title: curto, específico e diferente das outras ideias.
+- angle: explique em 1–2 frases por que o conteúdo chama atenção e qual tensão/benefício explora.
+- format: escolha o formato que melhor serve à ideia, não repita carrossel em tudo.
+- prompt: escreva um mini-briefing operacional de 250–900 caracteres com gancho, sequência ou estrutura, direção de copy, direção visual e CTA; não peça texto dentro da imagem gerada.
+- Varie os ângulos entre educativo, comercial, autoridade, objeção, comparação, produto/serviço e relacionamento quando fizer sentido.
+- Respeite integralmente o Brand Kit e o objetivo atual.
+- Não invente preços, resultados, depoimentos, estatísticas, clientes, funcionalidades, garantias ou fatos da empresa.
+- Pessoas e interfaces só devem ser sugeridas quando o briefing/Brand Kit exigir explicitamente.` },
           { role: "user", content: `${brandContextAsPrompt(brand)}
 
 Objetivo atual: ${data.objective}
@@ -767,7 +910,7 @@ Quantidade: ${data.quantity}` },
       angle: String(idea.angle || ""),
       format: String(idea.format || "carrossel"),
       objective: String(idea.objective || data.objective),
-      prompt: String(idea.prompt || idea.title || "").slice(0, 500),
+      prompt: String(idea.prompt || idea.title || "").slice(0, 1200),
     }));
     return { ideas };
   });
