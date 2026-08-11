@@ -28,6 +28,7 @@ function PromptCreatorPage() {
   const [plan, setPlan] = useState<PlanId>("profissional");
   const [brandId, setBrandId] = useState("");
   const [pedido, setPedido] = useState("");
+  const [textProvider, setTextProvider] = useState<"groq" | "lovable">("groq");
   const [prompt, setPrompt] = useState("");
   const [generatedData, setGeneratedData] = useState<CarouselPromptData | null>(null);
   const [busy, setBusy] = useState(false);
@@ -53,7 +54,7 @@ function PromptCreatorPage() {
     if (pedido.trim().length < 3) return toast.error("Digite o que você deseja criar.");
     setBusy(true);
     try {
-      const result = await generate({ data: { accessKey, pedido, brandId: brandId || null } });
+      const result = await generate({ data: { accessKey, pedido, brandId: brandId || null, textProvider } });
       setPrompt(result.prompt);
       setGeneratedData(result);
       toast.success("Prompt criado com o Brand Kit selecionado.");
@@ -110,14 +111,24 @@ function PromptCreatorPage() {
             )}
 
             <form onSubmit={handleGenerate} className="panel p-5 sm:p-7">
-              <label className="block"><span className="mb-2 flex items-center gap-2 text-sm font-semibold"><MessageSquareText className="h-4 w-4 text-primary" /> O que você quer criar?</span><textarea value={pedido} onChange={(event) => setPedido(event.target.value)} rows={6} maxLength={500} placeholder="Ex.: Quero um carrossel para apresentar nosso diferencial e levar o público para o WhatsApp." className="app-input resize-y" /><div className="mt-2 text-right text-[11px] text-muted-foreground">{pedido.length}/500</div></label>
-              <button type="submit" disabled={busy} className="primary-button mt-5 w-full sm:w-auto disabled:opacity-60">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}{busy ? "Criando prompt..." : "Criar prompt"}</button>
+              <div className="mb-5 grid gap-4 sm:grid-cols-[1fr_280px]">
+                <div>
+                  <div className="text-sm font-semibold">Motor do prompt</div>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Compare o motor atual da Zunexi com o mesmo GPT-5.6 Sol encontrado no projeto criado pelo Lovable.</p>
+                </div>
+                <select value={textProvider} onChange={(event) => setTextProvider(event.target.value as "groq" | "lovable")} className="app-input">
+                  <option value="groq">Groq — motor atual</option>
+                  <option value="lovable">Lovable — GPT-5.6 Sol</option>
+                </select>
+              </div>
+              <label className="block"><span className="mb-2 flex items-center gap-2 text-sm font-semibold"><MessageSquareText className="h-4 w-4 text-primary" /> O que você quer criar?</span><textarea value={pedido} onChange={(event) => setPedido(event.target.value)} rows={7} maxLength={1200} placeholder="Ex.: Quero um carrossel para mostrar por que uma pizzaria perde pedidos quando demora no WhatsApp e como uma automação resolve isso. Público: donos de pizzarias. Tom direto, visual premium e sem pessoas." className="app-input resize-y" /><div className="mt-2 text-right text-[11px] text-muted-foreground">{pedido.length}/1200</div></label>
+              <button type="submit" disabled={busy} className="primary-button mt-5 w-full sm:w-auto disabled:opacity-60">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}{busy ? "Criando prompt..." : `Criar prompt com ${textProvider === "lovable" ? "Lovable" : "Groq"}`}</button>
             </form>
 
             <section className="panel mt-6 p-5 sm:p-7">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div><div className="flex items-center gap-2 font-semibold"><Sparkles className="h-4 w-4 text-primary" /> Prompt gerado</div><p className="mt-1 text-xs text-muted-foreground">O Brand Kit selecionado já está incorporado nas instruções.</p></div><button type="button" onClick={copyPrompt} disabled={!prompt} className="secondary-button disabled:opacity-40"><Copy className="h-4 w-4" /> Copiar</button></div>
-              <textarea value={prompt} onChange={(event) => setPrompt(event.target.value.slice(0, 500))} rows={10} placeholder="O prompt criado pela IA aparecerá aqui..." maxLength={500} className="app-input resize-y" />
-              <div className="mt-2 text-right text-[11px] text-muted-foreground">{prompt.length}/500</div>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div><div className="flex items-center gap-2 font-semibold"><Sparkles className="h-4 w-4 text-primary" /> Prompt gerado</div><p className="mt-1 text-xs text-muted-foreground">O Brand Kit selecionado já está incorporado. O resultado inclui ângulo criativo, narrativa, direção visual, copy e restrições.</p></div><button type="button" onClick={copyPrompt} disabled={!prompt} className="secondary-button disabled:opacity-40"><Copy className="h-4 w-4" /> Copiar</button></div>
+              <textarea value={prompt} onChange={(event) => setPrompt(event.target.value.slice(0, 2400))} rows={10} placeholder="O prompt criado pela IA aparecerá aqui..." maxLength={2400} className="app-input resize-y" />
+              <div className="mt-2 text-right text-[11px] text-muted-foreground">{prompt.length}/2400</div>
               <button type="button" onClick={sendToCarousel} disabled={!prompt} className="primary-button mt-5 w-full disabled:opacity-40 sm:w-auto">Ir para criar carrossel <ArrowRight className="h-4 w-4" /></button>
             </section>
           </section>

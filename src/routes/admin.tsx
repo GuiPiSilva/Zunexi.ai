@@ -363,8 +363,8 @@ function ImageEnginePanel() {
         <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/12 text-primary"><ImageIcon className="h-5 w-5" /></div>
         <div>
           <div className="eyebrow mb-1">Motor de imagem</div>
-          <h2 className="section-title text-lg">Colab + Cloudflare</h2>
-          <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">A geração usa o servidor de imagem do Colab como principal e Cloudflare Workers AI como fallback. A URL e a chave do Colab ficam somente no backend do Vercel.</p>
+          <h2 className="section-title text-lg">Lovable GPT Image 2 + Colab + Cloudflare</h2>
+          <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">O sistema pode usar o mesmo motor encontrado no projeto do Lovable (openai/gpt-image-2 via Lovable AI Gateway), além de Colab e Cloudflare. A seleção pode ser feita pelo usuário e todas as chaves ficam somente no backend do Vercel.</p>
         </div>
       </div>
     </section>

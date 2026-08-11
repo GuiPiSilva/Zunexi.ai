@@ -26,7 +26,7 @@ import { getAccessKey } from "@/lib/session";
 import { getPrimaryBrandProfile, listBrandProfiles } from "@/lib/brand.functions";
 import { newProject, upsertProject } from "@/lib/storage";
 import { buildLayout, compositionForLayout, fontPairFromStyle, paletteFromDescription } from "@/lib/layouts";
-import { explicitHumanVisualRequest, resolveCampaignLayouts, reviewAndRepairElements } from "@/lib/creative-engine";
+import { explicitHumanVisualRequest, explicitInterfaceVisualRequest, resolveCampaignLayouts, reviewAndRepairElements } from "@/lib/creative-engine";
 import { renderElementsThumbnail } from "@/lib/fabric-elements";
 import {
   createCreationJob,
@@ -60,6 +60,7 @@ type CarouselForm = {
   cta: string;
   informacoesAdicionais: string;
   imageQuality: "fast" | "premium";
+  imageProvider: "auto" | "colab" | "cloudflare" | "lovable";
   brandId: string;
 };
 
@@ -76,6 +77,7 @@ const DEFAULT_FORM: CarouselForm = {
   cta: "",
   informacoesAdicionais: "",
   imageQuality: "fast",
+  imageProvider: "auto",
   brandId: "",
 };
 
@@ -302,6 +304,7 @@ function NovoCarrossel() {
       const resolvedLayouts = resolveCampaignLayouts(output.slides);
       const allowPeople = output.slides.some((slide) => slide.allowPeople === true) ||
         explicitHumanVisualRequest(payload.form.tema, payload.form.produto, payload.details);
+      const allowInterfaces = explicitInterfaceVisualRequest(payload.form.tema, payload.form.produto, payload.details);
 
       setActiveJob(job.id);
       setResult(output);
@@ -340,7 +343,9 @@ function NovoCarrossel() {
                   palette: payload.form.paleta,
                   style: `${payload.form.estilo}; tom ${payload.form.tom}`,
                   imageQuality: payload.form.imageQuality || "premium",
+                  imageProvider: payload.form.imageProvider || "auto",
                   allowPeople,
+                  allowInterfaces,
                 } });
                 if (wasCancelled(job.id)) return;
                 break;
@@ -612,7 +617,7 @@ function NovoCarrossel() {
     setImageEngineTesting(true);
     setImageEngineTestResult(null);
     try {
-      const response = await testImageProviders({ data: { imageQuality: form.imageQuality } });
+      const response = await testImageProviders({ data: { imageQuality: form.imageQuality, imageProvider: form.imageProvider } });
       setImageEngineTestResult(response);
       response.ok ? toast.success("Motor multi-API conectado.") : toast.error(response.message);
     } catch (error) {
@@ -659,7 +664,8 @@ function NovoCarrossel() {
                   <Field label="Quantidade de slides"><select value={form.quantidadeSlides} onChange={(e) => setForm({ ...form, quantidadeSlides: Number(e.target.value) })} className="app-input">{Array.from({ length: 20 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value} slides</option>)}</select></Field>
                   <Field label="Estilo visual"><select value={form.estilo} onChange={(e) => setForm({ ...form, estilo: e.target.value })} className="app-input"><option>publicidade premium</option><option>food commercial</option><option>cinematográfico</option><option>luxury campaign</option><option>editorial</option><option>minimalista e premium</option><option>tech campaign</option><option>3D publicitário</option><option>corporativo</option><option>vibrante</option></select></Field>
                   <Field label="Paleta de cores"><input value={form.paleta} onChange={(e) => setForm({ ...form, paleta: e.target.value })} className="app-input" /></Field>
-                  <Field label="Motor de imagem"><div className="app-input flex items-center">Colab → Cloudflare</div></Field>
+                  <Field label="Motor de imagem"><select value={form.imageProvider} onChange={(e) => setForm({ ...form, imageProvider: e.target.value as CarouselForm["imageProvider"] })} className="app-input"><option value="auto">Automático — usa os motores configurados</option><option value="lovable">Lovable — GPT Image 2</option><option value="colab">Colab — usar somente este motor</option><option value="cloudflare">Cloudflare — usar somente este motor</option></select></Field>
+                  <Field label="Qualidade da imagem"><select value={form.imageQuality} onChange={(e) => setForm({ ...form, imageQuality: e.target.value as CarouselForm["imageQuality"] })} className="app-input"><option value="fast">Rápida</option><option value="premium">Premium</option></select></Field>
                 </div>
 
                 <Field label="CTA — chamada para ação"><input value={form.cta} onChange={(e) => setForm({ ...form, cta: e.target.value })} placeholder="Ex.: Experimente grátis a Zunexi.ai" className="app-input" /></Field>
@@ -669,7 +675,7 @@ function NovoCarrossel() {
                   <div className="rounded-xl border border-border bg-white/[0.02] p-4">
                     <div className="text-sm font-medium">Temporariamente desativada</div>
                     <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                      A geração usa o Colab como motor principal e a Cloudflare como fallback conforme as APIs configuradas no Vercel. O upload de referência continua separado da geração principal por enquanto.
+                      No modo Automático, a geração percorre os motores configurados conforme IMAGE_PROVIDER_ORDER. Para comparar a qualidade do Lovable GPT Image 2 com Colab/Cloudflare, escolha um motor específico acima. O upload de referência continua separado da geração principal por enquanto.
                     </p>
                   </div>
                 </Field>

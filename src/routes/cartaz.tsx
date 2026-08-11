@@ -7,7 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { generateCartaz, generateImage } from "@/lib/ai.functions";
 import { newProject, upsertProject } from "@/lib/storage";
 import { buildLayout, compositionForLayout, fontPairFromStyle, paletteFromDescription } from "@/lib/layouts";
-import { explicitHumanVisualRequest, resolveCampaignLayouts, reviewAndRepairElements } from "@/lib/creative-engine";
+import { explicitHumanVisualRequest, explicitInterfaceVisualRequest, resolveCampaignLayouts, reviewAndRepairElements } from "@/lib/creative-engine";
 import { renderElementsThumbnail } from "@/lib/fabric-elements";
 import { getAccessKey } from "@/lib/session";
 import { getPrimaryBrandProfile, listBrandProfiles } from "@/lib/brand.functions";
@@ -63,6 +63,7 @@ function NovoCartaz() {
     palette: "roxo, rosa, azul e ciano",
     format: "1080x1350",
     imageQuality: "fast" as "fast" | "premium",
+    imageProvider: "auto" as "auto" | "colab" | "cloudflare" | "lovable",
     brandId: "",
   });
 
@@ -200,6 +201,12 @@ function NovoCartaz() {
           currentForm.description,
           currentForm.style,
         );
+        const allowInterfaces = explicitInterfaceVisualRequest(
+          currentForm.title,
+          currentForm.kind,
+          currentForm.description,
+          currentForm.style,
+        );
 
         let imageUrl = job.assets.main?.url || memoryPhoto || payload.photo;
         if (!imageUrl) {
@@ -216,7 +223,9 @@ function NovoCartaz() {
               style: `${currentForm.style}; campaign key visual; premium event art direction; no typography inside the generated image`,
               aspectRatio,
               imageQuality: currentForm.imageQuality || "premium",
+              imageProvider: currentForm.imageProvider || "auto",
               allowPeople,
+              allowInterfaces,
             },
           });
           imageUrl = image.url;
@@ -362,7 +371,7 @@ function NovoCartaz() {
               <Field label="Descrição do evento"><textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={4} placeholder="Descreva a experiência, atrações e diferenciais." className="app-input resize-y" /></Field>
               <Field label="Atrações principais"><input value={form.attractions} onChange={(e) => setForm({ ...form, attractions: e.target.value })} placeholder="DJ Lucas Beat, MC Wave, Banda Horizon" className="app-input" /></Field>
               <div className="grid gap-5 md:grid-cols-3"><Field label="Preço"><input value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="R$ 80,00" className="app-input" /></Field><Field label="Contato"><input value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} placeholder="(11) 99999-9999" className="app-input" /></Field><Field label="Chamada para ação"><input value={form.cta} onChange={(e) => setForm({ ...form, cta: e.target.value })} className="app-input" /></Field></div>
-              <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4"><Field label="Estilo visual"><select value={form.style} onChange={(e) => setForm({ ...form, style: e.target.value })} className="app-input">{STYLE_CARDS.map((style) => <option key={style.id} value={style.id}>{style.title}</option>)}</select></Field><Field label="Paleta de cores"><input value={form.palette} onChange={(e) => setForm({ ...form, palette: e.target.value })} className="app-input" /></Field><Field label="Formato da arte"><select value={form.format} onChange={(e) => setForm({ ...form, format: e.target.value })} className="app-input"><option value="1080x1350">1080 × 1350 — Feed</option><option value="1080x1080">1080 × 1080 — Quadrado</option><option value="1080x1920">1080 × 1920 — Story</option></select></Field><Field label="Motor de imagem"><div className="app-input flex items-center">Colab → Cloudflare</div></Field></div>
+              <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-5"><Field label="Estilo visual"><select value={form.style} onChange={(e) => setForm({ ...form, style: e.target.value })} className="app-input">{STYLE_CARDS.map((style) => <option key={style.id} value={style.id}>{style.title}</option>)}</select></Field><Field label="Paleta de cores"><input value={form.palette} onChange={(e) => setForm({ ...form, palette: e.target.value })} className="app-input" /></Field><Field label="Formato da arte"><select value={form.format} onChange={(e) => setForm({ ...form, format: e.target.value })} className="app-input"><option value="1080x1350">1080 × 1350 — Feed</option><option value="1080x1080">1080 × 1080 — Quadrado</option><option value="1080x1920">1080 × 1920 — Story</option></select></Field><Field label="Motor de imagem"><select value={form.imageProvider} onChange={(e) => setForm({ ...form, imageProvider: e.target.value as typeof form.imageProvider })} className="app-input"><option value="auto">Automático — motores configurados</option><option value="lovable">Lovable — GPT Image 2</option><option value="colab">Colab — somente este motor</option><option value="cloudflare">Cloudflare — somente este motor</option></select></Field><Field label="Qualidade"><select value={form.imageQuality} onChange={(e) => setForm({ ...form, imageQuality: e.target.value as typeof form.imageQuality })} className="app-input"><option value="fast">Rápida</option><option value="premium">Premium</option></select></Field></div>
               <Field label="Foto principal — opcional"><label className="flex min-h-28 cursor-pointer items-center gap-4 rounded-xl border border-dashed border-border bg-white/[0.018] p-4 hover:border-primary/50"><div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><Upload className="h-5 w-5" /></div><div className="min-w-0 flex-1"><div className="text-sm font-medium">{photo ? "Imagem carregada" : "Enviar imagem do evento"}</div><div className="mt-1 text-xs text-muted-foreground">PNG ou JPG, máximo de 8 MB.</div></div>{photo && <img src={photo} alt="Prévia" className="h-20 w-20 rounded-xl object-cover" />}<input type="file" accept="image/*" onChange={onFile} className="hidden" /></label></Field>
             </div>
             {busy && (
