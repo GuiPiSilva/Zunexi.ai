@@ -178,6 +178,22 @@ export const getPrimaryBrandProfile = createServerFn({ method: "POST" })
     return row;
   });
 
+
+const PreparePdfUploadInput = AccessInput.extend({
+  brandId: z.string().uuid().nullable().optional(),
+  fileName: z.string().trim().min(1).max(180),
+  mimeType: z.literal("application/pdf"),
+  fileSize: z.number().int().positive().max(15 * 1024 * 1024),
+});
+
+const ProcessPdfUploadInput = AccessInput.extend({
+  brandId: z.string().uuid().nullable().optional(),
+  fileName: z.string().trim().min(1).max(180),
+  mimeType: z.literal("application/pdf"),
+  storagePath: z.string().trim().min(5).max(500),
+  fileSize: z.number().int().positive().max(15 * 1024 * 1024),
+});
+
 const PdfInput = AccessInput.extend({
   brandId: z.string().uuid().nullable().optional(),
   fileName: z.string().trim().min(1).max(180),
@@ -237,6 +253,169 @@ async function ensureBucket(sb: ReturnType<typeof admin>) {
   });
   if (error && !/already exists/i.test(error.message)) throw new Error(error.message);
 }
+
+
+async function processBrandGuideBuffer({
+  sb,
+  context,
+  buffer,
+  brandId: inputBrandId,
+  fileName,
+  mimeType,
+  storagePath,
+}: {
+  sb: ReturnType<typeof admin>;
+  context: TenantContext;
+  buffer: Buffer;
+  brandId?: string | null;
+  fileName: string;
+  mimeType: "application/pdf";
+  storagePath: string;
+}) {
+  if (buffer.byteLength > 15 * 1024 * 1024) throw new Error("O PDF deve ter no máximo 15 MB.");
+  if (!buffer.byteLength) throw new Error("O PDF enviado está vazio.");
+
+  const { extractText, extractTextItems, getDocumentProxy } = await import("unpdf");
+  let pdf: Awaited<ReturnType<typeof getDocumentProxy>>;
+  try {
+    pdf = await getDocumentProxy(new Uint8Array(buffer), { maxImageSize: 16_777_216 });
+  } catch {
+    throw new Error("Não foi possível abrir este PDF. Tente exportar o manual novamente como PDF padrão.");
+  }
+  if (pdf.numPages > 100) throw new Error("O manual deve ter no máximo 100 páginas.");
+
+  const extraction = Promise.all([
+    extractText(pdf, { mergePages: true }),
+    extractTextItems(pdf),
+  ]);
+  const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("O PDF demorou demais para ser processado.")), 35_000));
+  const [{ text, totalPages }, structured] = await Promise.race([extraction, timeout]);
+  const extractedText = String(text || "").trim();
+  if (extractedText.length < 40) throw new Error("Não foi possível ler texto suficiente deste PDF. Use um PDF com texto selecionável.");
+
+  const fontCount = new Map<string, number>();
+  for (const page of structured.items) for (const item of page) {
+    const name = String(item.fontFamily || "").trim();
+    if (name) fontCount.set(name, (fontCount.get(name) || 0) + 1);
+  }
+  const fonts = [...fontCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([name]) => name);
+  const analysis = await analyzeGuide(extractedText, fonts);
+
+  let brandId = inputBrandId || null;
+  if (!brandId) {
+    await ensureBrandLimit(sb, context, true);
+    const { data: created, error } = await (sb as any).from("brand_profiles").insert({
+      tenant_id: context.tenant.id,
+      access_key_id: context.access.id,
+      created_by_member_id: context.member.id,
+      name: String(analysis.name || fileName.replace(/\.pdf$/i, "")),
+      primary_color: /^#[0-9a-f]{6}$/i.test(String(analysis.primaryColor)) ? analysis.primaryColor : "#4D6BFF",
+      secondary_color: /^#[0-9a-f]{6}$/i.test(String(analysis.secondaryColor)) ? analysis.secondaryColor : "#8B5CF6",
+      accent_color: /^#[0-9a-f]{6}$/i.test(String(analysis.accentColor)) ? analysis.accentColor : "#12C7FF",
+      tone_of_voice: String(analysis.toneOfVoice || ""),
+      audience: String(analysis.audience || ""),
+      visual_style: String(analysis.visualStyle || ""),
+      notes: String(analysis.notes || ""),
+      typography: fonts,
+      content_pillars: asArray(analysis.contentPillars),
+      prohibited_terms: asArray(analysis.prohibitedTerms),
+      guide_summary: String(analysis.guideSummary || ""),
+      guide_text: extractedText.slice(0, 50000),
+      guide_updated_at: new Date().toISOString(),
+      is_primary: true,
+    }).select("*").single();
+    if (error) throw new Error(error.message);
+    brandId = created.id;
+  } else {
+    const existing = await resolveBrandContext(sb, context, brandId);
+    if (!existing) throw new Error("Marca não encontrada nesta empresa.");
+    const { error } = await (sb as any).from("brand_profiles").update({
+      name: String(analysis.name || existing.name),
+      primary_color: /^#[0-9a-f]{6}$/i.test(String(analysis.primaryColor)) ? analysis.primaryColor : existing.primaryColor,
+      secondary_color: /^#[0-9a-f]{6}$/i.test(String(analysis.secondaryColor)) ? analysis.secondaryColor : existing.secondaryColor,
+      accent_color: /^#[0-9a-f]{6}$/i.test(String(analysis.accentColor)) ? analysis.accentColor : existing.accentColor,
+      tone_of_voice: String(analysis.toneOfVoice || existing.toneOfVoice),
+      audience: String(analysis.audience || existing.audience),
+      visual_style: String(analysis.visualStyle || existing.visualStyle),
+      notes: String(analysis.notes || existing.notes),
+      typography: fonts,
+      content_pillars: asArray(analysis.contentPillars),
+      prohibited_terms: asArray(analysis.prohibitedTerms),
+      guide_summary: String(analysis.guideSummary || ""),
+      guide_text: extractedText.slice(0, 50000),
+      guide_updated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq("id", brandId).eq("tenant_id", context.tenant.id);
+    if (error) throw new Error(error.message);
+  }
+
+  const extractedData = { ...analysis, typography: fonts };
+  const { error: docError } = await (sb as any).from("brand_documents").insert({
+    tenant_id: context.tenant.id,
+    brand_profile_id: brandId,
+    uploaded_by_member_id: context.member.id,
+    file_name: fileName,
+    storage_path: storagePath,
+    mime_type: mimeType,
+    size_bytes: buffer.byteLength,
+    page_count: totalPages,
+    extracted_text: extractedText.slice(0, 50000),
+    extracted_data: extractedData,
+  });
+  if (docError) throw new Error(docError.message);
+
+  const { data: brand, error: brandError } = await (sb as any).from("brand_profiles").select("*").eq("id", brandId).eq("tenant_id", context.tenant.id).single();
+  if (brandError) throw new Error(brandError.message);
+  return { brand, totalPages, fonts, summary: String(analysis.guideSummary || "") };
+}
+
+export const prepareBrandGuidePdfUpload = createServerFn({ method: "POST" })
+  .inputValidator((value: unknown) => PreparePdfUploadInput.parse(value))
+  .handler(async ({ data }) => {
+    const sb = admin();
+    const context = await requirePlanFeature(sb, data.accessKey, "brand_kit");
+    if (data.brandId) {
+      const existing = await resolveBrandContext(sb, context, data.brandId);
+      if (!existing) throw new Error("Marca não encontrada nesta empresa.");
+    } else {
+      await ensureBrandLimit(sb, context, true);
+    }
+    await ensureBucket(sb);
+    const safeName = data.fileName.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(-120) || "brand-guide.pdf";
+    const brandFolder = data.brandId || "new";
+    const storagePath = `${context.tenant.id}/${brandFolder}/${randomUUID()}-${safeName}`;
+    const { data: signed, error } = await sb.storage.from("brand-documents").createSignedUploadUrl(storagePath);
+    if (error || !signed?.token) throw new Error(error?.message || "Não foi possível preparar o upload do PDF.");
+    return { storagePath, token: signed.token };
+  });
+
+export const processUploadedBrandGuidePdf = createServerFn({ method: "POST" })
+  .inputValidator((value: unknown) => ProcessPdfUploadInput.parse(value))
+  .handler(async ({ data }) => {
+    const sb = admin();
+    const context = await requirePlanFeature(sb, data.accessKey, "brand_kit");
+    if (!data.storagePath.startsWith(`${context.tenant.id}/`)) throw new Error("Arquivo inválido para esta empresa.");
+    const { data: file, error: downloadError } = await sb.storage.from("brand-documents").download(data.storagePath);
+    if (downloadError || !file) throw new Error(downloadError?.message || "Não foi possível recuperar o PDF enviado.");
+    const buffer = Buffer.from(await file.arrayBuffer());
+    if (buffer.byteLength !== data.fileSize) {
+      console.warn("Brand PDF size mismatch", { expected: data.fileSize, actual: buffer.byteLength, path: data.storagePath });
+    }
+    try {
+      return await processBrandGuideBuffer({
+        sb,
+        context,
+        buffer,
+        brandId: data.brandId,
+        fileName: data.fileName,
+        mimeType: data.mimeType,
+        storagePath: data.storagePath,
+      });
+    } catch (error) {
+      await sb.storage.from("brand-documents").remove([data.storagePath]);
+      throw error;
+    }
+  });
 
 export const uploadBrandGuidePdf = createServerFn({ method: "POST" })
   .inputValidator((value: unknown) => PdfInput.parse(value))
