@@ -56,6 +56,34 @@ const AutomationPayload = z.object({
 const MANAGEMENT_FEATURE = "gestao_redes" as const;
 const META_VERSION = (process.env.META_GRAPH_VERSION || "v26.0").replace(/^\//, "");
 const META_GRAPH = `https://graph.facebook.com/${META_VERSION}`;
+const META_DEFAULT_SCOPES = [
+  "pages_show_list",
+  "pages_read_engagement",
+  "pages_manage_posts",
+  "pages_manage_metadata",
+  "instagram_basic",
+  "instagram_content_publish",
+];
+
+function publicAppUrl() {
+  const explicit = String(process.env.PUBLIC_APP_URL || process.env.APP_URL || "").trim();
+  const vercel = String(process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL || "").trim();
+  const raw = explicit || (vercel ? (vercel.startsWith("http") ? vercel : `https://${vercel}`) : "");
+  if (!raw) throw new Error("PUBLIC_APP_URL não configurada. Informe a URL pública do Zunexi na Vercel para usar o login automático das redes.");
+  return raw.replace(/\/+$/, "");
+}
+
+function metaOAuthCallbackUrl() {
+  return `${publicAppUrl()}/api/social/meta-oauth-callback`;
+}
+
+function metaOAuthScopes() {
+  const configured = String(process.env.META_OAUTH_SCOPES || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return configured.length ? configured : META_DEFAULT_SCOPES;
+}
 
 function tokenSecret() {
   const value = process.env.SOCIAL_TOKEN_SECRET || process.env.ADMIN_SESSION_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -79,6 +107,29 @@ function decryptSecret(value: string) {
   const decipher = createDecipheriv("aes-256-gcm", tokenSecret(), Buffer.from(ivRaw, "base64url"));
   decipher.setAuthTag(Buffer.from(tagRaw, "base64url"));
   return Buffer.concat([decipher.update(Buffer.from(encryptedRaw, "base64url")), decipher.final()]).toString("utf8");
+}
+
+type MetaOAuthState = {
+  accessKey: string;
+  brandId: string | null;
+  issuedAt: number;
+  nonce: string;
+};
+
+function encodeMetaOAuthState(value: MetaOAuthState) {
+  return encryptSecret(JSON.stringify(value));
+}
+
+function decodeMetaOAuthState(value: string): MetaOAuthState {
+  let parsed: MetaOAuthState;
+  try {
+    parsed = JSON.parse(decryptSecret(value)) as MetaOAuthState;
+  } catch {
+    throw new Error("Estado OAuth inválido. Inicie a conexão novamente pela Zunexi.");
+  }
+  if (!parsed.accessKey || !parsed.issuedAt || !parsed.nonce) throw new Error("Estado OAuth incompleto.");
+  if (Date.now() - parsed.issuedAt > 20 * 60_000) throw new Error("Esta tentativa de conexão expirou. Inicie o login novamente.");
+  return parsed;
 }
 
 function stringArray(value: unknown) {
@@ -150,6 +201,196 @@ async function fetchJson(url: string, init: RequestInit = {}, timeoutMs = 25_000
   } finally {
     clearTimeout(timer);
   }
+}
+
+const MetaOAuthStartInput = AccessInput.extend({
+  brandId: z.string().uuid().optional().nullable(),
+});
+
+export const createMetaOAuthUrl = createServerFn({ method: "POST" })
+  .inputValidator((value: unknown) => MetaOAuthStartInput.parse(value))
+  .handler(async ({ data }) => {
+    const appId = String(process.env.META_APP_ID || "").trim();
+    const appSecret = String(process.env.META_APP_SECRET || "").trim();
+    if (!appId || !appSecret) throw new Error("META_APP_ID e META_APP_SECRET precisam estar configurados na Vercel.");
+
+    const sb = admin();
+    const context = await requirePlanFeature(sb, data.accessKey, MANAGEMENT_FEATURE);
+    requireManager(context);
+    const brandId = await validateBrand(sb, context, data.brandId);
+    const state = encodeMetaOAuthState({
+      accessKey: data.accessKey,
+      brandId,
+      issuedAt: Date.now(),
+      nonce: randomBytes(18).toString("base64url"),
+    });
+    const params = new URLSearchParams({
+      client_id: appId,
+      redirect_uri: metaOAuthCallbackUrl(),
+      state,
+      response_type: "code",
+      scope: metaOAuthScopes().join(","),
+    });
+    return {
+      url: `https://www.facebook.com/${META_VERSION}/dialog/oauth?${params.toString()}`,
+      redirectUri: metaOAuthCallbackUrl(),
+      scopes: metaOAuthScopes(),
+    };
+  });
+
+async function upsertMetaOAuthAccount(args: {
+  context: TenantContext;
+  brandId: string | null;
+  platform: "facebook" | "instagram";
+  externalAccountId: string;
+  accountName: string;
+  username?: string;
+  pageId: string;
+  instagramBusinessAccountId?: string;
+  accessToken: string;
+  expiresAt: string | null;
+  permissions: string[];
+  metadata: Record<string, unknown>;
+}) {
+  const sb = admin();
+  const found = await (sb as any).from("social_accounts")
+    .select("*")
+    .eq("tenant_id", args.context.tenant.id)
+    .eq("platform", args.platform)
+    .eq("external_account_id", args.externalAccountId)
+    .maybeSingle();
+  if (found.error) throw new Error(found.error.message);
+
+  const payload = {
+    tenant_id: args.context.tenant.id,
+    brand_profile_id: args.brandId,
+    created_by_member_id: found.data?.created_by_member_id || args.context.member.id,
+    platform: args.platform,
+    account_name: String(args.accountName || args.platform).slice(0, 160),
+    username: String(args.username || "").replace(/^@/, "").slice(0, 160),
+    external_account_id: args.externalAccountId,
+    page_id: args.pageId,
+    instagram_business_account_id: args.instagramBusinessAccountId || "",
+    status: "connected",
+    access_token_cipher: encryptSecret(args.accessToken),
+    refresh_token_cipher: found.data?.refresh_token_cipher || "",
+    token_expires_at: args.expiresAt,
+    permissions: args.permissions,
+    metadata: { ...(found.data?.metadata || {}), ...args.metadata, connector: "meta_oauth" },
+    last_sync_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  const query = found.data
+    ? (sb as any).from("social_accounts").update(payload).eq("id", found.data.id).eq("tenant_id", args.context.tenant.id)
+    : (sb as any).from("social_accounts").insert(payload);
+  const saved = await query.select("*").single();
+  if (saved.error) throw new Error(saved.error.message);
+  return sanitizeAccount(saved.data);
+}
+
+export async function completeMetaOAuth(code: string, stateValue: string) {
+  const appId = String(process.env.META_APP_ID || "").trim();
+  const appSecret = String(process.env.META_APP_SECRET || "").trim();
+  if (!appId || !appSecret) throw new Error("META_APP_ID e META_APP_SECRET não configurados.");
+  if (!code) throw new Error("A Meta não retornou o código de autorização.");
+  if (!stateValue) throw new Error("A Meta não retornou o estado de segurança da conexão.");
+
+  const state = decodeMetaOAuthState(stateValue);
+  const sb = admin();
+  const context = await requirePlanFeature(sb, state.accessKey, MANAGEMENT_FEATURE);
+  requireManager(context);
+  const brandId = await validateBrand(sb, context, state.brandId);
+  const redirectUri = metaOAuthCallbackUrl();
+
+  const shortParams = new URLSearchParams({
+    client_id: appId,
+    client_secret: appSecret,
+    redirect_uri: redirectUri,
+    code,
+  });
+  const short = await fetchJson(`${META_GRAPH}/oauth/access_token?${shortParams.toString()}`);
+  const shortToken = String(short.access_token || "");
+  if (!shortToken) throw new Error("A Meta não retornou um token de acesso.");
+
+  let userToken = shortToken;
+  let expiresIn = Number(short.expires_in || 0);
+  try {
+    const longParams = new URLSearchParams({
+      grant_type: "fb_exchange_token",
+      client_id: appId,
+      client_secret: appSecret,
+      fb_exchange_token: shortToken,
+    });
+    const long = await fetchJson(`${META_GRAPH}/oauth/access_token?${longParams.toString()}`);
+    if (long.access_token) userToken = String(long.access_token);
+    if (long.expires_in) expiresIn = Number(long.expires_in);
+  } catch (error) {
+    console.warn("Não foi possível trocar o token Meta por longa duração; usando o token recebido no OAuth.", error);
+  }
+
+  const expiresAt = expiresIn > 0 ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
+  const scopes = metaOAuthScopes();
+  const fields = "id,name,username,access_token,instagram_business_account{id,username,name,profile_picture_url,followers_count,media_count}";
+  const pages = await fetchJson(`${META_GRAPH}/me/accounts?fields=${encodeURIComponent(fields)}&limit=100&access_token=${encodeURIComponent(userToken)}`);
+  const rows = Array.isArray(pages?.data) ? pages.data : [];
+  if (!rows.length) {
+    throw new Error("Nenhuma Página do Facebook foi encontrada para este login. A conta precisa ter acesso a uma Página para a conexão Meta da Zunexi.");
+  }
+
+  const saved: any[] = [];
+  for (const page of rows) {
+    const pageId = String(page?.id || "");
+    const pageToken = String(page?.access_token || "");
+    if (!pageId || !pageToken) continue;
+    const pageName = String(page?.name || page?.username || "Página Facebook");
+    saved.push(await upsertMetaOAuthAccount({
+      context,
+      brandId,
+      platform: "facebook",
+      externalAccountId: pageId,
+      accountName: pageName,
+      username: String(page?.username || ""),
+      pageId,
+      accessToken: pageToken,
+      expiresAt,
+      permissions: scopes,
+      metadata: { page_name: pageName, oauth_connected_at: new Date().toISOString() },
+    }));
+
+    const ig = page?.instagram_business_account;
+    const igId = String(ig?.id || "");
+    if (igId) {
+      const igName = String(ig?.name || ig?.username || `${pageName} Instagram`);
+      saved.push(await upsertMetaOAuthAccount({
+        context,
+        brandId,
+        platform: "instagram",
+        externalAccountId: igId,
+        accountName: igName,
+        username: String(ig?.username || ""),
+        pageId,
+        instagramBusinessAccountId: igId,
+        accessToken: pageToken,
+        expiresAt,
+        permissions: scopes,
+        metadata: {
+          page_name: pageName,
+          profile_picture_url: ig?.profile_picture_url || "",
+          followers_count: Number(ig?.followers_count || 0),
+          media_count: Number(ig?.media_count || 0),
+          oauth_connected_at: new Date().toISOString(),
+        },
+      }));
+    }
+  }
+
+  if (!saved.length) throw new Error("A Meta autorizou o login, mas não retornou nenhuma conta utilizável.");
+  return {
+    ok: true as const,
+    connected: saved.length,
+    accounts: saved.map((item) => ({ id: item.id, platform: item.platform, account_name: item.account_name, username: item.username })),
+  };
 }
 
 async function metaPost(path: string, token: string, values: Record<string, string>) {
