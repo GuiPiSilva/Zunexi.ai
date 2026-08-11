@@ -191,6 +191,8 @@ const IMAGE_STORAGE_BUCKET = process.env.IMAGE_STORAGE_BUCKET || "generated-imag
 const CLOUDFLARE_MODEL_FAST = process.env.CLOUDFLARE_IMAGE_MODEL_FAST || "@cf/black-forest-labs/flux-2-klein-4b";
 const CLOUDFLARE_MODEL_PREMIUM = process.env.CLOUDFLARE_IMAGE_MODEL_PREMIUM || "@cf/black-forest-labs/flux-2-klein-9b";
 const CLOUDFLARE_IMAGE_TIMEOUT_MS = Number(process.env.CLOUDFLARE_IMAGE_TIMEOUT_MS || 90_000);
+const CLOUDFLARE_GUIDANCE_FAST = Number(process.env.CLOUDFLARE_GUIDANCE_FAST || 3.2);
+const CLOUDFLARE_GUIDANCE_PREMIUM = Number(process.env.CLOUDFLARE_GUIDANCE_PREMIUM || 4.0);
 
 const COLAB_IMAGE_API_URL = (process.env.COLAB_IMAGE_API_URL || "").trim();
 const COLAB_IMAGE_API_KEY = (process.env.COLAB_IMAGE_API_KEY || "").trim();
@@ -273,6 +275,25 @@ function compactImagePrompt(prompt: string): string {
   const maxChars = 7_500;
   if (normalized.length <= maxChars) return normalized;
   return `${normalized.slice(0, 4_800)}\n\n[brief compacted]\n\n${normalized.slice(-2_500)}`;
+}
+
+function compactCloudflarePrompt(prompt: string): string {
+  // FLUX.2 klein roda com apenas 4 etapas no Workers AI. Para esse motor,
+  // um brief mais curto, concreto e sem listas contraditórias tende a ser
+  // mais útil do que o prompt universal longo usado pelos outros motores.
+  const normalized = prompt
+    .replace(/\r/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  const maxChars = 3_900;
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, 3_250)}\n\nFinal constraints: full-bleed single scene, strong hierarchy, natural copy-safe space, no readable text, no invented logos or watermarks.`;
+}
+
+function cloudflareGuidanceFor(quality: ImageQuality) {
+  const raw = quality === "premium" ? CLOUDFLARE_GUIDANCE_PREMIUM : CLOUDFLARE_GUIDANCE_FAST;
+  return Number.isFinite(raw) ? Math.max(0, Math.min(20, raw)) : quality === "premium" ? 4 : 3.2;
 }
 
 function dimensionsForAspectRatio(aspectRatio: "1:1" | "4:5" | "9:16") {
@@ -369,10 +390,11 @@ async function callCloudflareImage(
   const model = cloudflareModelFor(quality);
   const { width, height } = dimensionsForAspectRatio(aspectRatio);
   const form = new FormData();
-  form.append("prompt", compactImagePrompt(prompt));
+  form.append("prompt", compactCloudflarePrompt(prompt));
   form.append("width", String(width));
   form.append("height", String(height));
   form.append("seed", String(imageSeed(seed)));
+  form.append("guidance", String(cloudflareGuidanceFor(quality)));
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), CLOUDFLARE_IMAGE_TIMEOUT_MS);
@@ -569,6 +591,7 @@ async function generateWithProviderFallback(
   seed: string,
   quality: ImageQuality,
   preferredProvider: ImageProviderChoice = "auto",
+  providerPrompts?: Partial<Record<ImageProvider, string>>,
 ): Promise<GeneratedImage> {
   const configured = imageProviderOrder().filter(providerConfigured);
   if (!configured.length) {
@@ -589,9 +612,10 @@ async function generateWithProviderFallback(
   const failures: string[] = [];
   for (const provider of providers) {
     try {
-      if (provider === "colab") return await callColabImage(prompt, aspectRatio, seed, quality);
-      if (provider === "cloudflare") return await callCloudflareImage(prompt, aspectRatio, seed, quality);
-      return await callLovableImage(prompt, aspectRatio, seed, quality);
+      const providerPrompt = providerPrompts?.[provider] || prompt;
+      if (provider === "colab") return await callColabImage(providerPrompt, aspectRatio, seed, quality);
+      if (provider === "cloudflare") return await callCloudflareImage(providerPrompt, aspectRatio, seed, quality);
+      return await callLovableImage(providerPrompt, aspectRatio, seed, quality);
     } catch (error) {
       const detail = providerErrorMessage(error);
       console.error(`[image-provider:${provider}]`, detail);
@@ -659,6 +683,86 @@ function creativeProfile(data: z.infer<typeof ImageInput>) {
 - Use the requested palette as controlled art-direction accents while preserving believable local colors and materials.`;
 }
 
+function cloudflareDomainDirection(data: z.infer<typeof ImageInput>) {
+  const haystack = `${data.prompt} ${data.slideTitle} ${data.slideBody} ${data.slideKind} ${data.style} ${data.brand}`.toLowerCase();
+
+  if (/hamb|burger|food|comida|restaurante|lanche|pizza|sorvet|bebida|drink|café|cafe|gastron|card[aá]pio/.test(haystack)) {
+    return "Premium food advertising photography. Make the food the large appetizing hero (about half of the frame), realistic ingredients, rich texture, controlled highlights, cinematic side/rim light, shallow-to-medium depth of field, subtle steam or atmosphere when natural, dark stone/wood/table surfaces when appropriate.";
+  }
+  if (/tech|tecnolog|software|app|ia|ai |digital|saas|plataforma|zunexi/.test(haystack)) {
+    return "Premium technology launch visual. Use sculptural abstract forms, glass/metal materials, controlled blue-violet light, elegant particles or data-like geometry, deep dimensional space and expensive cinematic lighting. Prefer physical/abstract metaphors over fake software screens.";
+  }
+  if (/carro|automot|vehicle|car |suv|sedan|concession/.test(haystack)) {
+    return "Premium automotive launch photography. Accurate vehicle geometry, dominant three-quarter hero angle, low camera, controlled reflections, dramatic rim lighting, subtle haze, believable environment and strong product separation.";
+  }
+  if (/igreja|culto|evangel|worship|church|fé|fe |jesus|crist|biblia|bíblia/.test(haystack)) {
+    return "Refined inspirational editorial visual. Elegant symbolic imagery, warm dimensional light, premium texture, tasteful classical details, balanced composition and modern finishing. Avoid cheap flyer aesthetics.";
+  }
+  if (/advoc|jur[ií]dic|law |direito|escrit[oó]rio/.test(haystack)) {
+    return "Premium legal/corporate campaign visual. Architectural precision, refined materials, confident geometry, controlled neutral lighting, subtle depth and sophisticated editorial composition. Avoid cliché gavels unless explicitly requested.";
+  }
+  if (/odont|dent|cl[ií]nica|sa[uú]de|health|medic/.test(haystack)) {
+    return "Premium healthcare campaign visual. Clean but dimensional commercial photography or refined 3D objects, soft controlled light, high material realism, calm trust-building composition and subtle brand accents without sterile blank-white template styling.";
+  }
+  return "Premium commercial advertising key visual. One unmistakable hero subject, layered foreground/midground/background, believable materials, intentional lens perspective, strong but controlled lighting, editorial cropping and campaign-level polish.";
+}
+
+function cloudflareVariation(data: z.infer<typeof ImageInput>) {
+  const variants = [
+    "Camera/composition variant: low three-quarter perspective, close hero crop, strong depth, subject pushed away from the copy-safe zone.",
+    "Camera/composition variant: editorial side angle, asymmetrical framing, foreground detail, strong leading lines and layered depth.",
+    "Camera/composition variant: near-macro commercial detail with a bold hero scale, shallow foreground separation and controlled atmospheric background.",
+    "Camera/composition variant: cinematic wide-medium frame, diagonal depth, dramatic practical light and one dominant focal point.",
+    "Camera/composition variant: top/oblique advertising view when appropriate, graphic object arrangement, clear hierarchy and natural breathing room.",
+    "Camera/composition variant: premium studio/environment hybrid, strong silhouette separation, textured background depth and restrained accent lighting.",
+  ];
+  const key = `${data.seed}|${data.slideIndex}|${data.slideTitle}|${data.prompt}`;
+  return variants[imageSeed(key) % variants.length];
+}
+
+function cleanCloudflareSourceBrief(value: string) {
+  return value
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/\b(?:headline|subtitle|caption|typography|texto|t[ií]tulo|subt[ií]tulo|copy)\s*[:=-]?\s*[“"'][^”"']+[”"']/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 1_650);
+}
+
+function buildCloudflarePrompt(data: z.infer<typeof ImageInput>) {
+  const source = cleanCloudflareSourceBrief(data.prompt);
+  const interfaceRule = data.allowInterfaces
+    ? "A device or interface may appear only when it is essential to the user's requested subject. Keep screens secondary and visually clean, with no readable UI copy."
+    : "Represent digital/AI themes with objects, light, materials and abstract spatial forms; do not use screens, dashboards, browser windows or app mockups.";
+  const humanRule = data.allowPeople
+    ? "People may appear only when the source brief needs them; keep anatomy natural and the person purposeful rather than a generic stock model."
+    : "Use objects, environments or abstract visual forms only; no people, faces, hands, bodies, silhouettes or crowds.";
+
+  return `High-end Instagram campaign key visual, ${data.aspectRatio}, full bleed, one continuous scene.
+
+MAIN VISUAL IDEA:
+${source || "Create a premium visual interpretation of the supplied campaign concept."}
+
+COMPOSITION:
+${data.slideKind || "Keep one dominant hero subject and preserve a naturally calm copy-safe area."}
+${cloudflareVariation(data)}
+
+ART DIRECTION:
+${cloudflareDomainDirection(data)}
+Style: ${data.style || "contemporary premium advertising"}.
+Brand/palette: ${data.brand || "brand-led campaign"}; use ${data.palette || "a cohesive palette"} as restrained accents, not as a full-frame color wash. Preserve realistic local colors and material tones.
+
+QUALITY TARGET:
+Professional campaign photography / refined 3D / polished illustration as appropriate to the brief; strong hero scale; clear subject-background separation; deliberate foreground, midground and background; realistic materials; cinematic but believable lighting; rich micro-texture; crisp focal detail; intentional negative space integrated into the environment. The image should look commissioned by an advertising agency, not like a stock photo or a generic social template.
+
+CLEAN OUTPUT RULES:
+${humanRule}
+${interfaceRule}
+Keep surfaces clean and unlabeled. No readable words, random letters, numbers, logos, watermarks, prices, signs, badges or fake brand names. No poster/card/template layout, no split colored panel, no giant blank white rectangle, no collage. Do not duplicate the hero object or warp product geometry. Natural copy-safe space must come from composition, depth, shadow, lighting and low-detail environment.
+
+Output only the visual scene; Zunexi adds all typography and graphic elements afterward.`;
+}
+
 export const generateImage = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => ImageInput.parse(d))
   .handler(async ({ data }): Promise<{ url: string; provider: ImageProvider; model: string; priority: boolean }> => {
@@ -699,7 +803,15 @@ ART-DIRECTION STANDARD:
 
 Unique variation seed: ${data.seed}.`;
 
-    const generated = await generateWithProviderFallback(fullPrompt, data.aspectRatio, data.seed, effectiveQuality, data.imageProvider);
+    const cloudflarePrompt = buildCloudflarePrompt(data);
+    const generated = await generateWithProviderFallback(
+      fullPrompt,
+      data.aspectRatio,
+      data.seed,
+      effectiveQuality,
+      data.imageProvider,
+      { cloudflare: cloudflarePrompt },
+    );
     const url = await uploadBytesToSupabaseStorage(generated.bytes, generated.mimeType, `slide-${generated.provider}`);
     return { url, provider: generated.provider, model: generated.model, priority };
   });
