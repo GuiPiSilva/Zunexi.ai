@@ -30,6 +30,18 @@ export function explicitHumanVisualRequest(...values: Array<string | undefined |
   return HUMAN_VISUAL_REQUEST.some((pattern) => pattern.test(source));
 }
 
+const INTERFACE_VISUAL_REQUEST = [
+  /\b(?:mostrar|mostre|exibir|exiba|inclua|incluir|use|usar|coloque|com)\s+(?:a|uma|o|um)?\s*(?:tela|interface|dashboard|painel|app|aplicativo|site|website|software|plataforma|sistema|mockup)\b/i,
+  /\b(?:screenshot|screen|ui|user interface|app interface|dashboard screen|browser window|phone screen|laptop screen|monitor screen|device mockup)\b/i,
+  /\b(?:celular|smartphone|iphone|notebook|laptop|monitor|tablet)\s+(?:mostrando|exibindo|com a tela|com tela)\b/i,
+];
+
+/** Libera telas/interfaces apenas quando o briefing do usuário pedir isso explicitamente. */
+export function explicitInterfaceVisualRequest(...values: Array<string | undefined | null>) {
+  const source = values.filter(Boolean).join("\n");
+  return INTERFACE_VISUAL_REQUEST.some((pattern) => pattern.test(source));
+}
+
 function hashText(value: string) {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
