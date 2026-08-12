@@ -76,7 +76,7 @@ const DEFAULT_FORM: CarouselForm = {
   paleta: "roxo, azul, ciano e branco",
   cta: "",
   informacoesAdicionais: "",
-  imageQuality: "fast",
+  imageQuality: "premium",
   imageProvider: "auto",
   brandId: "",
 };
@@ -348,14 +348,16 @@ function NovoCarrossel() {
                   accessKey: payload.accessKey,
                   prompt: slide.promptImagem,
                   seed: `${output.id}-${slide.numero}`,
-                  // A copy é aplicada com precisão pelo renderer. Não a envie ao
-                  // motor visual, pois ele pode tentar desenhar letras na cena.
+                  // Estes campos classificam o domínio e o sentido visual no
+                  // servidor; a copy não é concatenada ao prompt final.
+                  slideTitle: slide.titulo,
+                  slideBody: slide.texto,
                   slideIndex: slide.numero,
                   slideTotal: output.slides.length,
-                  slideKind: `${slide.tipo}. ${compositionForLayout(resolvedLayouts[index])}`,
+                  slideKind: `${slide.tipo}. Conceito: ${slide.visualConcept || "direção específica do slide"}. ${compositionForLayout(resolvedLayouts[index])}`,
                   brand: payload.form.empresa,
                   palette: payload.form.paleta,
-                  style: `${payload.form.estilo}; tom ${payload.form.tom}`,
+                  style: `${payload.form.estilo}; tom ${payload.form.tom}; assinatura visual ${output.creativePlan?.visualSignature || "campanha editorial coerente"}`,
                   imageQuality: payload.form.imageQuality || "premium",
                   imageProvider: payload.form.imageProvider || "auto",
                   allowPeople,
@@ -679,7 +681,7 @@ function NovoCarrossel() {
                   <Field label="Estilo visual"><select value={form.estilo} onChange={(e) => setForm({ ...form, estilo: e.target.value })} className="app-input"><option>publicidade premium</option><option>food commercial</option><option>cinematográfico</option><option>luxury campaign</option><option>editorial</option><option>minimalista e premium</option><option>tech campaign</option><option>3D publicitário</option><option>corporativo</option><option>vibrante</option></select></Field>
                   <Field label="Paleta de cores"><input value={form.paleta} onChange={(e) => setForm({ ...form, paleta: e.target.value })} className="app-input" /></Field>
                   <Field label="Motor de imagem"><select value={form.imageProvider} onChange={(e) => setForm({ ...form, imageProvider: e.target.value as CarouselForm["imageProvider"] })} className="app-input"><option value="auto">Automático — usa os motores configurados</option><option value="lovable">Lovable — GPT Image 2</option><option value="colab">Colab — usar somente este motor</option><option value="cloudflare">Cloudflare V2 — prompt otimizado</option></select></Field>
-                  <Field label="Qualidade da imagem"><select value={form.imageQuality} onChange={(e) => setForm({ ...form, imageQuality: e.target.value as CarouselForm["imageQuality"] })} className="app-input"><option value="fast">Rápida</option><option value="premium">Premium</option></select></Field>
+                  <Field label="Qualidade da imagem"><select value={form.imageQuality} onChange={(e) => setForm({ ...form, imageQuality: e.target.value as CarouselForm["imageQuality"] })} className="app-input"><option value="premium">Premium (recomendado)</option><option value="fast">Rápida</option></select></Field>
                 </div>
 
                 <Field label="CTA — chamada para ação"><input value={form.cta} onChange={(e) => setForm({ ...form, cta: e.target.value })} placeholder="Ex.: Experimente grátis a Zunexi.ai" className="app-input" /></Field>
@@ -790,7 +792,7 @@ async function saveCarouselProject({
   });
 
   const resolvedPalette = paletteFromDescription(palette);
-  const fonts = fontPairFromStyle(style);
+  const fonts = fontPairFromStyle(`${style}\n${output.titulo}\n${output.slides.map((slide) => `${slide.titulo} ${slide.texto}`).join("\n")}`);
 
   const previews: Record<number, string> = {};
   const resolvedLayouts = resolveCampaignLayouts(output.slides);
