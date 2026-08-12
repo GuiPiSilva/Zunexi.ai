@@ -100,7 +100,11 @@ function groqResponseError(status: number, body: string, model: string) {
   const detail = groqErrorDetail(body);
   if (status === 401 || status === 403) return new Error("Chave da Groq inválida ou sem permissão.");
   if (status === 429) return new Error("Limite da Groq API atingido. Tente novamente em instantes.");
-  if (status === 413) return new Error("O pedido ficou grande demais para a Groq. Reduza as informações adicionais e tente novamente.");
+  if (status === 413) {
+    return new Error(detail
+      ? `A Groq recusou até o pedido mínimo (erro 413): ${detail}`
+      : "A Groq recusou até o pedido mínimo (erro 413). Verifique os limites da conta e tente novamente.");
+  }
   if (isUnavailableGroqModel(status, detail)) {
     return new Error(`O modelo da Groq \"${model}\" não está disponível. Configure GROQ_TEXT_MODEL=${DEFAULT_GROQ_TEXT_MODEL} na Vercel.`);
   }
@@ -108,7 +112,13 @@ function groqResponseError(status: number, body: string, model: string) {
   return new Error(detail ? `A Groq recusou a solicitação (erro ${status}): ${detail}` : `A Groq recusou a solicitação (erro ${status}).`);
 }
 
-async function requestGroqChat(apiKey: string, request: GroqChatRequest, signal: AbortSignal) {
+async function requestGroqChat(
+  apiKey: string,
+  request: GroqChatRequest,
+  signal: AbortSignal,
+  compactRequest?: GroqChatRequest,
+  minimalRequest?: GroqChatRequest,
+) {
   const selectedModel = configuredGroqModel();
   const models = Array.from(new Set([selectedModel, DEFAULT_GROQ_TEXT_MODEL]));
   let lastError: Error | undefined;
@@ -126,7 +136,8 @@ async function requestGroqChat(apiKey: string, request: GroqChatRequest, signal:
   }
 
   for (const model of models) {
-    let response = await send(model, request);
+    let activeRequest = request;
+    let response = await send(model, activeRequest);
 
     if (response.ok) return { response, model };
 
@@ -134,9 +145,24 @@ async function requestGroqChat(apiKey: string, request: GroqChatRequest, signal:
     let detail = groqErrorDetail(body);
     console.error("Groq error", response.status, model, detail);
 
-    if (request.response_format && isGroqJsonModeFailure(response.status, detail)) {
+    if (response.status === 413) {
+      const smallerRequests = [compactRequest, minimalRequest]
+        .filter((candidate): candidate is GroqChatRequest => Boolean(candidate));
+      for (const smallerRequest of smallerRequests) {
+        console.warn(`Pedido muito grande para ${model}; repetindo automaticamente com contexto menor.`);
+        activeRequest = smallerRequest;
+        response = await send(model, activeRequest);
+        if (response.ok) return { response, model };
+        body = await response.text();
+        detail = groqErrorDetail(body);
+        console.error("Groq reduced retry error", response.status, model, detail);
+        if (response.status !== 413) break;
+      }
+    }
+
+    if (activeRequest.response_format && isGroqJsonModeFailure(response.status, detail)) {
       console.warn(`Modo JSON da Groq falhou no modelo ${model}; repetindo com validação local.`);
-      const { response_format: _responseFormat, ...requestWithoutJsonMode } = request;
+      const { response_format: _responseFormat, ...requestWithoutJsonMode } = activeRequest;
       response = await send(model, requestWithoutJsonMode);
       if (response.ok) return { response, model };
       body = await response.text();
@@ -642,20 +668,83 @@ ${softwareCampaign ? "Para esse tipo de campanha, privilegie copy curta, visualm
 ${denseContentMode ? "MODO DENSO: use conteúdo mais completo apenas quando os itens e dados estiverem presentes no briefing. Organize em linhas simples, sem Markdown." : "MODO PADRÃO: mantenha a copy enxuta, forte e com informação real em todos os slides."}
 Semente de variação criativa: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
+    const compactSystemPrompt = `Você é diretor de criação e copywriter. Retorne SOMENTE JSON válido:
+{"titulo":"","legenda":"","hashtags":[""],"creativePlan":{"centralIdea":"","visualSignature":"","audienceInsight":"","peoplePolicy":"disabled","avoidPatterns":[]},"slides":[{"numero":1,"titulo":"","texto":"","cta":"","promptImagem":"","tipo":"capa","layout":"social-hero","visualConcept":"","textZone":"left","subjectZone":"right","camera":"","lighting":"","allowPeople":false,"reviewScore":95}]}
+
+Crie exatamente ${data.quantidadeSlides} slides em português brasileiro. Use somente fatos do briefing. Títulos com 2 a 6 palavras e textos curtos. Não use clichês, placeholders, Markdown ou dados inventados. No último slide use o CTA fornecido. promptImagem deve estar em inglês e descrever somente a cena sem texto, letras, números ou logotipo. Use layouts válidos: ${LAYOUT_IDS.join(", ")}. Pessoas estão ${allowPeople ? "permitidas somente quando necessárias" : "proibidas"}. Interfaces estão ${allowInterfaces ? "permitidas somente quando necessárias" : "proibidas"}.`;
+
+    const compactUserPrompt = `${trimAtWord(selectedBrandPrompt, 1200)}
+Tema: ${trimAtWord(data.tema, 500)}
+Marca: ${trimAtWord(brand === "marca do cliente" ? "não fornecida" : brand, 140)}
+Produto: ${trimAtWord(product, 240)}
+Objetivo: ${trimAtWord(data.objetivo || "engajamento", 100)}
+Público: ${trimAtWord(data.publicoAlvo || "não especificado", 220)}
+Tom: ${trimAtWord(data.tom, 80)}
+Estilo: ${trimAtWord(visualStyle, 220)}
+Cores: ${trimAtWord(palette, 140)}
+CTA: ${trimAtWord(requestedCta || "ação coerente", 100)}
+Extras: ${trimAtWord(data.informacoesAdicionais || "nenhuma", 500)}`;
+
+    const emergencySystemPrompt = `Retorne somente JSON válido em português:
+{"titulo":"","legenda":"","hashtags":[""],"slides":[{"numero":1,"titulo":"","texto":"","cta":"","promptImagem":"","tipo":"capa","layout":"social-hero","allowPeople":false}]}
+Crie exatamente ${data.quantidadeSlides} slides usando apenas os fatos enviados. Título e texto curtos; CTA no último slide; promptImagem em inglês sem texto, letras, números ou logotipo.`;
+
+    const emergencyUserPrompt = `Tema: ${trimAtWord(data.tema, 260)}
+Marca: ${trimAtWord(brand === "marca do cliente" ? "não fornecida" : brand, 120)}
+Produto: ${trimAtWord(product, 180)}
+Objetivo: ${trimAtWord(data.objetivo || "engajamento", 80)}
+Público: ${trimAtWord(data.publicoAlvo || "não especificado", 150)}
+Tom: ${trimAtWord(data.tom, 60)}
+Cores: ${trimAtWord(palette, 110)}
+CTA: ${trimAtWord(requestedCta || "ação coerente", 80)}`;
+
+    const minimalSystemPrompt = `Retorne somente JSON válido:
+{"titulo":"","legenda":"","hashtags":[""],"slides":[{"numero":1,"titulo":"","texto":"","cta":"","promptImagem":"","tipo":"capa","layout":"social-hero","allowPeople":false}]}
+Crie exatamente ${data.quantidadeSlides} slides em português. Use apenas os fatos enviados. Copy curta; promptImagem em inglês e sem escrita.`;
+
+    const minimalUserPrompt = `Tema: ${trimAtWord(data.tema, 160)}
+Marca: ${trimAtWord(brand === "marca do cliente" ? "não fornecida" : brand, 80)}
+Produto: ${trimAtWord(product, 110)}
+Objetivo: ${trimAtWord(data.objetivo || "engajamento", 50)}
+Público: ${trimAtWord(data.publicoAlvo || "não especificado", 80)}
+Cores: ${trimAtWord(palette, 70)}
+CTA: ${trimAtWord(requestedCta || "ação coerente", 60)}`;
+
+    const completionTokenBudget = Math.min(3200, Math.max(700, 480 + data.quantidadeSlides * 140));
+    const emergencyTokenBudget = Math.min(2400, Math.max(560, 400 + data.quantidadeSlides * 100));
+    const minimalTokenBudget = Math.min(1800, Math.max(460, 340 + data.quantidadeSlides * 75));
+
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), TIMEOUT_MS);
     let response: Response;
     try {
       ({ response } = await requestGroqChat(apiKey, {
-          temperature: 0.55,
+          temperature: 0.5,
           top_p: 0.86,
-          max_completion_tokens: 5000,
+          max_completion_tokens: completionTokenBudget,
           response_format: { type: "json_object" },
           messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
+            { role: "system", content: compactSystemPrompt },
+            { role: "user", content: compactUserPrompt },
           ],
-        }, controller.signal));
+        }, controller.signal, {
+          temperature: 0.42,
+          top_p: 0.84,
+          max_completion_tokens: emergencyTokenBudget,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: emergencySystemPrompt },
+            { role: "user", content: emergencyUserPrompt },
+          ],
+        }, {
+          temperature: 0.35,
+          top_p: 0.82,
+          max_completion_tokens: minimalTokenBudget,
+          messages: [
+            { role: "system", content: minimalSystemPrompt },
+            { role: "user", content: minimalUserPrompt },
+          ],
+        }));
     } catch (e) {
       const err = e as Error;
       if (err.name === "AbortError") throw new Error("Tempo esgotado ao gerar. Tente novamente.");
