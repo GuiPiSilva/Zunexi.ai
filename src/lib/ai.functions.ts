@@ -642,47 +642,27 @@ function creativeProfile(data: z.infer<typeof ImageInput>) {
   const haystack = `${data.prompt} ${data.slideTitle} ${data.slideBody} ${data.slideKind} ${data.style} ${data.brand}`.toLowerCase();
 
   if (/hamb|burger|food|comida|restaurante|lanche|pizza|sorvet|bebida|drink|café|cafe|gastron|card[aá]pio/.test(haystack)) {
-    return `FOOD POSTER CAMPAIGN DIRECTION:
-- Visual language: premium charcoal-black textured background, warm ember particles, smoke/steam, dark wood or stone surface, amber/orange practical light accents and cream highlights.
-- The food must be a LARGE hero, usually 45-70% of the frame, sharply appetizing, glossy but believable, with strong rim light and deep controlled shadows.
-- Prefer close-up advertising photography, low three-quarter angles, macro ingredient detail, dramatic depth and layered foreground/background.
-- Create natural dark negative-space zones where large distressed display typography, prices, badges and menu information can be added later.
-- For menu/list slides, arrange multiple food items in deliberate zones with visual separation, like a professional restaurant menu campaign — but DO NOT generate any written text.
-- Use fire/smoke/embers only as tasteful atmosphere. Keep ingredients realistic and product colors natural.
-- The result should resemble a commissioned burger/pizzeria campaign poster, not a normal restaurant photo and not a minimalist template.`;
+    const productIntegrity = /hamb|burger|lanche/.test(haystack)
+      ? "Show one physically coherent assembled burger with believable bun, patty, cheese and only the ingredients requested. Do not combine it with pasta or another main dish."
+      : /pizza/.test(haystack)
+        ? "Show one physically coherent pizza with believable crust, toppings and melted cheese; do not merge it with another dish."
+        : "Show one coherent dish or product category; do not combine unrelated foods.";
+    return `Premium restaurant advertising photography. ${productIntegrity} Make the food the only dominant hero, occupying 45–65% of the frame, with natural ingredient color, precise texture, controlled highlights and believable steam only when appropriate. Use a controlled studio/table setting with charcoal stone or dark wood, clean depth and restrained warm practical light. Treat marketing metaphors as copy only: never turn them into roads, maps, vehicles, destinations, storefronts or scenery. Avoid mixed dishes, random garnishes, excessive smoke and orange color cast.`;
   }
 
   if (/igreja|culto|evangel|worship|church|fé|fe |jesus|crist|biblia|bíblia/.test(haystack)) {
-    return `FAITH / VINTAGE EDITORIAL POSTER DIRECTION:
-- Use warm parchment, ivory, burgundy, antique-gold and burnt-orange visual language when compatible with the requested palette.
-- Favor symbolic central illustration or cinematic subject, refined vintage print texture, ornamental botanical/details and balanced editorial symmetry.
-- Leave intentional zones for very large serif display typography and a smaller scripture/supporting line later; DO NOT render letters or verse text inside the image.
-- Avoid generic worship stock photography, artificial halos and cheap church flyer aesthetics.
-- The result should feel like a premium illustrated editorial poster with classical hierarchy and modern finishing.`;
+    return `Refined inspirational editorial art with warm parchment, ivory, burgundy and antique-gold accents when compatible with the palette. Favor one symbolic subject, dimensional light, fine print texture, restrained botanical or classical detail and balanced negative space. Avoid generic worship stock photography, artificial halos and cheap flyer styling.`;
   }
 
   if (/tech|tecnolog|software|app|ia|ai |digital|saas|plataforma|zunexi/.test(haystack)) {
-    return `TECH / CONTENT CREATION CAMPAIGN DIRECTION:
-- Make the visual meaning obvious. Use concrete editorial metaphors for the function: organized media cards, modular content tiles, calendar/scheduling blocks, publishing connections, brand-asset layers, image/text creation tools or analytics objects.
-- Use a deep black or brand-led background with controlled electric-blue/violet accents, subtle dot matrices, restrained particles and premium material detail.
-- Keep deliberate negative space for the renderer.
-- Do NOT generate random glass sculptures, crystals, meaningless 3D symbols, generic AI brains, holograms or cliché circuitry.
-- Avoid fake UI screens unless the user explicitly requested an interface.
-- The result should feel like a premium SaaS campaign art asset with a clear connection to the message, not generic 'AI art'.`;
+    return `Premium technology campaign art with an obvious functional metaphor: organized media tiles, modular content assets, scheduling blocks, publishing connections, brand layers or analytics objects. Use a deep neutral background, controlled electric blue/violet accents, restrained particles and precise materials. Avoid random glass sculptures, crystals, generic AI brains, holograms, cliché circuitry and fake software screens.`;
   }
 
   if (/carro|automot|vehicle|car |suv|sedan|concession/.test(haystack)) {
-    return `AUTOMOTIVE POSTER CAMPAIGN DIRECTION:
-- Hero vehicle should dominate the frame with accurate geometry, premium reflections and dramatic low/three-quarter camera angle.
-- Use dark cinematic environment, directional rim light, atmospheric haze and bold negative space for oversized headline/price later.
-- Make it look like an automotive launch poster, never a dealership snapshot.`;
+    return `Premium automotive launch photography. The vehicle dominates the frame with accurate geometry, controlled reflections, a dramatic low three-quarter camera and directional rim light. Use believable environmental depth and restrained haze; avoid dealership snapshots and warped bodywork.`;
   }
 
-  return `PREMIUM POSTER CAMPAIGN DIRECTION:
-- Compose like a finished advertising key visual: one dominant hero subject, dramatic contrast, deliberate negative space, layered depth, texture and strong lighting.
-- The final composition will receive oversized typography, badges, prices, separators and supporting copy before export, so design clear visual zones for them.
-- Avoid generic centered stock-photo composition and bland minimalist white panels.
-- Use the requested palette as controlled art-direction accents while preserving believable local colors and materials.`;
+  return `Premium commercial campaign art with one dominant hero subject, deliberate asymmetry, layered depth, believable materials, controlled contrast and natural negative space. Avoid generic centered stock-photo composition and bland blank panels. Use the palette only as controlled accents while preserving realistic local colors.`;
 }
 
 function cloudflareDomainDirection(data: z.infer<typeof ImageInput>) {
@@ -710,7 +690,16 @@ function cloudflareDomainDirection(data: z.infer<typeof ImageInput>) {
 }
 
 function cloudflareVariation(data: z.infer<typeof ImageInput>) {
-  const variants = [
+  const haystack = `${data.prompt} ${data.style} ${data.brand}`.toLowerCase();
+  const foodVariants = [
+    "Camera/composition variant: close low three-quarter food hero, cropped confidently, subject on the right, dark textured table fading into calm space on the left.",
+    "Camera/composition variant: oblique top-down food composition, one coherent dish, graphic ingredient arrangement, clean surrounding surface and controlled shadow depth.",
+    "Camera/composition variant: near-macro ingredient detail in the foreground with the complete food hero still readable, shallow depth and restrained warm backlight.",
+    "Camera/composition variant: frontal table-height hero with strong side light, natural steam, deep charcoal background and asymmetrical placement.",
+    "Camera/composition variant: premium studio tabletop scene, food hero slightly off-center, subtle foreground texture, soft background falloff and generous calm area.",
+    "Camera/composition variant: tight editorial crop from a high three-quarter angle, precise ingredient layers, crisp focal texture and restrained atmospheric depth.",
+  ];
+  const generalVariants = [
     "Camera/composition variant: low three-quarter perspective, close hero crop, strong depth, subject pushed away from the copy-safe zone.",
     "Camera/composition variant: editorial side angle, asymmetrical framing, foreground detail, strong leading lines and layered depth.",
     "Camera/composition variant: near-macro commercial detail with a bold hero scale, shallow foreground separation and controlled atmospheric background.",
@@ -718,21 +707,63 @@ function cloudflareVariation(data: z.infer<typeof ImageInput>) {
     "Camera/composition variant: top/oblique advertising view when appropriate, graphic object arrangement, clear hierarchy and natural breathing room.",
     "Camera/composition variant: premium studio/environment hybrid, strong silhouette separation, textured background depth and restrained accent lighting.",
   ];
-  const key = `${data.seed}|${data.slideIndex}|${data.slideTitle}|${data.prompt}`;
-  return variants[imageSeed(key) % variants.length];
+  const variants = /hamb|burger|food|comida|restaurante|lanche|pizza|sorvet|bebida|drink|café|cafe|gastron|card[aá]pio/.test(haystack)
+    ? foodVariants
+    : generalVariants;
+  const campaignSeed = data.seed.replace(/-\d+$/, "") || `${data.prompt}|${data.style}`;
+  const start = imageSeed(campaignSeed) % variants.length;
+  const offset = Math.max(0, (data.slideIndex || 1) - 1);
+  return variants[(start + offset) % variants.length];
 }
 
-function cleanCloudflareSourceBrief(value: string) {
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function cleanVisualStyle(value: string) {
   return value
+    .split(/[;\n]/)
+    .map((part) => part.trim())
+    .filter((part) => part && !/(?:typograph|tipograf|font|typeface|logo|wordmark)/i.test(part))
+    .join("; ")
+    .slice(0, 420);
+}
+
+function cleanVisualSourceBrief(value: string, brand: string) {
+  let cleaned = value
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/\b(?:headline|subtitle|caption|typography|texto|t[ií]tulo|subt[ií]tulo|copy)\s*[:=-]?\s*[“"'][^”"']+[”"']/gi, " ")
+    .replace(/\b(?:neon\s+)?(?:sign|signage|billboard|marquee|menu\s*board|lightbox)\b(?:\s+\w+){0,14}/gi, " unlabeled background practical light ")
+    .replace(/\b(?:logo|wordmark|brand\s+name)\b(?:\s+\w+){0,10}/gi, " ")
+    .replace(/\b(?:reading|saying|spelling|showing\s+the\s+words?)\b[^,.;]*/gi, " ")
+    .replace(/[“"'][^”"']{1,80}[”"']/g, " ");
+
+  if (brand.trim()) {
+    cleaned = cleaned.replace(new RegExp(escapeRegExp(brand.trim()), "gi"), " ");
+    const genericBrandWords = new Set(["hamburgueria", "hamburgeria", "restaurante", "pizzaria", "empresa", "marca", "studio", "studios", "ltda"]);
+    const distinctiveTokens = brand
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .split(/[^a-zA-Z0-9]+/)
+      .filter((token) => token.length >= 4 && !genericBrandWords.has(token.toLowerCase()));
+    distinctiveTokens.forEach((token) => {
+      cleaned = cleaned.replace(new RegExp(escapeRegExp(token), "gi"), " ");
+    });
+  }
+
+  return cleaned
+    .replace(/\b\d{2,}\b/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 1_650);
+    .slice(0, 1_250);
 }
 
 function slideMeaningDirection(data: z.infer<typeof ImageInput>) {
   const haystack = `${data.slideTitle} ${data.slideBody} ${data.prompt} ${data.slideKind}`.toLowerCase();
+
+  if (/hamb|burger|food|comida|restaurante|lanche|pizza|sorvet|bebida|drink|café|cafe|gastron|card[aá]pio/.test(haystack)) {
+    return "Treat the marketing headline as copy only. Keep the visual centered on the exact food product in a controlled studio/table environment; do not illustrate verbal metaphors with roads, maps, vehicles, destinations, signs or unrelated scenery.";
+  }
 
   if (/rapid|rápid|agil|veloc|minutes|minutos|instant|aceler/.test(haystack)) {
     return "Translate the idea into speed and momentum: layered media panels, directional light trails, modular cards in forward motion, fast publishing cues and elegant visual acceleration. Avoid generic speed icons.";
@@ -749,7 +780,7 @@ function slideMeaningDirection(data: z.infer<typeof ImageInput>) {
   if (/profission|marca|brand|identidade|visual|premium/.test(haystack)) {
     return "Translate the idea into professionalism and brand craft: refined editorial composition, brand-asset metaphors, premium finishing, calm hierarchy and polished commercial presentation.";
   }
-  return "Choose a hero scene that literally or metaphorically represents the message of the slide. The visual should explain the claim, not merely decorate it.";
+  return "Choose a concrete hero scene that supports the subject without turning slogans or figurative wording into literal scenery. The visual should explain the claim, not merely decorate it.";
 }
 
 function slideRoleDirection(data: z.infer<typeof ImageInput>) {
@@ -760,8 +791,23 @@ function slideRoleDirection(data: z.infer<typeof ImageInput>) {
   return "Content-slide behavior: the scene should communicate one concrete benefit or idea with a focused hero and enough breathing room for overlay copy.";
 }
 
+function layoutCompositionDirection(data: z.infer<typeof ImageInput>) {
+  const instruction = data.slideKind.toLowerCase();
+  if (/right half|lower-right|right 55%|right-center|upper-center\/right/.test(instruction)) {
+    return "Place the hero in the right 50–58% and keep the left side naturally calm, darker and low-detail.";
+  }
+  if (/upper 55%/.test(instruction)) {
+    return "Keep the hero in the upper half and let the lower area become naturally calmer through depth and shadow.";
+  }
+  if (/central 60%/.test(instruction)) {
+    return "Keep the center calm and place restrained visual interest around the outer edges.";
+  }
+  return "Use deliberate asymmetry and preserve one naturally calm low-detail area without adding an artificial panel.";
+}
+
 function buildCloudflarePrompt(data: z.infer<typeof ImageInput>) {
-  const source = cleanCloudflareSourceBrief(data.prompt);
+  const source = cleanVisualSourceBrief(data.prompt, data.brand);
+  const style = cleanVisualStyle(data.style) || "contemporary premium advertising";
   const interfaceRule = data.allowInterfaces
     ? "A device or interface may appear only when it is essential to the user's requested subject. Keep screens secondary and visually clean, with no readable UI copy."
     : "Represent digital/AI themes with objects, light, materials and abstract spatial forms; do not use screens, dashboards, browser windows or app mockups.";
@@ -776,7 +822,7 @@ ${source || "Create a premium visual interpretation of the supplied campaign con
 
 COMPOSITION:
 ${slideRoleDirection(data)}
-${data.slideKind || "Keep one dominant hero subject and preserve a naturally calm copy-safe area."}
+${layoutCompositionDirection(data)}
 ${cloudflareVariation(data)}
 
 MESSAGE INTERPRETATION:
@@ -784,8 +830,8 @@ ${slideMeaningDirection(data)}
 
 ART DIRECTION:
 ${cloudflareDomainDirection(data)}
-Style: ${data.style || "contemporary premium advertising"}.
-Brand/palette: ${data.brand || "brand-led campaign"}; use ${data.palette || "a cohesive palette"} as restrained accents, not as a full-frame color wash. Preserve realistic local colors and material tones.
+Style: ${style}.
+Palette: use ${data.palette || "a cohesive palette"} only as restrained accents, not as a full-frame color wash. Preserve realistic local colors and material tones.
 
 QUALITY TARGET:
 Professional campaign photography / refined 3D / polished illustration as appropriate to the brief; strong hero scale; clear subject-background separation; deliberate foreground, midground and background; realistic materials; cinematic but believable lighting; rich micro-texture; crisp focal detail; intentional negative space integrated into the environment. The image should look commissioned by an advertising agency, not like a stock photo or a generic social template.
@@ -795,7 +841,38 @@ ${humanRule}
 ${interfaceRule}
 Keep surfaces clean and unlabeled. No readable words, random letters, word fragments, glyphs, numbers, logos, watermarks, prices, signs, badges or fake brand names. No poster/card/template layout, no split colored panel, no giant blank white rectangle, no collage. Avoid irrelevant abstract logo-like sculptures, crystals, rings, random metallic glyphs and decorative objects that do not explain the slide message. For software/content topics, every hero object must map to a real idea such as planning, creation, publishing, analytics, organization or brand assets. Do not duplicate the hero object or warp product geometry. Natural copy-safe space must come from composition, depth, shadow, lighting and low-detail environment.
 
-Output only the visual scene; Zunexi adds all typography and graphic elements afterward.`;
+Output only the clean visual scene.`;
+}
+
+function buildUniversalImagePrompt(data: z.infer<typeof ImageInput>) {
+  const source = cleanVisualSourceBrief(data.prompt, data.brand);
+  const style = cleanVisualStyle(data.style) || "contemporary premium commercial art direction";
+  const humanRule = data.allowPeople
+    ? "Include people only when the source subject truly requires them; anatomy must be natural and purposeful."
+    : "Use objects and environments only; exclude people, faces, hands, bodies, silhouettes and crowds.";
+  const interfaceRule = data.allowInterfaces
+    ? "A device may appear only when essential, with a blank, non-readable screen."
+    : "Exclude screens, dashboards, browser windows, app interfaces and device mockups.";
+
+  return `Create one full-bleed ${data.aspectRatio} premium commercial background image, not a finished social-media design.
+
+SUBJECT
+${source || "Create one clear hero subject that directly represents the supplied product or service."}
+
+ART DIRECTION
+${creativeProfile(data)}
+${slideRoleDirection(data)}
+${layoutCompositionDirection(data)}
+${cloudflareVariation(data)}
+Style: ${style}.
+Palette: ${data.palette || "cohesive restrained accents"}; preserve natural product and material colors.
+
+FINISH
+One coherent scene, one dominant focal point, agency-grade lighting, realistic materials, crisp hero detail, controlled depth, clean separation and intentional breathing room. ${humanRule} ${interfaceRule}
+
+Keep every visible surface physically blank and unlabeled. Exclude letters, digits, words, logos, labels, signs, prices, badges and watermarks. Do not create a poster, card, collage, split panel or fake brand mark. Do not duplicate or deform the hero subject.
+
+Variation seed: ${data.seed}.`;
 }
 
 export const generateImage = createServerFn({ method: "POST" })
@@ -804,40 +881,7 @@ export const generateImage = createServerFn({ method: "POST" })
     const access = await requireAccessKey(admin(), data.accessKey);
     const priority = planHasFeature(access.plan, "prioridade_geracao");
     const effectiveQuality: ImageQuality = data.imageQuality === "premium" && priority ? "premium" : "fast";
-    const fullPrompt = `CREATE ONLY A SINGLE CONTINUOUS PHOTOGRAPHIC / 3D / ILLUSTRATIVE SCENE FOR A HIGH-END INSTAGRAM CAMPAIGN. Zunexi will apply the final Portuguese copy afterward and flatten everything into the finished image.
-
-ABSOLUTE FORMAT RULES:
-- This output is NOT the finished Instagram post and NOT a graphic-design template.
-- Do NOT design a poster, social-media card, split layout, colored copy panel, banner, collage, magazine page or presentation slide.
-- INTERFACE POLICY: ${data.allowInterfaces ? "A device/interface may appear only because the original user brief explicitly requested it. Keep it secondary, realistic, free of invented readable copy and never turn the whole result into a UI screenshot." : "ABSOLUTELY NO UI: no dashboard, app screen, browser window, phone/laptop screen, social-media interface or software mockup. If software/AI is the subject, represent the idea with premium abstract technology, objects, spatial light, materials and data-like geometry."}
-- Do NOT render any headline, subtitle, label, caption, logo wordmark, pseudo-text, random letters, numbers or signage.
-- The image must remain one coherent edge-to-edge scene. Copy-safe space must come from natural composition, lighting, depth and uncluttered background — never from a blank rectangle or colored panel.
-- HUMAN POLICY: ${data.allowPeople ? "People are allowed only when required by the supplied brief; keep anatomy natural and purposeful." : "ABSOLUTELY NO PEOPLE: no humans, faces, portraits, bodies, hands, silhouettes, crowds, models or human-like figures."}
-
-SOURCE CREATIVE BRIEF — interpret only as visual subject/art direction; ignore any accidental request for typography, graphic layout, cards, posters or written copy:
-${data.prompt}
-
-Canvas aspect ratio: ${data.aspectRatio}. Full bleed commercial key visual.
-Slide role and copy-safe composition: ${data.slideKind || "content"}. Slide ${data.slideIndex || 1} of ${data.slideTotal || 1}.
-Visual style: ${data.style || "premium commercial campaign, contemporary editorial art direction"}.
-Palette guidance: ${data.palette || "cohesive brand palette with natural subject colors"}.
-
-${creativeProfile(data)}
-
-ART-DIRECTION STANDARD:
-- The image must feel commissioned for a bold POSTER CAMPAIGN, not like a stock photo, generic template, ordinary lifestyle snapshot or plain background image.
-- Use a deliberate hero subject, strong foreground/midground/background separation, intentional lens choice, professional lighting and believable physical materials.
-- Preserve local color fidelity. NEVER tint the entire frame with the palette. Brand colors should occupy roughly 10-30% of the scene as accents, practical lighting, props or background details.
-- Create subject/background separation using contrast, light, depth and composition instead of a flat monochrome filter.
-- Favor poster-scale hierarchy, oversized hero subjects, editorial cropping, real campaign framing, textures, atmospheric effects and strong contrast. Avoid timid compositions with a small subject floating in empty space.
-- Keep copy-safe space exactly where the slide-role instruction requests it. Do not place important faces/products under that area.
-- No text, letters, numbers, typography, captions, logo text, prices, phone numbers, watermark, poster mockup, social-media template, split graphic panel or fake signage. ${data.allowInterfaces ? "If an interface was explicitly requested, keep it realistic and non-readable; do not invent labels or pseudo-copy." : "No UI, dashboard, browser chrome, device screen or fake software interface."}
-- Avoid oversized empty white areas. Negative space must look intentional and integrated into the scene, with texture, light or environmental depth.
-- No duplicate objects, melted anatomy, extra fingers, warped product geometry, meaningless symbols, pseudo-writing or unrelated abstract logo-like sculptures.
-- Do not invent visible brand names. Brand identity comes from art direction, palette accents and supplied reference imagery only.
-- For software, AI or content-creation themes, prefer visual metaphors tied to content production, scheduling, branding, media layers and organized creative flow instead of generic futuristic ornaments.
-
-Unique variation seed: ${data.seed}.`;
+    const fullPrompt = buildUniversalImagePrompt(data);
 
     const cloudflarePrompt = buildCloudflarePrompt(data);
     const generated = await generateWithProviderFallback(
