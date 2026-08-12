@@ -694,14 +694,38 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
   const denseMode = isDenseCopy(title, body);
   const requestedSocial = String(id).startsWith("social-");
   const bodySize = px(clamp(denseMode ? W * 0.024 : W * 0.032, denseMode ? 20 : 27, denseMode ? 31 : 38));
-  const effectiveId: LayoutId = denseMode && !requestedSocial ? "menu-board" : id;
+  const baseEffectiveId: LayoutId = denseMode && !requestedSocial ? "menu-board" : id;
   const techMode = !denseMode && isTechCampaign(input);
 
-  if (String(effectiveId).startsWith("social-")) {
+  // Quando a API produziu uma imagem, ela precisa ser protagonista da arte final.
+  // Os layouts social-* antigos eram 100% geométricos e descartavam esse ativo.
+  // A sequência abaixo gira por campanha e por slide, como uma direção de arte
+  // contínua, preservando o texto editável sobre composições realmente distintas.
+  const imageLayouts: LayoutId[] = [
+    "text-over-image",
+    "side-text",
+    "bottom-text",
+    "hero-image",
+    "diagonal",
+    "center-text",
+  ];
+  const campaignKey = [
+    input.brandName || "",
+    input.theme || "",
+    input.styleHint || "",
+  ].join("|");
+  const campaignOffset = stableVariant(campaignKey, imageLayouts.length);
+  const slideOffset = Math.max(0, (input.slideNumber || 1) - 1);
+  const imageFirstId = imageLayouts[(campaignOffset + slideOffset) % imageLayouts.length];
+  const effectiveId: LayoutId = imageUrl
+    ? (denseMode ? "menu-board" : imageFirstId)
+    : baseEffectiveId;
+
+  if (!imageUrl && String(effectiveId).startsWith("social-")) {
     return buildSocialLayout(effectiveId, input);
   }
 
-  if (techMode) {
+  if (!imageUrl && techMode) {
     return buildTechLayout(effectiveId, input);
   }
 
@@ -897,14 +921,19 @@ export function layoutForSlide(index: number, kind: string, title = "", body = "
 export function compositionForLayout(layout: LayoutId): string {
   switch (layout) {
     case "social-hero":
-      return "Use one relevant hero visual on the right half or lower-right. Keep the left 45% calm and dark for a bold headline. Do not generate any text inside the image.";
+      return "Create a bold full-bleed campaign key visual with one dominant subject, strong depth and natural negative space. Do not generate text.";
     case "social-editorial":
-    case "social-minimal":
+      return "Create an asymmetric editorial campaign scene with a dominant subject on one side and a naturally calm copy-safe area on the other. Do not generate text.";
     case "social-workflow":
+      return "Create a cinematic visual that communicates progression through depth, motion or ordered objects, while remaining one coherent scene. Do not generate text or UI labels.";
     case "social-feature-grid":
+      return "Create a premium campaign scene with layered visual details and one clear focal subject; keep secondary elements controlled and realistic. Do not generate text.";
     case "social-cards":
+      return "Create a rich advertising visual with foreground, midground and background separation, one hero subject and strong editorial cropping. Do not generate text.";
+    case "social-minimal":
+      return "Create a refined minimal key visual with one sculptural or photographic focal subject and generous natural breathing room. Do not generate text.";
     case "social-cta":
-      return "This slide uses a graphic-design template rendered by Zunexi. If an auxiliary image is generated, keep it simple, isolated and text-free; typography and cards are added later by the renderer.";
+      return "Create a confident closing visual with strong contrast, a memorable hero subject and clean space for a short call to action. Do not generate text.";
     case "bottom-text":
       return "Keep the hero subject in the upper 55% with clear separation. Preserve the lower 35% as a darker, calmer copy-safe area without artificial blank panels.";
     case "side-text":

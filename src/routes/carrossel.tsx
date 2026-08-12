@@ -348,8 +348,8 @@ function NovoCarrossel() {
                   accessKey: payload.accessKey,
                   prompt: slide.promptImagem,
                   seed: `${output.id}-${slide.numero}`,
-                  slideTitle: slide.titulo,
-                  slideBody: slide.texto,
+                  // A copy é aplicada com precisão pelo renderer. Não a envie ao
+                  // motor visual, pois ele pode tentar desenhar letras na cena.
                   slideIndex: slide.numero,
                   slideTotal: output.slides.length,
                   slideKind: `${slide.tipo}. ${compositionForLayout(resolvedLayouts[index])}`,
@@ -803,14 +803,20 @@ async function saveCarouselProject({
     const rawElements = buildLayout(resolvedLayouts[index], {
       title: slide.titulo,
       body: slide.texto,
+      cta: slide.cta,
       imageUrl: storedImage,
       palette: resolvedPalette,
       width: 1080,
       height: 1080,
       fonts,
+      slideNumber: slide.numero,
+      slideTotal: output.slides.length,
+      brandName: brand,
+      theme: `${output.titulo}\n${output.legenda}`,
+      styleHint: style,
     });
 
-    if (brand?.trim()) {
+    if (brand?.trim() && !rawElements.some((element) => element.role === "brand")) {
       rawElements.push({
         kind: "text",
         x: 64,
