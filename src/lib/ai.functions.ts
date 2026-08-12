@@ -647,7 +647,7 @@ function creativeProfile(data: z.infer<typeof ImageInput>) {
       : /pizza/.test(haystack)
         ? "Show one physically coherent pizza with believable crust, toppings and melted cheese; do not merge it with another dish."
         : "Show one coherent dish or product category; do not combine unrelated foods.";
-    return `Premium restaurant advertising photography. ${productIntegrity} Make the food the only dominant hero, occupying 45–65% of the frame, with natural ingredient color, precise texture, controlled highlights and believable steam only when appropriate. Use a controlled studio/table setting with charcoal stone or dark wood, clean depth and restrained warm practical light. Treat marketing metaphors as copy only: never turn them into roads, maps, vehicles, destinations, storefronts or scenery. Avoid mixed dishes, random garnishes, excessive smoke and orange color cast.`;
+    return `Premium restaurant advertising photography. ${productIntegrity} Make the food the only dominant hero, occupying 45–65% of the frame, with natural ingredient color, precise texture, controlled highlights and believable steam only when appropriate. Use a controlled studio/table setting with charcoal stone or dark wood, clean depth, restrained warm practical light and deep black negative space that can blend into a premium editorial layout. Treat marketing metaphors as copy only: never turn them into roads, maps, vehicles, destinations, restaurant facades, storefronts, marquees or scenery. No buildings, counters, menu boards, signs, packaging labels or branded surfaces unless the user explicitly requested that exact subject. Avoid mixed dishes, random garnishes, excessive smoke and orange color cast.`;
   }
 
   if (/igreja|culto|evangel|worship|church|fé|fe |jesus|crist|biblia|bíblia/.test(haystack)) {
@@ -669,7 +669,7 @@ function cloudflareDomainDirection(data: z.infer<typeof ImageInput>) {
   const haystack = `${data.prompt} ${data.slideTitle} ${data.slideBody} ${data.slideKind} ${data.style} ${data.brand}`.toLowerCase();
 
   if (/hamb|burger|food|comida|restaurante|lanche|pizza|sorvet|bebida|drink|café|cafe|gastron|card[aá]pio/.test(haystack)) {
-    return "Premium food advertising photography. Make the food the large appetizing hero (about half of the frame), realistic ingredients, rich texture, controlled highlights, cinematic side/rim light, shallow-to-medium depth of field, subtle steam or atmosphere when natural, dark stone/wood/table surfaces when appropriate.";
+    return "Premium food advertising photography. Make the exact food product the large appetizing hero (about half of the frame), realistic ingredients, rich texture, controlled highlights, cinematic side/rim light, shallow-to-medium depth of field, subtle steam only when natural, and dark charcoal stone or black studio surfaces. Build a luxurious black editorial atmosphere with restrained brand-color highlights. No storefront, facade, restaurant interior, sign, menu board, packaging label or unrelated scenery.";
   }
   if (/tech|tecnolog|software|app|ia|ai |digital|saas|plataforma|zunexi/.test(haystack)) {
     return "Premium technology launch visual. Build a relevant metaphor for digital creation, publishing flow, content organization or AI-assisted production. Prefer layered media cards, modular asset blocks, refined device-adjacent objects, structured digital surfaces and purposeful spatial geometry over random symbols. Use controlled blue-violet light, elegant particles, dimensional depth and expensive cinematic lighting. Avoid fake software screens and avoid isolated abstract logo-like sculptures.";
@@ -762,7 +762,7 @@ function slideMeaningDirection(data: z.infer<typeof ImageInput>) {
   const haystack = `${data.slideTitle} ${data.slideBody} ${data.prompt} ${data.slideKind}`.toLowerCase();
 
   if (/hamb|burger|food|comida|restaurante|lanche|pizza|sorvet|bebida|drink|café|cafe|gastron|card[aá]pio/.test(haystack)) {
-    return "Treat the marketing headline as copy only. Keep the visual centered on the exact food product in a controlled studio/table environment; do not illustrate verbal metaphors with roads, maps, vehicles, destinations, signs or unrelated scenery.";
+    return "Treat every marketing headline as copy only. Keep the visual centered on the exact food product in a controlled dark studio/table environment; do not illustrate verbal metaphors with roads, maps, vehicles, destinations, restaurant buildings, storefronts, signs, menu boards or unrelated scenery. The final renderer will add premium frames and typography, so keep the photographed surfaces blank and clean.";
   }
 
   if (/rapid|rápid|agil|veloc|minutes|minutos|instant|aceler/.test(haystack)) {
@@ -864,6 +864,7 @@ ${creativeProfile(data)}
 ${slideRoleDirection(data)}
 ${layoutCompositionDirection(data)}
 ${cloudflareVariation(data)}
+${slideMeaningDirection(data)}
 Style: ${style}.
 Palette: ${data.palette || "cohesive restrained accents"}; preserve natural product and material colors.
 
