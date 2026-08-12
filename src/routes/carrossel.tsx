@@ -81,6 +81,15 @@ const DEFAULT_FORM: CarouselForm = {
   brandId: "",
 };
 
+function mergeAdditionalInformation(...values: Array<string | undefined | null>) {
+  const unique = values
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .filter((value, index, all) => all.indexOf(value) === index)
+    .join("\n\n");
+  return unique.slice(0, 3000);
+}
+
 type CarouselJobPayload = {
   form: CarouselForm;
   details: string;
@@ -138,7 +147,7 @@ function NovoCarrossel() {
         const data = (transferredData ? JSON.parse(transferredData) : { tema: legacyPrompt || "" }) as Partial<CarouselForm> & { prompt?: string };
         setForm((current) => ({
           ...current,
-          tema: data.prompt || data.tema || current.tema,
+          tema: data.tema || data.prompt || current.tema,
           empresa: data.empresa || current.empresa,
           produto: data.produto || current.produto,
           objetivo: data.objetivo || current.objetivo,
@@ -148,7 +157,11 @@ function NovoCarrossel() {
           estilo: data.estilo || current.estilo,
           paleta: data.paleta || current.paleta,
           cta: data.cta || current.cta,
-          informacoesAdicionais: data.informacoesAdicionais || current.informacoesAdicionais,
+          informacoesAdicionais: mergeAdditionalInformation(
+            data.informacoesAdicionais,
+            data.prompt && data.prompt !== data.tema ? `Briefing criado pela Zunexi:\n${data.prompt}` : "",
+            current.informacoesAdicionais,
+          ),
           brandId: (data as any).brandId || current.brandId,
         }));
         toast.success("Prompt e campos enviados para o criador de carrossel.");
@@ -171,7 +184,8 @@ function NovoCarrossel() {
       tom: brand.tone_of_voice || current.tom,
       estilo: [brand.visual_style || current.estilo, Array.isArray(brand.typography) && brand.typography.length ? `Tipografia obrigatória: ${brand.typography.join(", ")}` : ""].filter(Boolean).join("; "),
       paleta: `${brand.primary_color}, ${brand.secondary_color}, ${brand.accent_color}`,
-      informacoesAdicionais: [current.informacoesAdicionais, brand.notes, brand.guide_summary, Array.isArray(brand.content_pillars) ? `Pilares: ${brand.content_pillars.join(", ")}` : "", Array.isArray(brand.prohibited_terms) ? `Evitar: ${brand.prohibited_terms.join(", ")}` : ""].filter(Boolean).join("\n"),
+      // O servidor aplica o Brand Kit completo usando brandId. Não duplique o manual no briefing.
+      informacoesAdicionais: mergeAdditionalInformation(current.informacoesAdicionais),
     }));
   }
 
@@ -463,14 +477,14 @@ function NovoCarrossel() {
     setSavedProjectId(null);
     setProgress(5);
 
-    const details = [
+    const details = mergeAdditionalInformation(
       form.empresa && `Marca: ${form.empresa}`,
       form.produto && `Produto ou serviço: ${form.produto}`,
       form.estilo && `Estilo visual: ${form.estilo}`,
       form.paleta && `Paleta: ${form.paleta}`,
       form.cta && `CTA: ${form.cta}`,
       form.informacoesAdicionais,
-    ].filter(Boolean).join("\n");
+    );
 
     try {
       const job = createCreationJob("carrossel", {
