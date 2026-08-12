@@ -382,7 +382,7 @@ async function reviewCampaignWithGroq({
         messages: [
           {
             role: "system",
-            content: `Você é o revisor final da Zunexi. Receba um carrossel em JSON e devolva o MESMO formato JSON, corrigido e pronto para produção. Não explique nada. Preserve somente fatos autorizados pelo briefing. Elimine clichês, repetição de títulos, repetição de layouts, prompts visuais genéricos, placeholders e dados inventados. Reescreva qualquer copy que pareça slogan genérico de IA; prefira linguagem de anúncio clara, concreta e curta. Cada slide deve ter layout válido entre: ${LAYOUT_IDS.join(", ")}. Garanta que promptImagem esteja em inglês e descreva somente a cena sem texto. Pessoas estão ${allowPeople ? "permitidas porque foram solicitadas explicitamente" : "PROIBIDAS; remova pessoas, rostos, mãos, corpos e silhuetas de todos os prompts"}. Se a campanha for de software, IA, Zunexi ou conteúdo digital, elimine slogans vazios como “Crie melhor”, “Desbloqueie o poder”, “Autonomia criativa”, “Qualidade previsível” e equivalentes. Reescreva títulos para ficarem específicos, curtos e úteis; cada slide deve comunicar uma função, problema, mecanismo ou benefício diferente. Para layouts social-workflow, social-cards e social-feature-grid, preserve linhas curtas separadas por quebra de linha para alimentar os elementos gráficos. Troque prompts abstratos por metáforas visuais relevantes como cards, calendário, analytics, fluxo de publicação, mídia organizada e assets de marca. Dê reviewScore de 0 a 100 para cada slide depois das correções.`,
+            content: `Você é o revisor final da Zunexi. Receba um carrossel em JSON e devolva o MESMO formato JSON, corrigido e pronto para produção. Não explique nada. Preserve somente fatos autorizados pelo briefing. Elimine clichês, repetição de títulos, repetição de layouts, prompts visuais genéricos, placeholders e dados inventados. Reescreva qualquer copy que pareça slogan genérico de IA; prefira linguagem de anúncio clara, concreta e curta. Cada slide deve ter layout válido entre: ${LAYOUT_IDS.join(", ")}. Garanta que promptImagem esteja em inglês e descreva somente a cena sem texto. Pessoas estão ${allowPeople ? "permitidas porque foram solicitadas explicitamente" : "PROIBIDAS; remova pessoas, rostos, mãos, corpos e silhuetas de todos os prompts"}. Se a campanha for de software, IA, Zunexi ou conteúdo digital, elimine slogans vazios como “Crie melhor”, “Desbloqueie o poder”, “Autonomia criativa”, “Qualidade previsível” e equivalentes. Reescreva títulos para ficarem específicos, curtos e úteis; cada slide deve comunicar uma função, problema, mecanismo ou benefício diferente. Para layouts social-workflow, social-cards e social-feature-grid, preserve linhas curtas separadas por quebra de linha para alimentar os elementos gráficos. Troque prompts abstratos por metáforas visuais relevantes como cards, calendário, analytics, fluxo de publicação, mídia organizada e assets de marca. Se a campanha for de hamburgueria, restaurante ou alimentação, mantenha o produto gastronômico como herói em estúdio escuro premium; remova fachadas, placas, letreiros, cardápios fotografados, marcas inventadas e metáforas literais. Use enquadramentos variados do produto e preserve área livre coerente com o layout. Dê reviewScore de 0 a 100 para cada slide depois das correções.`,
           },
           {
             role: "user",
@@ -465,6 +465,10 @@ export const generateInstagramContent = createServerFn({ method: "POST" })
 ${data.informacoesAdicionais}
 ${product}
 ${brand}`);
+    const foodCampaign = /hamb|burger|food|comida|restaurante|lanche|pizza|sorvet|bebida|drink|caf[eé]|gastron|card[aá]pio|menu|combo|artesanal|bacon|cheddar|batata/i.test(`${data.tema}
+${data.informacoesAdicionais}
+${product}
+${brand}`);
     const softwareCopyRule = softwareCampaign
       ? `
 REGRAS ESPECIAIS PARA SOFTWARE / IA / ZUNEXI:
@@ -487,6 +491,16 @@ DIREÇÃO VISUAL ESPECIAL PARA SOFTWARE / IA / ZUNEXI:
 - Use social-editorial ou social-minimal para mensagens fortes; social-workflow para processos; social-cards para 3 ideias; social-feature-grid para 4 benefícios; social-cta para fechamento.
 - Use social-hero com imagem somente quando existir um assunto visual real que ajude a mensagem (produto, ambiente, objeto, mockup explicitamente solicitado).
 - Se uma imagem for necessária, ela deve mostrar um objeto/ambiente semanticamente ligado ao slide. Proibido cristal, escultura, símbolo 3D ou forma abstrata aleatória apenas para “parecer tecnologia”.`
+      : "";
+    const foodCampaignRule = foodCampaign
+      ? `
+REGRAS ESPECIAIS PARA GASTRONOMIA:
+- Trate o alimento ou bebida como produto de campanha: um herói grande, apetitoso e fisicamente coerente, com textura real, luz lateral controlada e fundo escuro sofisticado.
+- A direção visual deve lembrar uma peça premium construída em camadas: fotografia do produto + moldura fina + contraste preto + acentos da paleta + tipografia aplicada depois pelo renderer.
+- Não use fachada de restaurante, placa, letreiro, menu fotografado, embalagem com marca inventada, estrada ou cenário literal para representar frases da copy.
+- Varie os slides entre close baixo, detalhe macro, vista oblíqua superior, composição lateral e encerramento com mais respiro. Preserve sempre a área de texto definida pelo layout.
+- promptImagem descreve somente a fotografia limpa, sem palavras, logotipo, preço, telefone ou qualquer elemento tipográfico.
+- A copy deve ser curta e comercial, sem inventar sabores, ingredientes, preços, promoções, endereço ou diferenciais que não estejam no briefing.`
       : "";
 
     const { data: recentRows } = await (sb as any)
@@ -636,7 +650,7 @@ REGRAS DO promptImagem:
 - Reserve negative space natural para a copy; não crie painel branco vazio, faixa sólida, cartão artificial ou metade branca sem motivo.
 - Use cores locais naturais e acentos controlados da marca.
 - Evite stock photo, generic modern interior, generic smiling person, objetos duplicados, mãos deformadas e fundos poluídos.
-- Em alimentação ou produto físico, faça o produto ocupar cerca de 35–55% da cena quando adequado.${softwareVisualRule}
+- Em alimentação ou produto físico, faça o produto ocupar cerca de 35–55% da cena quando adequado.${softwareVisualRule}${foodCampaignRule}
 
 Antes de responder, revise silenciosamente cada slide e elimine: clichês, repetição, placeholders, dados inventados, Markdown e frases que poderiam servir para qualquer empresa.`;
 
@@ -665,13 +679,14 @@ ${recentCreativeMemory.length ? JSON.stringify(recentCreativeMemory) : "nenhuma 
 Faça uma campanha contínua e específica. Não use saudações de abertura, texto de apresentação genérico, placeholders ou dados que não estejam no briefing. O promptImagem de cada slide deve gerar somente a fotografia/ilustração principal sem texto.
 Se o tema envolver Zunexi, software, IA, conteúdo, criação, agenda, publicação, branding ou automação, traduza cada slide em uma metáfora visual coerente com o assunto: content cards, publishing flow, organized brand assets, modular creative blocks, media layers, scheduling cues ou structured digital production. Evite símbolo 3D aleatório ou ícone abstrato sem relação clara com a mensagem.
 ${softwareCampaign ? "Para esse tipo de campanha, privilegie copy curta, visualmente forte e orientada a benefício. A composição final pode parecer mais editorial e gráfica do que fotográfica." : ""}
+${foodCampaign ? "Para esta campanha gastronômica, cada prompt deve mostrar o produto em estúdio escuro premium, sem fachadas, placas, letreiros ou marcas inventadas. Varie câmera e posição do produto conforme o layout." : ""}
 ${denseContentMode ? "MODO DENSO: use conteúdo mais completo apenas quando os itens e dados estiverem presentes no briefing. Organize em linhas simples, sem Markdown." : "MODO PADRÃO: mantenha a copy enxuta, forte e com informação real em todos os slides."}
 Semente de variação criativa: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
     const compactSystemPrompt = `Você é diretor de criação e copywriter. Retorne SOMENTE JSON válido:
 {"titulo":"","legenda":"","hashtags":[""],"creativePlan":{"centralIdea":"","visualSignature":"","audienceInsight":"","peoplePolicy":"disabled","avoidPatterns":[]},"slides":[{"numero":1,"titulo":"","texto":"","cta":"","promptImagem":"","tipo":"capa","layout":"social-hero","visualConcept":"","textZone":"left","subjectZone":"right","camera":"","lighting":"","allowPeople":false,"reviewScore":95}]}
 
-Crie exatamente ${data.quantidadeSlides} slides em português brasileiro. Use somente fatos do briefing. Títulos com 2 a 6 palavras e textos curtos. Não use clichês, placeholders, Markdown ou dados inventados. No último slide use o CTA fornecido. promptImagem deve estar em inglês e descrever somente a cena sem texto, letras, números ou logotipo. Use layouts válidos: ${LAYOUT_IDS.join(", ")}. Pessoas estão ${allowPeople ? "permitidas somente quando necessárias" : "proibidas"}. Interfaces estão ${allowInterfaces ? "permitidas somente quando necessárias" : "proibidas"}.`;
+Crie exatamente ${data.quantidadeSlides} slides em português brasileiro. Use somente fatos do briefing. Títulos com 2 a 6 palavras e textos curtos. Não use clichês, placeholders, Markdown ou dados inventados. No último slide use o CTA fornecido. Cada slide deve avançar a narrativa e usar composição diferente. promptImagem deve estar em inglês e descrever somente uma cena publicitária limpa, sem texto, letras, números, logotipo, preço ou telefone. Use layouts válidos: ${LAYOUT_IDS.join(", ")}. Preserve uma área de texto coerente com o layout. Pessoas estão ${allowPeople ? "permitidas somente quando necessárias" : "proibidas"}. Interfaces estão ${allowInterfaces ? "permitidas somente quando necessárias" : "proibidas"}.${foodCampaign ? " Para gastronomia: produto grande e realista em estúdio preto premium, luz lateral, texturas naturais, acentos da paleta; nunca fachada, placa, letreiro, menu fotografado ou marca inventada. Varie close baixo, macro, vista oblíqua e composição lateral." : ""}`;
 
     const compactUserPrompt = `${trimAtWord(selectedBrandPrompt, 1200)}
 Tema: ${trimAtWord(data.tema, 500)}
@@ -687,7 +702,7 @@ Extras: ${trimAtWord(data.informacoesAdicionais || "nenhuma", 500)}`;
 
     const emergencySystemPrompt = `Retorne somente JSON válido em português:
 {"titulo":"","legenda":"","hashtags":[""],"slides":[{"numero":1,"titulo":"","texto":"","cta":"","promptImagem":"","tipo":"capa","layout":"social-hero","allowPeople":false}]}
-Crie exatamente ${data.quantidadeSlides} slides usando apenas os fatos enviados. Título e texto curtos; CTA no último slide; promptImagem em inglês sem texto, letras, números ou logotipo.`;
+Crie exatamente ${data.quantidadeSlides} slides usando apenas os fatos enviados. Título e texto curtos; CTA no último slide; promptImagem em inglês sem texto, letras, números ou logotipo.${foodCampaign ? " Gastronomia: use fotografia premium do produto em estúdio escuro, sem fachadas ou letreiros." : ""}`;
 
     const emergencyUserPrompt = `Tema: ${trimAtWord(data.tema, 260)}
 Marca: ${trimAtWord(brand === "marca do cliente" ? "não fornecida" : brand, 120)}
