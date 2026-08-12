@@ -1,1118 +1,534 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { createClient } from "@supabase/supabase-js";
-import type { Database } from "@/integrations/supabase/types";
-import { consumeAccessCredit, requirePlanFeature, requireTenantContext } from "@/lib/access.functions";
-import { brandContextAsPrompt, resolveBrandContext } from "@/lib/brand.functions";
-import { explicitHumanVisualRequest, explicitInterfaceVisualRequest } from "@/lib/creative-engine";
-import { LAYOUT_IDS } from "@/lib/layouts";
+import { randomUUID } from "node:crypto";
+import { admin, requirePlanFeature, requireTenantContext, type TenantContext } from "@/lib/access.functions";
+import { normalizePlan } from "@/lib/plans";
 
-function admin() {
-  return createClient<Database>(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false, autoRefreshToken: false } },
-  );
-}
-
-const Input = z.object({
-  jobId: z.string().uuid(),
-  accessKey: z.string().trim().min(4).max(64),
-  tema: z.string().trim().min(3).max(3000),
-  objetivo: z.string().trim().max(300).optional().default(""),
-  publicoAlvo: z.string().trim().max(300).optional().default(""),
-  tom: z.string().trim().max(100).optional().default("profissional"),
-  quantidadeSlides: z.number().int().min(1).max(20),
-  informacoesAdicionais: z.string().trim().max(3000).optional().default(""),
-  brandId: z.string().uuid().optional().nullable(),
+const AccessInput = z.object({ accessKey: z.string().trim().min(4).max(64) });
+const BrandPayload = z.object({
+  name: z.string().trim().min(2).max(120),
+  primaryColor: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/),
+  secondaryColor: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/),
+  accentColor: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/),
+  toneOfVoice: z.string().trim().max(1200).default(""),
+  audience: z.string().trim().max(1200).default(""),
+  visualStyle: z.string().trim().max(2400).default(""),
+  notes: z.string().trim().max(5000).default(""),
+  isPrimary: z.boolean().default(false),
 });
 
-export interface CreativePlanOut {
-  centralIdea: string;
-  visualSignature: string;
-  audienceInsight: string;
-  peoplePolicy: "disabled" | "explicitly-requested";
-  avoidPatterns: string[];
-}
-
-export interface SlideOut {
-  numero: number;
-  titulo: string;
-  texto: string;
-  cta?: string;
-  promptImagem: string;
-  tipo: string;
-  layout?: string;
-  visualConcept?: string;
-  textZone?: string;
-  subjectZone?: string;
-  camera?: string;
-  lighting?: string;
-  allowPeople?: boolean;
-  reviewScore?: number;
-}
-export interface CarrosselOut {
+export type BrandContext = {
   id: string;
-  titulo: string;
-  legenda: string;
-  hashtags: string[];
-  slides: SlideOut[];
-  creativePlan?: CreativePlanOut;
-}
-
-const TIMEOUT_MS = 45_000;
-const DEFAULT_GROQ_TEXT_MODEL = "llama-3.3-70b-versatile";
-
-type GroqChatRequest = {
-  temperature?: number;
-  top_p?: number;
-  max_completion_tokens?: number;
-  response_format?: { type: "json_object" };
-  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  name: string;
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  toneOfVoice: string;
+  audience: string;
+  visualStyle: string;
+  notes: string;
+  typography: string[];
+  contentPillars: string[];
+  prohibitedTerms: string[];
+  guideSummary: string;
+  guideText: string;
 };
 
-function configuredGroqModel() {
-  let value = (process.env.GROQ_TEXT_MODEL || DEFAULT_GROQ_TEXT_MODEL).trim();
-  if (/^GROQ_TEXT_MODEL\s*=/i.test(value)) value = value.replace(/^GROQ_TEXT_MODEL\s*=\s*/i, "");
-  return value.replace(/^["']|["']$/g, "").trim() || DEFAULT_GROQ_TEXT_MODEL;
+function asArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean) : [];
 }
 
-function groqErrorDetail(body: string) {
-  try {
-    const payload = JSON.parse(body) as { error?: { message?: unknown; code?: unknown }; message?: unknown };
-    const detail = payload.error?.message ?? payload.message;
-    if (typeof detail === "string" && detail.trim()) return compactWhitespace(detail).slice(0, 280);
-  } catch {
-    // Some proxy and provider errors are returned as plain text.
-  }
-  return compactWhitespace(body).slice(0, 280);
-}
-
-function isUnavailableGroqModel(status: number, detail: string) {
-  return status === 400 && /model/i.test(detail) && /(?:decommission|deprecated|not found|does not exist|invalid|unavailable|permission)/i.test(detail);
-}
-
-function isGroqJsonModeFailure(status: number, detail: string) {
-  return status === 400 && /(?:json_validate_failed|failed to generate json|json mode|valid json)/i.test(detail);
-}
-
-function groqResponseError(status: number, body: string, model: string) {
-  const detail = groqErrorDetail(body);
-  if (status === 401 || status === 403) return new Error("Chave da Groq inválida ou sem permissão.");
-  if (status === 429) return new Error("Limite da Groq API atingido. Tente novamente em instantes.");
-  if (status === 413) return new Error("O pedido ficou grande demais para a Groq. Reduza as informações adicionais e tente novamente.");
-  if (isUnavailableGroqModel(status, detail)) {
-    return new Error(`O modelo da Groq \"${model}\" não está disponível. Configure GROQ_TEXT_MODEL=${DEFAULT_GROQ_TEXT_MODEL} na Vercel.`);
-  }
-  if (status >= 500) return new Error(`A Groq está temporariamente indisponível (erro ${status}). Tente novamente em instantes.`);
-  return new Error(detail ? `A Groq recusou a solicitação (erro ${status}): ${detail}` : `A Groq recusou a solicitação (erro ${status}).`);
-}
-
-async function requestGroqChat(apiKey: string, request: GroqChatRequest, signal: AbortSignal) {
-  const selectedModel = configuredGroqModel();
-  const models = Array.from(new Set([selectedModel, DEFAULT_GROQ_TEXT_MODEL]));
-  let lastError: Error | undefined;
-
-  async function send(model: string, payload: GroqChatRequest) {
-    return fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      signal,
-      body: JSON.stringify({ ...payload, model }),
-    });
-  }
-
-  for (const model of models) {
-    let response = await send(model, request);
-
-    if (response.ok) return { response, model };
-
-    let body = await response.text();
-    let detail = groqErrorDetail(body);
-    console.error("Groq error", response.status, model, detail);
-
-    if (request.response_format && isGroqJsonModeFailure(response.status, detail)) {
-      console.warn(`Modo JSON da Groq falhou no modelo ${model}; repetindo com validação local.`);
-      const { response_format: _responseFormat, ...requestWithoutJsonMode } = request;
-      response = await send(model, requestWithoutJsonMode);
-      if (response.ok) return { response, model };
-      body = await response.text();
-      detail = groqErrorDetail(body);
-      console.error("Groq retry error", response.status, model, detail);
-    }
-
-    lastError = groqResponseError(response.status, body, model);
-
-    const hasFallback = model !== models[models.length - 1];
-    if (!hasFallback || !isUnavailableGroqModel(response.status, detail)) throw lastError;
-    console.warn(`Modelo Groq ${model} indisponível; tentando ${DEFAULT_GROQ_TEXT_MODEL}.`);
-  }
-
-  throw lastError || new Error("Não foi possível consultar a Groq.");
-}
-
-const PLACEHOLDER_LINE = /(?:\[(?:inserir|adicione|preencha|coloque)[^\]]*\]|<(?:inserir|adicione|preencha|coloque)[^>]*>|\b(?:a definir|não informado|nao informado|não fornecido|nao fornecido|exemplo|seu telefone|seu endereço|seu endereco)\b)/i;
-const WEAK_COPY = /^(?:bem[- ]?vindo|conheça|descubra|aproveite|saiba mais|qualidade que|sabor que|uma experiência|experiência única|o melhor para você|feito para você|não perca|crie agora|crie melhor|desbloqueie o poder|eleve sua marca|leve sua marca)(?:\b|[!.:]|$)/i;
-const GENERIC_COPY = /\b(?:desbloqueie o poder|potencialize sua criatividade|crie melhor|crie agora|qualidade previsível|autonomia criativa|leve sua marca ao próximo nível|transforme seu negócio|solução completa|inovação que transforma|resultados incríveis)\b/i;
-
-function compactWhitespace(value: string) {
-  return value
-    .replace(/\r/g, "")
-    .replace(/[ \t]+/g, " ")
-    .replace(/ *\n */g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function stripMarkdown(value: string) {
-  return value
-    .replace(/```(?:json)?/gi, "")
-    .replace(/^\s{0,3}#{1,6}\s*/gm, "")
-    .replace(/\*\*(.*?)\*\*/g, "$1")
-    .replace(/__(.*?)__/g, "$1")
-    .replace(/^\s*[-*+]\s+/gm, "• ");
-}
-
-function removePlaceholderLines(value: string) {
-  return value
-    .split("\n")
-    .filter((line) => !PLACEHOLDER_LINE.test(line))
-    .join("\n");
-}
-
-function trimAtWord(value: string, limit: number) {
-  if (value.length <= limit) return value;
-  const slice = value.slice(0, limit + 1);
-  const boundary = slice.lastIndexOf(" ");
-  return `${slice.slice(0, boundary > limit * 0.65 ? boundary : limit).trim()}…`;
-}
-
-function sanitizeTitle(value: unknown) {
-  const cleaned = compactWhitespace(removePlaceholderLines(stripMarkdown(String(value ?? ""))))
-    .split("\n")
-    .find(Boolean)
-    ?.replace(/^[“"']|[”"']$/g, "")
-    .replace(/[.!]+$/g, "")
-    .trim() || "";
-  return trimAtWord(cleaned, 82);
-}
-
-function sanitizeBody(value: unknown, dense: boolean) {
-  const cleaned = compactWhitespace(removePlaceholderLines(stripMarkdown(String(value ?? ""))))
-    .replace(/(^|\n)(?:texto|descrição|descricao|copy)\s*:\s*/gi, "$1")
-    .trim();
-  return trimAtWord(cleaned, dense ? 900 : 150);
-}
-
-function sanitizeCta(value: unknown) {
-  const cleaned = compactWhitespace(removePlaceholderLines(stripMarkdown(String(value ?? ""))))
-    .split("\n")
-    .find(Boolean)
-    ?.replace(/^(?:cta|chamada para a[cç][aã]o)\s*:\s*/i, "")
-    .replace(/^[“"']|[”"']$/g, "")
-    .trim() || "";
-  return trimAtWord(cleaned, 54);
-}
-
-function sanitizePromptImage(value: unknown) {
-  return compactWhitespace(String(value ?? ""))
-    .replace(/```/g, "")
-    .replace(/\b(?:add|include|render|write|display|place|show)\s+(?:the\s+)?(?:text|title|headline|subtitle|copy|words?|letters?|logo|price|phone|watermark)[^.;]*[.;]?/gi, "")
-    .replace(/\b(?:no|without)\s+(?:text|typography|letters?|words?|captions?)\b/gi, "")
-    .trim();
-}
-
-function parseJsonObject(raw: string): Omit<CarrosselOut, "id"> {
-  const cleaned = raw.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
-  try {
-    return JSON.parse(cleaned) as Omit<CarrosselOut, "id">;
-  } catch {
-    const start = cleaned.indexOf("{");
-    const end = cleaned.lastIndexOf("}");
-    if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1)) as Omit<CarrosselOut, "id">;
-    throw new Error("Resposta da Groq em formato inválido.");
-  }
-}
-
-function copyQualityWarnings(slides: SlideOut[]) {
-  const warnings: string[] = [];
-  slides.forEach((slide) => {
-    if (!slide.titulo) warnings.push(`slide ${slide.numero} sem título`);
-    if (PLACEHOLDER_LINE.test(`${slide.titulo}\n${slide.texto}`)) warnings.push(`slide ${slide.numero} com placeholder`);
-    if (WEAK_COPY.test(slide.titulo) || GENERIC_COPY.test(`${slide.titulo} ${slide.texto}`)) warnings.push(`slide ${slide.numero} com copy genérica`);
-    if ((slide.texto || "").length > 220) warnings.push(`slide ${slide.numero} com texto longo demais`);
-  });
-
-  const normalizedTitles = slides.map((slide) => slide.titulo.toLowerCase().replace(/[^a-z0-9áéíóúãõâêôç ]/gi, "").trim());
-  normalizedTitles.forEach((title, index) => {
-    if (title && normalizedTitles.indexOf(title) !== index) warnings.push(`slide ${slides[index].numero} repete um título anterior`);
-  });
-
-  const repeatedStarts = new Map<string, number[]>();
-  normalizedTitles.forEach((title, index) => {
-    const start = title.split(/\s+/).slice(0, 2).join(" ");
-    if (!start) return;
-    repeatedStarts.set(start, [...(repeatedStarts.get(start) || []), slides[index].numero]);
-  });
-  repeatedStarts.forEach((nums, start) => {
-    if (nums.length >= 3) warnings.push(`muitos títulos começam com "${start}"`);
-  });
-
-  const layouts = slides.map((slide) => slide.layout).filter(Boolean);
-  for (let index = 1; index < layouts.length; index += 1) {
-    if (layouts[index] === layouts[index - 1]) warnings.push("layouts consecutivos repetidos");
-  }
-  return warnings;
-}
-
-function sanitizeCreativeField(value: unknown, limit = 220) {
-  return trimAtWord(compactWhitespace(stripMarkdown(String(value ?? ""))), limit);
-}
-
-function normalizeCreativePlan(value: unknown, allowPeople: boolean): CreativePlanOut | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const plan = value as Partial<CreativePlanOut>;
-  const avoidPatterns = Array.isArray(plan.avoidPatterns)
-    ? plan.avoidPatterns.map((item) => sanitizeCreativeField(item, 120)).filter(Boolean).slice(0, 8)
-    : [];
+function toBrandContext(row: any): BrandContext {
   return {
-    centralIdea: sanitizeCreativeField(plan.centralIdea, 240),
-    visualSignature: sanitizeCreativeField(plan.visualSignature, 300),
-    audienceInsight: sanitizeCreativeField(plan.audienceInsight, 220),
-    peoplePolicy: allowPeople ? "explicitly-requested" : "disabled",
-    avoidPatterns,
+    id: String(row.id),
+    name: String(row.name || "Marca"),
+    primaryColor: String(row.primary_color || "#4D6BFF"),
+    secondaryColor: String(row.secondary_color || "#8B5CF6"),
+    accentColor: String(row.accent_color || "#12C7FF"),
+    toneOfVoice: String(row.tone_of_voice || ""),
+    audience: String(row.audience || ""),
+    visualStyle: String(row.visual_style || ""),
+    notes: String(row.notes || ""),
+    typography: asArray(row.typography),
+    contentPillars: asArray(row.content_pillars),
+    prohibitedTerms: asArray(row.prohibited_terms),
+    guideSummary: String(row.guide_summary || ""),
+    guideText: String(row.guide_text || ""),
   };
 }
 
-function normalizeSlide(value: SlideOut, index: number, total: number, dense: boolean, allowPeople: boolean): SlideOut {
-  const requestedLayout = sanitizeCreativeField(value.layout, 40);
-  const layout = (LAYOUT_IDS as readonly string[]).includes(requestedLayout) ? requestedLayout : undefined;
-  return {
-    numero: index + 1,
-    titulo: sanitizeTitle(value.titulo),
-    texto: sanitizeBody(value.texto, dense),
-    cta: sanitizeCta(value.cta),
-    promptImagem: sanitizePromptImage(value.promptImagem),
-    tipo: String(value.tipo ?? (index === 0 ? "capa" : index === total - 1 ? "cta" : "conteudo")),
-    layout,
-    visualConcept: sanitizeCreativeField(value.visualConcept, 240),
-    textZone: sanitizeCreativeField(value.textZone, 40),
-    subjectZone: sanitizeCreativeField(value.subjectZone, 40),
-    camera: sanitizeCreativeField(value.camera, 100),
-    lighting: sanitizeCreativeField(value.lighting, 100),
-    allowPeople,
-    reviewScore: typeof value.reviewScore === "number" ? Math.max(0, Math.min(100, Math.round(value.reviewScore))) : undefined,
-  };
-}
-
-function applyReferenceLayoutSequence(slides: SlideOut[], softwareCampaign: boolean, dense: boolean, allowInterfaces: boolean) {
-  if (!softwareCampaign || dense || !slides.length) return slides;
-  const middle: Array<SlideOut["layout"]> = [
-    "social-workflow",
-    "social-cards",
-    "social-feature-grid",
-    "social-editorial",
-    "social-minimal",
-  ];
-  return slides.map((slide, index) => {
-    if (index === 0) {
-      const imageLed = allowInterfaces && /(?:mockup|dashboard|interface|tela|site|app|produto)/i.test(`${slide.visualConcept || ""} ${slide.promptImagem || ""}`);
-      return { ...slide, layout: imageLed ? "social-hero" : "social-editorial" };
-    }
-    if (index === slides.length - 1) return { ...slide, layout: "social-cta" };
-    return { ...slide, layout: middle[(index - 1) % middle.length] };
-  });
-}
-
-async function reviewCampaignWithGroq({
-  apiKey,
-  campaign,
-  briefing,
-  allowPeople,
-}: {
-  apiKey: string;
-  campaign: Omit<CarrosselOut, "id">;
-  briefing: string;
-  allowPeople: boolean;
-}): Promise<Omit<CarrosselOut, "id">> {
-  if (process.env.GROQ_CREATIVE_REVIEW_ENABLED === "false") return campaign;
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 40_000);
-  try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: (process.env.GROQ_REVIEW_MODEL || configuredGroqModel()).trim(),
-        temperature: 0.25,
-        top_p: 0.8,
-        max_completion_tokens: 5000,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: `Você é o revisor final da Zunexi. Receba um carrossel em JSON e devolva o MESMO formato JSON, corrigido e pronto para produção. Não explique nada. Preserve somente fatos autorizados pelo briefing. Elimine clichês, repetição de títulos, repetição de layouts, prompts visuais genéricos, placeholders e dados inventados. Reescreva qualquer copy que pareça slogan genérico de IA; prefira linguagem de anúncio clara, concreta e curta. Cada slide deve ter layout válido entre: ${LAYOUT_IDS.join(", ")}. Garanta que promptImagem esteja em inglês e descreva somente a cena sem texto. Pessoas estão ${allowPeople ? "permitidas porque foram solicitadas explicitamente" : "PROIBIDAS; remova pessoas, rostos, mãos, corpos e silhuetas de todos os prompts"}. Se a campanha for de software, IA, Zunexi ou conteúdo digital, elimine slogans vazios como “Crie melhor”, “Desbloqueie o poder”, “Autonomia criativa”, “Qualidade previsível” e equivalentes. Reescreva títulos para ficarem específicos, curtos e úteis; cada slide deve comunicar uma função, problema, mecanismo ou benefício diferente. Para layouts social-workflow, social-cards e social-feature-grid, preserve linhas curtas separadas por quebra de linha para alimentar os elementos gráficos. Troque prompts abstratos por metáforas visuais relevantes como cards, calendário, analytics, fluxo de publicação, mídia organizada e assets de marca. Dê reviewScore de 0 a 100 para cada slide depois das correções.`,
-          },
-          {
-            role: "user",
-            content: `BRIEFING AUTORIZADO:
-${briefing}
-
-CAMPANHA A REVISAR:
-${JSON.stringify(campaign)}`,
-          },
-        ],
-      }),
-    });
-    if (!response.ok) return campaign;
-    const json = await response.json() as { choices?: { message?: { content?: string } }[] };
-    const raw = json.choices?.[0]?.message?.content?.trim();
-    if (!raw) return campaign;
-    const reviewed = parseJsonObject(raw);
-    if (
-      !reviewed || typeof reviewed.titulo !== "string" || typeof reviewed.legenda !== "string" ||
-      !Array.isArray(reviewed.hashtags) || !Array.isArray(reviewed.slides) ||
-      reviewed.slides.length < campaign.slides.length
-    ) return campaign;
-    return reviewed;
-  } catch (error) {
-    console.warn("Revisor criativo indisponível; usando primeira versão.", error);
-    return campaign;
-  } finally {
-    clearTimeout(timeout);
+async function ensureBrandLimit(sb: ReturnType<typeof admin>, context: TenantContext, creating = true) {
+  if (!creating) return;
+  const plan = normalizePlan(context.tenant.plan);
+  const { count, error } = await (sb as any).from("brand_profiles").select("id", { count: "exact", head: true }).eq("tenant_id", context.tenant.id);
+  if (error) throw new Error(error.message);
+  if (plan === "profissional" && (count ?? 0) >= 1) {
+    throw new Error("O plano Profissional permite um Brand Kit. O plano Agência permite múltiplas marcas.");
   }
 }
 
-export const generateInstagramContent = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => Input.parse(d))
-  .handler(async ({ data }): Promise<CarrosselOut> => {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) throw new Error("GROQ_API_KEY não configurada no servidor.");
-
-    const sb = admin();
-    const context = await requireTenantContext(sb, data.accessKey);
-    const keyId = context.access.id;
-    const selectedBrand = await resolveBrandContext(sb, context, data.brandId);
-    const selectedBrandPrompt = brandContextAsPrompt(selectedBrand);
-
-    const { data: existing } = await (sb as any)
-      .from("generations")
-      .select("id, titulo, legenda, hashtags, slides")
-      .eq("tenant_id", context.tenant.id)
-      .eq("member_id", context.member.id)
-      .eq("client_job_id", data.jobId)
-      .maybeSingle();
-    if (existing) {
-      return {
-        id: existing.id,
-        titulo: existing.titulo,
-        legenda: existing.legenda,
-        hashtags: existing.hashtags as unknown as string[],
-        slides: existing.slides as unknown as SlideOut[],
-      };
-    }
-
-    await consumeAccessCredit(sb, data.accessKey, data.jobId);
-
-    const brandMatch = data.informacoesAdicionais.match(/Marca:\s*(.+)/i);
-    const productMatch = data.informacoesAdicionais.match(/Produto ou serviço:\s*(.+)/i);
-    const styleMatch = data.informacoesAdicionais.match(/Estilo visual:\s*(.+)/i);
-    const paletteMatch = data.informacoesAdicionais.match(/Paleta:\s*(.+)/i);
-    const ctaMatch = data.informacoesAdicionais.match(/CTA:\s*(.+)/i);
-
-    const brand = selectedBrand?.name || brandMatch?.[1]?.trim() || "marca do cliente";
-    const product = productMatch?.[1]?.trim() || data.tema;
-    const visualStyle = selectedBrand?.visualStyle || styleMatch?.[1]?.trim() || "publicidade premium, composição editorial forte, visual de campanha autoral";
-    const palette = selectedBrand ? `${selectedBrand.primaryColor}, ${selectedBrand.secondaryColor}, ${selectedBrand.accentColor}` : paletteMatch?.[1]?.trim() || "paleta coerente com a marca, alto contraste";
-    const requestedCta = ctaMatch?.[1]?.trim() || "";
-    const denseContentMode = /card[aá]pio|menu|cat[aá]logo|lista|tabela|pre[cç]o|sabores|pizzas|bebidas|tradicionais|doces|promo[cç][aã]o/.test(
-      `${data.tema} ${data.informacoesAdicionais} ${product}`.toLowerCase(),
-    );
-    const allowPeople = explicitHumanVisualRequest(data.tema, data.informacoesAdicionais, product);
-    const allowInterfaces = explicitInterfaceVisualRequest(data.tema, data.informacoesAdicionais, product);
-    const softwareCampaign = /zunexi|\bia\b|software|saas|app|aplicativo|plataforma|sistema|conte[uú]do|carrossel|posts?|publica[cç][aã]o|calend[aá]rio|agenda|automa[cç][aã]o|branding|analytics|marketing/i.test(`${data.tema}
-${data.informacoesAdicionais}
-${product}
-${brand}`);
-    const softwareCopyRule = softwareCampaign
-      ? `
-REGRAS ESPECIAIS PARA SOFTWARE / IA / ZUNEXI:
-- A capa deve funcionar como headline de anúncio ou editorial: uma ideia específica, clara e memorável. Evite “mais que criar”, “crie melhor”, “desbloqueie o poder”, “autonomia criativa”, “qualidade previsível”, “potencialize sua criatividade” e qualquer slogan que serviria para qualquer SaaS.
-- Prefira títulos concretos que nomeiem a função, o problema ou o ganho: ex. “Ideia + IA”, “Templates inteligentes”, “Texto que já nasce pronto”, “Publique sem perder o ritmo”, “Seu calendário em ordem”. Não copie estes exemplos literalmente; use a lógica.
-- Cada slide intermediário deve trabalhar UMA função ou benefício por vez. Não repita “IA”, “conteúdo”, “criar” ou o nome da marca em todos os títulos.
-- Para social-workflow: o campo texto deve ter 3 linhas curtas, uma etapa por linha, sem marcadores.
-- Para social-cards: o campo texto deve ter 3 linhas curtas, uma ideia/benefício por linha.
-- Para social-feature-grid: o campo texto deve ter 4 linhas curtas, um benefício por linha.
-- Para social-editorial e social-minimal: use uma única frase curta de apoio; deixe a headline ser protagonista.
-- Para social-cta: use CTA específico no campo cta, com 2 a 5 palavras. O campo texto deve explicar o benefício final em uma frase.
-- Não escreva parágrafos longos. Não descreva a empresa de forma genérica. Mostre utilidade prática.
-- Evite promessas vagas como “transforme seu negócio”, “leve sua marca ao próximo nível”, “inovação que transforma” e equivalentes.`
-      : "";
-    const softwareVisualRule = softwareCampaign
-      ? `
-DIREÇÃO VISUAL ESPECIAL PARA SOFTWARE / IA / ZUNEXI:
-- A referência é design editorial premium de Instagram/SaaS: tipografia grande, grids, cards, contadores, acentos de cor, alternância dark/light e bastante respiro.
-- NÃO transforme todos os slides em imagens 3D. Slides de conceito, processo, lista, benefício e CTA devem preferir os layouts social-* que o renderer monta sem IA de imagem.
-- Use social-editorial ou social-minimal para mensagens fortes; social-workflow para processos; social-cards para 3 ideias; social-feature-grid para 4 benefícios; social-cta para fechamento.
-- Use social-hero com imagem somente quando existir um assunto visual real que ajude a mensagem (produto, ambiente, objeto, mockup explicitamente solicitado).
-- Se uma imagem for necessária, ela deve mostrar um objeto/ambiente semanticamente ligado ao slide. Proibido cristal, escultura, símbolo 3D ou forma abstrata aleatória apenas para “parecer tecnologia”.`
-      : "";
-
-    const { data: recentRows } = await (sb as any)
-      .from("generations")
-      .select("titulo, slides, created_at")
-      .eq("tenant_id", context.tenant.id)
-      .neq("client_job_id", data.jobId)
-      .order("created_at", { ascending: false })
-      .limit(6);
-
-    const recentCreativeMemory = (recentRows || []).map((row) => {
-      const recentSlides = Array.isArray(row.slides) ? row.slides as unknown as SlideOut[] : [];
-      return {
-        titulo: row.titulo,
-        slides: recentSlides.slice(0, 8).map((slide) => ({
-          titulo: slide.titulo,
-          layout: slide.layout,
-          visualConcept: slide.visualConcept,
-          prompt: String(slide.promptImagem || "").slice(0, 180),
-        })),
-      };
-    });
-
-    const socialLayoutSequence = [
-      "social-hero",
-      "social-workflow",
-      "social-cards",
-      "social-feature-grid",
-      "social-editorial",
-      "social-minimal",
-      "social-cta",
-    ] as const;
-
-    const slideRoles = Array.from({ length: data.quantidadeSlides }, (_, index) => {
-      const isFirst = index === 0;
-      const isLast = index === data.quantidadeSlides - 1;
-      const layout = isFirst
-        ? "social-hero"
-        : isLast
-          ? "social-cta"
-          : socialLayoutSequence[Math.min(index, socialLayoutSequence.length - 2)];
-      const formatRule = layout === "social-workflow"
-        ? "O campo texto deve conter 3 etapas curtas em linhas separadas, sem bullets."
-        : layout === "social-feature-grid"
-          ? "O campo texto deve conter 4 benefícios/itens curtos em linhas separadas, sem bullets."
-          : layout === "social-cards"
-            ? "O campo texto deve conter 3 ideias/benefícios curtos em linhas separadas."
-            : "Use uma frase secundária curta e específica.";
-      if (isFirst) return `Slide 1: CAPA — use layout ${layout}. Interrompa o scroll com promessa forte, específica e visualmente grande. ${formatRule}`;
-      if (isLast) return `Slide ${index + 1}: CTA — use layout ${layout}. Feche a narrativa com benefício claro e ação simples. ${formatRule}`;
-      if (index === 1) return `Slide ${index + 1}: CONTEXTO / FLUXO — use layout ${layout}. Mostre uma sequência, transformação ou mecanismo em 3 passos. ${formatRule}`;
-      if (index === 2) return `Slide ${index + 1}: SOLUÇÃO / POSSIBILIDADES — use layout ${layout}. Mostre 3 possibilidades, recursos ou resultados diferentes. ${formatRule}`;
-      if (index === 3) return `Slide ${index + 1}: BENEFÍCIOS — use layout ${layout}. Mostre 4 benefícios concretos e curtos. ${formatRule}`;
-      if (data.objetivo.toLowerCase().includes("vender")) {
-        return `Slide ${index + 1}: DIFERENCIAL DE VENDA — use layout ${layout}. Aprofunde uma vantagem concreta sem repetir o slide anterior. ${formatRule}`;
-      }
-      return `Slide ${index + 1}: BENEFÍCIO / DETALHE — use layout ${layout}. Desenvolva uma ideia concreta e visualmente distinta. ${formatRule}`;
-    }).join("\n");
-
-    const systemPrompt = `Você é um diretor de criação e copywriter sênior de campanhas para Instagram. Crie conteúdo que pareça escrito para ESTA marca e ESTE pedido, não um texto genérico reutilizável. O resultado será aplicado diretamente em uma arte profissional; por isso, toda frase precisa ser útil, específica, curta e visualmente legível.
-
-Retorne SOMENTE JSON válido, sem cercas de código, no formato EXATO:
-{
-  "titulo": "Título principal do carrossel",
-  "legenda": "Legenda completa para Instagram, com quebras de linha e CTA no final",
-  "hashtags": ["hashtag1", "hashtag2"],
-  "creativePlan": {
-    "centralIdea": "ideia central específica da campanha",
-    "visualSignature": "assinatura visual que une os slides",
-    "audienceInsight": "insight útil sobre o público sem inventar fatos",
-    "peoplePolicy": "disabled ou explicitly-requested",
-    "avoidPatterns": ["padrões visuais e verbais que não devem ser repetidos"]
-  },
-  "slides": [
-    {
-      "numero": 1,
-      "titulo": "Texto principal do slide",
-      "texto": "Texto secundário do slide",
-      "cta": "CTA curto somente quando fizer sentido; vazio nos demais slides",
-      "promptImagem": "Direção de arte em inglês, somente para a imagem sem texto",
-      "tipo": "capa",
-      "layout": "social-hero",
-      "visualConcept": "conceito visual específico deste slide",
-      "textZone": "left",
-      "subjectZone": "right",
-      "camera": "close-up low three-quarter angle",
-      "lighting": "controlled cinematic rim light",
-      "allowPeople": false,
-      "reviewScore": 95
-    }
-  ]
+export async function resolveBrandContext(
+  sb: ReturnType<typeof admin>,
+  context: TenantContext,
+  brandId?: string | null,
+): Promise<BrandContext | null> {
+  let query = (sb as any).from("brand_profiles").select("*").eq("tenant_id", context.tenant.id);
+  if (brandId) query = query.eq("id", brandId);
+  else query = query.order("is_primary", { ascending: false }).order("created_at", { ascending: true }).limit(1);
+  const { data, error } = brandId ? await query.maybeSingle() : await query.maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? toBrandContext(data) : null;
 }
 
-PLANEJAMENTO OBRIGATÓRIO:
-${slideRoles}
-
-PROCESSO CRIATIVO OBRIGATÓRIO:
-- Escolha primeiro um ângulo central claro para a campanha. Todos os slides devem desenvolver esse ângulo em sequência.
-- Cada slide precisa ter uma função diferente. Não repita a mesma promessa com outras palavras.
-- A capa deve interromper o scroll com uma promessa, tensão, benefício ou ideia específica; nunca use uma simples saudação à marca.
-- Os slides intermediários devem avançar a narrativa com informação concreta, benefício, detalhe do produto, objeção, comparação, prova permitida ou orientação prática.
-- O último slide deve encerrar a ideia e indicar uma ação coerente. Use o CTA fornecido quando existir.
-- Defina uma creativePlan antes dos slides. Ela deve unir a campanha sem tornar as composições iguais.
-- Escolha para cada slide um layout válido entre: ${LAYOUT_IDS.join(", ")}. Nunca repita o mesmo layout em slides consecutivos, exceto menu-board quando o conteúdo realmente for denso.
-- Priorize a nova família social-* para posts e carrosséis. Ela foi criada para peças com hierarquia forte, cards, etapas, grids e alternância entre slides claros e escuros.
-- Use social-hero para anúncio com um visual realmente relevante; social-workflow para processo em 3 etapas; social-cards para 3 ideias; social-feature-grid para 4 benefícios; social-editorial para headline forte; social-minimal para uma mensagem de alto impacto com muito respiro; social-cta para fechamento.
-- Em campanhas de software/IA, a capa deve preferir social-editorial ou social-minimal. Use social-hero na capa somente se houver um produto visual, interface/mockup solicitado ou objeto concreto que enriqueça a mensagem.
-- Os layouts social-workflow, social-cards, social-feature-grid, social-editorial, social-minimal e social-cta são construídos pelo renderer e NÃO dependem de uma imagem de IA. Por isso, o texto precisa ser bom o bastante para ser o protagonista.
-- textZone e subjectZone devem ser opostos ou claramente separados para proteger a legibilidade.
-
-REFERÊNCIA DE DIREÇÃO DE ARTE:
-- Busque o nível de acabamento de posts premium de tecnologia, marketing e SaaS: tipografia grande, contraste forte, muito respiro, pequenos acentos de cor, cards limpos, contadores 01/06, alternância dark/light e composição de anúncio.
-- Evite o visual de "imagem de IA com texto por cima". A peça deve parecer design gráfico criado por um diretor de arte.
-- Nem todo slide precisa de fotografia ou 3D. Em slides de conceito, processo, lista e CTA, prefira design tipográfico e elementos gráficos simples.
-- Varie entre: headline editorial em fundo sólido; fluxo em 3 etapas; cards modulares; grade 2x2 de benefícios; anúncio com visual à direita; fechamento centralizado com CTA. Isso deve criar ritmo de carrossel sem perder a identidade.
-
-REGRAS DE COPY — PRIORIDADE MÁXIMA:
-- Escreva em português brasileiro natural, correto e contemporâneo.
-- Títulos: de 2 a 6 palavras, preferencialmente entre 16 e 44 caracteres. Devem soar como headline de anúncio, não como frase de IA. Evite slogans vagos. Varie a construção sintática entre os slides.
-- Texto secundário padrão: 1 frase curta ou até 3 linhas objetivas, com aproximadamente 35 a 110 caracteres no total. Prefira clareza e impacto a explicações longas.
-- Para cardápio, catálogo, lista ou preços realmente fornecidos, organize o texto em linhas simples e legíveis. Não use Markdown, #, **, tabelas ou blocos de código.
-- PROIBIDO usar placeholders ou campos fictícios, como “[inserir endereço]”, “[telefone]”, “a definir”, “não informado” ou “seu contato”. Quando um dado não foi fornecido, simplesmente não o mencione.
-- PROIBIDO inventar preço, desconto, sabor, ingrediente, número, endereço, telefone, data, depoimento, resultado, garantia ou condição comercial.
-- PROIBIDO escrever títulos vazios ou clichês como “Bem-vindo”, “Conheça”, “Descubra”, “Aproveite”, “Saiba mais”, “Qualidade que você merece”, “Sabor que conquista”, “Experiência única” e variações, salvo quando a frase receber informação específica que a torne indispensável.
-- Não use linguagem de bastidor (“neste slide”, “o objetivo é”, “a marca deve”). Escreva somente a copy que aparecerá ao público.
-- Não repita palavras-chave em todos os títulos. Não comece vários slides do mesmo jeito.
-- Evite repetir a assinatura verbal da marca em todos os slides. Uma mesma frase não deve sustentar mais de um slide.
-- Se o briefing tiver poucos dados, trabalhe com posicionamento e benefícios plausíveis da categoria, sem fingir fatos específicos sobre a empresa.
-- Campo cta: deixe vazio em slides normais. No fechamento, use somente uma ação curta, específica e coerente com o briefing. Nunca invente telefone, link, preço ou condição.
-- Hashtags: 8 a 15, relevantes, sem # no JSON e sem termos aleatórios.${softwareCopyRule}
-
-PADRÃO DE QUALIDADE VISUAL:
-- Pense como diretor de arte de uma campanha real. Cada slide precisa ter um conceito visual deliberado, não apenas “uma foto bonita”.
-- O produto, serviço ou assunto deve ser o herói. Evite cenas genéricas de escritório, restaurante, cidade ou pessoas sorrindo sem função narrativa.
-- Não faça todos os slides com o mesmo enquadramento. Preserve a assinatura visual da campanha, mas varie câmera, distância, perspectiva e posição do assunto.
-- Em alimentação, use fotografia gastronômica de campanha: produto dominante, textura real, luz controlada, profundidade e cores naturais dos ingredientes. Não aplique filtro laranja ou bege global.
-- Em tecnologia, use key visual de lançamento com materiais precisos, luz escultural, composição limpa e sofisticada. Prefira metáforas visuais relevantes para criação de conteúdo, publicação, organização, fluxo criativo, camadas de mídia, brand assets e produção digital; evite símbolo 3D aleatório, hologramas genéricos e circuitos clichês sem motivo.
-- Em automotivo, preserve proporções e use linguagem de campanha automotiva, não foto comum de concessionária.
-- A paleta da marca deve aparecer como acentos controlados, nunca como banho monocromático sobre toda a imagem.
-
-REGRAS DO promptImagem:
-- Escreva em inglês, com direção de arte específica.
-- Descreva SOMENTE o visual principal: hero subject, environment, camera, lens, lighting, materials, depth, color treatment and composition.
-- Indique claramente o herói, posição no quadro, luz, distância/ângulo de câmera, textura/material e estética de campanha. O herói deve representar a mensagem do slide, não apenas ser um objeto bonito.
-- NÃO solicite texto, tipografia, letras, números, logotipo, preço, telefone, watermark, moldura ou palavras dentro da imagem. O motor deve gerar SOMENTE o fundo/cena.
-- Interfaces, dashboards, telas, browser windows e mockups de dispositivos estão ${allowInterfaces ? "permitidos SOMENTE porque foram pedidos explicitamente; ainda assim, evite pseudo-texto e use a interface como elemento secundário" : "PROIBIDOS. Para temas de tecnologia/software, traduza o conceito em objetos, luz, materiais, geometria e ambiente — nunca invente uma tela de app"}.
-- Reserve negative space natural para a copy; não crie painel branco vazio, faixa sólida, cartão artificial ou metade branca sem motivo.
-- Use cores locais naturais e acentos controlados da marca.
-- Evite stock photo, generic modern interior, generic smiling person, objetos duplicados, mãos deformadas e fundos poluídos.
-- Em alimentação ou produto físico, faça o produto ocupar cerca de 35–55% da cena quando adequado.${softwareVisualRule}
-
-Antes de responder, revise silenciosamente cada slide e elimine: clichês, repetição, placeholders, dados inventados, Markdown e frases que poderiam servir para qualquer empresa.`;
-
-    const userPrompt = `Crie o carrossel completo usando apenas os dados abaixo.
-
-BRIEFING AUTORIZADO:
-${selectedBrandPrompt}
-
-Tema: ${data.tema}
-Marca: ${brand === "marca do cliente" ? "não fornecida — não invente nome" : brand}
-Produto ou serviço: ${product}
-Objetivo: ${data.objetivo || "engajamento"}
-Público-alvo: ${data.publicoAlvo || "não especificado"}
-Tom de comunicação: ${data.tom}
-Quantidade de slides: ${data.quantidadeSlides}
-Estilo visual: ${visualStyle}
-Paleta: ${palette}
-CTA fornecido: ${requestedCta || "não fornecido — crie apenas uma ação genérica coerente, sem telefone, endereço ou link"}
-Informações adicionais: ${data.informacoesAdicionais || "nenhuma"}
-Política de pessoas: ${allowPeople ? "Pessoas permitidas porque o pedido visual as solicitou explicitamente." : "SEM PESSOAS. Não use pessoas, rostos, mãos, corpos, silhuetas ou multidões."}
-Política de interfaces: ${allowInterfaces ? "Tela/interface permitida porque o usuário pediu explicitamente; não invente texto legível." : "SEM TELAS OU UI. Não crie dashboard, app, navegador, smartphone com interface, screenshot ou mockup de software."}
-
-MEMÓRIA CRIATIVA RECENTE — não copie títulos, conceitos, enquadramentos ou sequências de layout abaixo:
-${recentCreativeMemory.length ? JSON.stringify(recentCreativeMemory) : "nenhuma criação anterior disponível"}
-
-Faça uma campanha contínua e específica. Não use saudações de abertura, texto de apresentação genérico, placeholders ou dados que não estejam no briefing. O promptImagem de cada slide deve gerar somente a fotografia/ilustração principal sem texto.
-Se o tema envolver Zunexi, software, IA, conteúdo, criação, agenda, publicação, branding ou automação, traduza cada slide em uma metáfora visual coerente com o assunto: content cards, publishing flow, organized brand assets, modular creative blocks, media layers, scheduling cues ou structured digital production. Evite símbolo 3D aleatório ou ícone abstrato sem relação clara com a mensagem.
-${softwareCampaign ? "Para esse tipo de campanha, privilegie copy curta, visualmente forte e orientada a benefício. A composição final pode parecer mais editorial e gráfica do que fotográfica." : ""}
-${denseContentMode ? "MODO DENSO: use conteúdo mais completo apenas quando os itens e dados estiverem presentes no briefing. Organize em linhas simples, sem Markdown." : "MODO PADRÃO: mantenha a copy enxuta, forte e com informação real em todos os slides."}
-Semente de variação criativa: ${Math.random().toString(36).slice(2)}-${Date.now()}`;
-
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), TIMEOUT_MS);
-    let response: Response;
-    try {
-      ({ response } = await requestGroqChat(apiKey, {
-          temperature: 0.55,
-          top_p: 0.86,
-          max_completion_tokens: 5000,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-        }, controller.signal));
-    } catch (e) {
-      const err = e as Error;
-      if (err.name === "AbortError") throw new Error("Tempo esgotado ao gerar. Tente novamente.");
-      throw err.message ? err : new Error("Falha ao chamar a Groq API.");
-    } finally { clearTimeout(t); }
-
-    const json = await response.json() as { choices?: { message?: { content?: string } }[] };
-    const raw = json.choices?.[0]?.message?.content ?? "";
-    if (!raw) throw new Error("Resposta vazia da Groq.");
-    let parsed = parseJsonObject(raw);
-
-    if (
-      !parsed || typeof parsed.titulo !== "string" || typeof parsed.legenda !== "string" ||
-      !Array.isArray(parsed.hashtags) || !Array.isArray(parsed.slides) || parsed.slides.length === 0
-    ) throw new Error("Resposta da Groq não segue o formato esperado.");
-
-    const authorizedBriefing = `${selectedBrandPrompt}
-Tema: ${data.tema}
-Marca: ${brand}
-Produto: ${product}
-Objetivo: ${data.objetivo}
-Público: ${data.publicoAlvo}
-Tom: ${data.tom}
-Estilo: ${visualStyle}
-Paleta: ${palette}
-CTA: ${requestedCta}
-Informações: ${data.informacoesAdicionais}`;
-    parsed = await reviewCampaignWithGroq({
-      apiKey,
-      campaign: parsed,
-      briefing: authorizedBriefing,
-      allowPeople,
-    });
-
-    let slides = parsed.slides.slice(0, data.quantidadeSlides).map((slide, index) =>
-      normalizeSlide(slide, index, data.quantidadeSlides, denseContentMode, allowPeople),
-    );
-    slides = applyReferenceLayoutSequence(slides, softwareCampaign, denseContentMode, allowInterfaces);
-
-    const warnings = copyQualityWarnings(slides);
-    if (warnings.some((warning) => warning.includes("sem título"))) {
-      throw new Error("A IA retornou um roteiro incompleto. Tente gerar novamente com mais detalhes sobre o produto ou serviço.");
-    }
-    if (warnings.length) console.warn("Avisos de qualidade da copy:", warnings);
-
-    const hashtags = parsed.hashtags
-      .map((hashtag) => compactWhitespace(String(hashtag)).replace(/^#+/, "").replace(/\s+/g, ""))
-      .filter(Boolean)
-      .filter((hashtag, index, all) => all.indexOf(hashtag) === index)
-      .slice(0, 15);
-    const carouselTitle = sanitizeTitle(parsed.titulo) || slides[0]?.titulo || data.tema;
-    const caption = sanitizeBody(parsed.legenda, true);
-    const creativePlan = normalizeCreativePlan(parsed.creativePlan, allowPeople);
-
-    const { data: inserted, error: insErr } = await (sb as any)
-      .from("generations")
-      .insert({
-        access_key_id: keyId,
-        tenant_id: context.tenant.id,
-        member_id: context.member.id,
-        brand_profile_id: selectedBrand?.id || null,
-        client_job_id: data.jobId,
-        tema: data.tema,
-        objetivo: data.objetivo,
-        publico_alvo: data.publicoAlvo,
-        tom: data.tom,
-        quantidade_slides: data.quantidadeSlides,
-        informacoes_adicionais: data.informacoesAdicionais,
-        titulo: carouselTitle,
-        legenda: caption,
-        hashtags,
-        slides,
-      })
-      .select("id")
-      .single();
-    if (insErr || !inserted) throw new Error("Falha ao salvar geração no banco.");
-
-
-    return { id: inserted.id, titulo: carouselTitle, legenda: caption, hashtags, slides, creativePlan };
-  });
-
-const UpdateSlideInput = z.object({
-  accessKey: z.string().trim().min(4).max(64),
-  generationId: z.string().uuid(),
-  slideNumero: z.number().int().min(1),
-  titulo: z.string().max(300),
-  texto: z.string().max(2000),
-});
-
-export const updateSlide = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => UpdateSlideInput.parse(d))
-  .handler(async ({ data }): Promise<{ ok: true }> => {
-    const sb = admin();
-    const context = await requireTenantContext(sb, data.accessKey);
-    const { data: row, error } = await (sb as any)
-      .from("generations")
-      .select("slides")
-      .eq("id", data.generationId)
-      .eq("tenant_id", context.tenant.id)
-      .eq("member_id", context.member.id)
-      .single();
-    if (error || !row) throw new Error("Geração não encontrada.");
-    const slides = (row.slides as unknown as SlideOut[]).map(s =>
-      s.numero === data.slideNumero ? { ...s, titulo: data.titulo, texto: data.texto } : s,
-    );
-    const { error: upErr } = await (sb as any)
-      .from("generations")
-      .update({ slides })
-      .eq("id", data.generationId)
-      .eq("tenant_id", context.tenant.id)
-      .eq("member_id", context.member.id);
-    if (upErr) throw new Error("Falha ao salvar edições.");
-    return { ok: true };
-  });
-
-export const testGroqConnection = createServerFn({ method: "POST" })
-  .handler(async (): Promise<{ ok: boolean; model: string; message: string }> => {
-    const apiKey = process.env.GROQ_API_KEY;
-    const model = configuredGroqModel();
-    if (!apiKey) return { ok: false, model, message: "GROQ_API_KEY não configurada no servidor." };
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 15_000);
-    try {
-      const { response: r, model: activeModel } = await requestGroqChat(apiKey, {
-          temperature: 0,
-          max_completion_tokens: 10,
-          messages: [{ role: "user", content: "Responda apenas: OK" }],
-        }, controller.signal);
-      const j = await r.json() as { choices?: { message?: { content?: string } }[] };
-      const txt = j.choices?.[0]?.message?.content?.trim() ?? "";
-      return { ok: true, model: activeModel, message: `Conexão OK com ${activeModel}. Resposta: "${txt || "(vazia)"}"` };
-    } catch (e) {
-      const err = e as Error;
-      if (err.name === "AbortError") return { ok: false, model, message: "Tempo esgotado ao contatar a Groq." };
-      return { ok: false, model, message: err.message || "Falha de rede ao contatar a Groq." };
-    } finally { clearTimeout(t); }
-  });
-
-const PromptCreatorInput = z.object({
-  accessKey: z.string().trim().min(4).max(64),
-  pedido: z.string().trim().min(3).max(1200),
-  brandId: z.string().uuid().optional().nullable(),
-  textProvider: z.enum(["groq", "lovable"]).optional().default("groq"),
-});
-
-export type CarouselPromptData = {
-  prompt: string;
-  tema: string;
-  empresa: string;
-  produto: string;
-  objetivo: string;
-  publicoAlvo: string;
-  tom: string;
-  quantidadeSlides: number;
-  estilo: string;
-  paleta: string;
-  cta: string;
-  informacoesAdicionais: string;
-};
-
-function normalizePromptData(value: Partial<CarouselPromptData>): CarouselPromptData {
-  const allowedObjectives = ["vender", "educar", "engajar", "informar", "captar clientes"];
-  const objetivo = allowedObjectives.includes(String(value.objetivo || "").toLowerCase())
-    ? String(value.objetivo).toLowerCase()
-    : "informar";
-
-  return {
-    prompt: String(value.prompt || "").trim().slice(0, 2400),
-    tema: String(value.tema || "").trim(),
-    empresa: String(value.empresa || "").trim(),
-    produto: String(value.produto || "").trim(),
-    objetivo,
-    publicoAlvo: String(value.publicoAlvo || "").trim(),
-    tom: String(value.tom || "profissional").trim() || "profissional",
-    quantidadeSlides: Math.min(20, Math.max(1, Number(value.quantidadeSlides) || 5)),
-    estilo: String(value.estilo || "publicidade premium").trim() || "publicidade premium",
-    paleta: String(value.paleta || "roxo, azul, ciano e branco").trim() || "roxo, azul, ciano e branco",
-    cta: String(value.cta || "").trim(),
-    informacoesAdicionais: String(value.informacoesAdicionais || "").trim(),
-  };
+export function brandContextAsPrompt(brand: BrandContext | null, guideLimit = 12000): string {
+  if (!brand) return "Nenhum Brand Kit foi selecionado.";
+  const bounded = (value: unknown, limit: number) => String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limit);
+  const guide = bounded(brand.guideText, Math.max(0, Math.min(12000, guideLimit)));
+  return `BRAND KIT OBRIGATÓRIO — aplique estas regras em 100% da criação:
+Marca: ${bounded(brand.name, 180)}
+Cores oficiais: ${brand.primaryColor}, ${brand.secondaryColor}, ${brand.accentColor}
+Tipografia identificada: ${bounded(brand.typography.join(", "), 600) || "não identificada"}
+Tom de voz: ${bounded(brand.toneOfVoice, 700) || "não informado"}
+Público-alvo: ${bounded(brand.audience, 900) || "não informado"}
+Estilo visual: ${bounded(brand.visualStyle, 900) || "não informado"}
+Pilares de conteúdo: ${bounded(brand.contentPillars.join("; "), 1200) || "não informados"}
+Termos e abordagens proibidos: ${bounded(brand.prohibitedTerms.join("; "), 1200) || "nenhum informado"}
+Observações: ${bounded(brand.notes, 1600) || "nenhuma"}
+Resumo do manual: ${bounded(brand.guideSummary, 2400) || "não disponível"}
+Trecho do manual PDF: ${guide || "não disponível"}
+REGRA: quando o briefing do usuário conflitar com o manual da marca, preserve fatos fornecidos pelo usuário, mas mantenha cores, tom, tipografia, estilo e restrições do Brand Kit.`;
 }
 
-const PROMPT_CREATOR_SYSTEM = `Você é o estrategista criativo sênior da Zunexi.ai. Transforme o pedido do usuário em um briefing realmente utilizável para criar um carrossel profissional de Instagram, sem frases genéricas e sem inventar fatos.
-
-O campo prompt pode ter até 2400 caracteres e deve ser um briefing operacional completo, escrito em português, contendo naturalmente: objetivo específico; promessa/ideia central; público; ângulo criativo; sequência narrativa sugerida; direção visual; composição; tratamento de imagem; orientação de copy; CTA; restrições e dados que NÃO podem ser inventados.
-
-QUALIDADE OBRIGATÓRIA:
-- Seja específico ao negócio, produto e pedido. Não gere um texto que serviria para qualquer empresa.
-- Evite clichês como “transforme sua presença digital”, “leve sua marca para o próximo nível”, “desperte seu potencial”, “inove hoje” e variações vazias.
-- A primeira tela deve ter um gancho concreto e visualmente forte; os slides seguintes devem avançar a história, não repetir a mesma ideia.
-- Direção visual deve descrever hierarquia, foco, atmosfera, enquadramento e espaço natural para a copy.
-- Nunca peça para o motor de imagem escrever textos, logos, preços, números, telas de app ou pseudo-interfaces dentro da imagem. A Zunexi aplica o texto depois.
-- Pessoas só devem aparecer quando o pedido do usuário exigir explicitamente. Caso contrário, prefira objetos, produto, arquitetura, geometria, luz, textura e elementos abstratos coerentes.
-- objetivo deve ser um destes: vender, educar, engajar, informar, captar clientes.
-- quantidadeSlides deve ser entre 1 e 20; escolha a quantidade que realmente faz sentido, normalmente entre 5 e 8.
-- Não invente nome de empresa, preço, telefone, endereço, resultados, depoimentos ou qualquer informação comercial.
-- Quando houver Brand Kit, ele é obrigatório e deve definir empresa, tom, estilo, paleta, público e restrições.
-- Quando um dado não existir, deixe vazio em vez de inventar.`;
-
-const PROMPT_CREATOR_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    prompt: { type: "string" },
-    tema: { type: "string" },
-    empresa: { type: "string" },
-    produto: { type: "string" },
-    objetivo: { type: "string", enum: ["vender", "educar", "engajar", "informar", "captar clientes"] },
-    publicoAlvo: { type: "string" },
-    tom: { type: "string" },
-    quantidadeSlides: { type: "integer", minimum: 1, maximum: 20 },
-    estilo: { type: "string" },
-    paleta: { type: "string" },
-    cta: { type: "string" },
-    informacoesAdicionais: { type: "string" },
-  },
-  required: ["prompt", "tema", "empresa", "produto", "objetivo", "publicoAlvo", "tom", "quantidadeSlides", "estilo", "paleta", "cta", "informacoesAdicionais"],
-} as const;
-
-async function callLovablePromptCreator(pedido: string, brandPrompt: string): Promise<string> {
-  const key = (process.env.LOVABLE_API_KEY || "").trim();
-  if (!key) throw new Error("LOVABLE_API_KEY não configurada no servidor.");
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-  try {
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/responses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Lovable-API-Key": key,
-        "X-Lovable-AIG-SDK": "fetch",
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: process.env.LOVABLE_TEXT_MODEL || "openai/gpt-5.6-sol",
-        stream: true,
-        input: [
-          { role: "system", content: [{ type: "input_text", text: PROMPT_CREATOR_SYSTEM }] },
-          { role: "user", content: [{ type: "input_text", text: `${brandPrompt}\n\nPedido do usuário: ${pedido}` }] },
-        ],
-        reasoning: { effort: "low", summary: "auto" },
-        text: {
-          format: {
-            type: "json_schema",
-            name: "zunexi_carousel_briefing",
-            strict: true,
-            schema: PROMPT_CREATOR_SCHEMA,
-          },
-        },
-        store: false,
-      }),
-    });
-
-    if (!response.ok || !response.body) {
-      const raw = await response.text().catch(() => "");
-      if (response.status === 402) throw new Error("Créditos do Lovable AI esgotados.");
-      if (response.status === 429) throw new Error("Limite do Lovable AI atingido. Tente novamente em instantes.");
-      if (response.status === 401 || response.status === 403) throw new Error("LOVABLE_API_KEY inválida ou sem permissão.");
-      throw new Error(raw || `Lovable AI retornou erro ${response.status}.`);
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let out = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        const data = line.slice(5).trim();
-        if (!data || data === "[DONE]") continue;
-        try {
-          const event = JSON.parse(data) as { type?: string; delta?: string; response?: { output_text?: string } };
-          if (event.type === "response.output_text.delta" && typeof event.delta === "string") out += event.delta;
-          else if (event.type === "response.completed" && event.response?.output_text && !out) out = event.response.output_text;
-        } catch { /* ignora frame SSE parcial */ }
-      }
-    }
-    if (!out.trim()) throw new Error("O Lovable GPT-5.6 Sol retornou um prompt vazio.");
-    return out.trim();
-  } catch (error) {
-    if ((error as Error).name === "AbortError") throw new Error("Tempo esgotado ao chamar o Lovable GPT-5.6 Sol.");
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-export const generateCarouselPrompt = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => PromptCreatorInput.parse(d))
-  .handler(async ({ data }): Promise<CarouselPromptData> => {
+export const listBrandProfiles = createServerFn({ method: "POST" })
+  .inputValidator((value: unknown) => AccessInput.parse(value))
+  .handler(async ({ data }) => {
     const sb = admin();
-    const context = await requirePlanFeature(sb, data.accessKey, "criador_prompts");
-    const selectedBrand = await resolveBrandContext(sb, context, data.brandId);
-    const brandPrompt = brandContextAsPrompt(selectedBrand);
-
-    if (data.textProvider === "lovable") {
-      const content = await callLovablePromptCreator(data.pedido, brandPrompt);
-      let parsed: Partial<CarouselPromptData>;
-      try {
-        parsed = JSON.parse(content) as Partial<CarouselPromptData>;
-      } catch {
-        parsed = { prompt: content, tema: data.pedido };
-      }
-      const normalized = normalizePromptData(parsed);
-      if (!normalized.prompt) normalized.prompt = data.pedido.slice(0, 2400);
-      if (!normalized.tema) normalized.tema = normalized.prompt;
-      return normalized;
-    }
-
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) throw new Error("GROQ_API_KEY não configurada no servidor.");
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-    try {
-      const { response } = await requestGroqChat(apiKey, {
-          temperature: 0.45,
-          max_completion_tokens: 3000,
-          response_format: { type: "json_object" },
-          messages: [
-            {
-              role: "system",
-              content: `${PROMPT_CREATOR_SYSTEM}
-
-Retorne SOMENTE JSON válido com as chaves: prompt, tema, empresa, produto, objetivo, publicoAlvo, tom, quantidadeSlides, estilo, paleta, cta, informacoesAdicionais.`,
-            },
-            { role: "user", content: `${brandPrompt}
-
-Pedido do usuário: ${data.pedido}` },
-          ],
-        }, controller.signal);
-
-      const json = await response.json() as { choices?: { message?: { content?: string } }[] };
-      const content = json.choices?.[0]?.message?.content?.trim();
-      if (!content) throw new Error("A Groq retornou um prompt vazio.");
-
-      let parsed: Partial<CarouselPromptData>;
-      try {
-        parsed = JSON.parse(content) as Partial<CarouselPromptData>;
-      } catch {
-        parsed = { prompt: content, tema: data.pedido };
-      }
-
-      const normalized = normalizePromptData(parsed);
-      if (!normalized.prompt) normalized.prompt = data.pedido.slice(0, 2400);
-      if (!normalized.tema) normalized.tema = normalized.prompt;
-      return normalized;
-    } catch (error) {
-      if ((error as Error).name === "AbortError") throw new Error("Tempo esgotado ao criar o prompt. Tente novamente.");
-      throw error;
-    } finally {
-      clearTimeout(timeout);
-    }
+    const context = await requirePlanFeature(sb, data.accessKey, "brand_kit");
+    const { data: rows, error } = await (sb as any).from("brand_profiles").select("*").eq("tenant_id", context.tenant.id).order("is_primary", { ascending: false }).order("created_at", { ascending: true });
+    if (error) throw new Error(error.message);
+    return {
+      plan: normalizePlan(context.tenant.plan),
+      tenantId: context.tenant.id,
+      tenantName: context.tenant.name,
+      memberId: context.member.id,
+      brands: rows ?? [],
+    };
   });
 
-
-export const generateBrandContentIdeas = createServerFn({ method: "POST" })
-  .inputValidator((value: unknown) => z.object({
-    accessKey: z.string().trim().min(4).max(64),
-    brandId: z.string().uuid().optional().nullable(),
-    objective: z.string().trim().max(200).optional().default("crescer e gerar oportunidades"),
-    quantity: z.number().int().min(3).max(20).optional().default(8),
-  }).parse(value))
-  .handler(async ({ data }): Promise<{ ideas: Array<{ title: string; angle: string; format: string; objective: string; prompt: string }> }> => {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) throw new Error("GROQ_API_KEY não configurada no servidor.");
+export const saveBrandProfile = createServerFn({ method: "POST" })
+  .inputValidator((value: unknown) => AccessInput.extend({ id: z.string().uuid().nullable().optional(), brand: BrandPayload }).parse(value))
+  .handler(async ({ data }) => {
     const sb = admin();
-    const context = await requirePlanFeature(sb, data.accessKey, "criador_prompts");
-    const brand = await resolveBrandContext(sb, context, data.brandId);
-    if (!brand) throw new Error("Cadastre ou selecione um Brand Kit para gerar ideias personalizadas.");
-    const fallbackIdeas = () => {
-      const pillars = brand.contentPillars.length ? brand.contentPillars : ["autoridade", "produto ou serviço", "educação", "objeções", "relacionamento"];
-      const audience = brand.audience || "público da marca";
-      const voice = brand.toneOfVoice || "claro, profissional e humano";
-      const templates = [
-        ["O que seu público ainda não percebeu", "carrossel", "educativo"],
-        ["O erro que atrasa a decisão de compra", "post", "objeção"],
-        ["Antes de escolher, compare isto", "carrossel", "comparação"],
-        ["Como a marca resolve isso na prática", "reel", "demonstração"],
-        ["Por trás de uma escolha melhor", "story", "bastidor"],
-        ["O benefício que muda a experiência", "post", "comercial"],
-        ["Uma dúvida comum, respondida sem enrolação", "carrossel", "autoridade"],
-        ["Do problema ao próximo passo", "reel", "relacionamento"],
-      ];
-      return templates.slice(0, data.quantity).map(([title, format, angleType], index) => {
-        const pillar = pillars[index % pillars.length];
-        const angle = `Use o pilar “${pillar}” para falar com ${audience}. Trabalhe um ângulo de ${angleType}, mantendo o tom ${voice} e sem inventar dados da marca.`;
-        const prompt = `Crie um conteúdo de formato ${format} para ${brand.name}, alinhado ao pilar “${pillar}” e ao objetivo “${data.objective}”. Gancho: ${title}. Público: ${audience}. Tom: ${voice}. Estruture a copy com uma ideia central clara, desenvolvimento curto e CTA coerente. Direção visual: ${brand.visualStyle || "visual profissional alinhado ao Brand Kit"}; use as cores ${brand.primaryColor}, ${brand.secondaryColor} e ${brand.accentColor}. Não gere texto dentro da imagem e não invente preços, números, depoimentos ou funcionalidades.`;
-        return { title, angle, format, objective: data.objective, prompt: prompt.slice(0, 1200) };
-      });
+    const context = await requirePlanFeature(sb, data.accessKey, "brand_kit");
+    await ensureBrandLimit(sb, context, !data.id);
+
+    if (data.brand.isPrimary) {
+      const { error } = await (sb as any).from("brand_profiles").update({ is_primary: false }).eq("tenant_id", context.tenant.id);
+      if (error) throw new Error(error.message);
+    }
+
+    const payload = {
+      tenant_id: context.tenant.id,
+      access_key_id: context.access.id,
+      created_by_member_id: context.member.id,
+      name: data.brand.name,
+      primary_color: data.brand.primaryColor,
+      secondary_color: data.brand.secondaryColor,
+      accent_color: data.brand.accentColor,
+      tone_of_voice: data.brand.toneOfVoice,
+      audience: data.brand.audience,
+      visual_style: data.brand.visualStyle,
+      notes: data.brand.notes,
+      is_primary: data.brand.isPrimary,
+      updated_at: new Date().toISOString(),
     };
 
-    const requestBody = {
+    if (data.id) {
+      const { data: row, error } = await (sb as any).from("brand_profiles").update(payload).eq("id", data.id).eq("tenant_id", context.tenant.id).select("*").single();
+      if (error) throw new Error(error.message);
+      return row;
+    }
+
+    const { data: row, error } = await (sb as any).from("brand_profiles").insert(payload).select("*").single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+export const deleteBrandProfile = createServerFn({ method: "POST" })
+  .inputValidator((value: unknown) => AccessInput.extend({ id: z.string().uuid() }).parse(value))
+  .handler(async ({ data }) => {
+    const sb = admin();
+    const context = await requirePlanFeature(sb, data.accessKey, "brand_kit");
+    const { data: docs } = await (sb as any).from("brand_documents").select("storage_path").eq("tenant_id", context.tenant.id).eq("brand_profile_id", data.id);
+    for (const doc of docs ?? []) await sb.storage.from("brand-documents").remove([doc.storage_path]);
+    const { error } = await (sb as any).from("brand_profiles").delete().eq("id", data.id).eq("tenant_id", context.tenant.id);
+    if (error) throw new Error(error.message);
+    return { ok: true as const };
+  });
+
+export const getPrimaryBrandProfile = createServerFn({ method: "POST" })
+  .inputValidator((value: unknown) => AccessInput.extend({ brandId: z.string().uuid().optional().nullable() }).parse(value))
+  .handler(async ({ data }) => {
+    const sb = admin();
+    const context = await requireTenantContext(sb, data.accessKey);
+    if (normalizePlan(context.tenant.plan) === "essencial") return null;
+    const brand = await resolveBrandContext(sb, context, data.brandId);
+    if (!brand) return null;
+    const { data: row, error } = await (sb as any).from("brand_profiles").select("*").eq("tenant_id", context.tenant.id).eq("id", brand.id).single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+
+const PreparePdfUploadInput = AccessInput.extend({
+  brandId: z.string().uuid().nullable().optional(),
+  fileName: z.string().trim().min(1).max(180),
+  mimeType: z.literal("application/pdf"),
+  fileSize: z.number().int().positive().max(15 * 1024 * 1024),
+});
+
+const ProcessPdfUploadInput = AccessInput.extend({
+  brandId: z.string().uuid().nullable().optional(),
+  fileName: z.string().trim().min(1).max(180),
+  mimeType: z.literal("application/pdf"),
+  storagePath: z.string().trim().min(5).max(500),
+  fileSize: z.number().int().positive().max(15 * 1024 * 1024),
+});
+
+const PdfInput = AccessInput.extend({
+  brandId: z.string().uuid().nullable().optional(),
+  fileName: z.string().trim().min(1).max(180),
+  mimeType: z.literal("application/pdf"),
+  base64: z.string().min(100),
+});
+
+function cleanJson(raw: string) {
+  const text = raw.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  return JSON.parse(start >= 0 && end > start ? text.slice(start, end + 1) : text) as Record<string, unknown>;
+}
+
+async function analyzeGuide(extractedText: string, fonts: string[]) {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    return {
+      name: "Marca importada",
+      primaryColor: "#4D6BFF",
+      secondaryColor: "#8B5CF6",
+      accentColor: "#12C7FF",
+      toneOfVoice: "",
+      audience: "",
+      visualStyle: "",
+      notes: "Manual importado. Revise os campos antes de salvar.",
+      contentPillars: [],
+      prohibitedTerms: [],
+      guideSummary: extractedText.slice(0, 1800),
+    };
+  }
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
       model: process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile",
-      temperature: 0.62,
+      temperature: 0.15,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: `Você é estrategista editorial e diretor criativo sênior da Zunexi.ai. Retorne somente JSON válido no formato {"ideas":[{"title":"...","angle":"...","format":"carrossel|cartaz|post|story|reel","objective":"...","prompt":"..."}]}.
-
-REGRAS DE QUALIDADE:
-- Cada ideia deve nascer de um insight, dor, objeção, desejo, comparação, bastidor, demonstração, prova permitida ou oportunidade específica do público descrito no Brand Kit.
-- Não use títulos genéricos como “5 dicas”, “Você sabia?”, “Conheça nossos serviços”, “Transforme sua marca”, “Saiba mais” ou variações sem um ângulo concreto.
-- title: curto, específico e diferente das outras ideias.
-- angle: explique em 1–2 frases por que o conteúdo chama atenção e qual tensão/benefício explora.
-- format: escolha o formato que melhor serve à ideia, não repita carrossel em tudo.
-- prompt: escreva um mini-briefing operacional de 250–900 caracteres com gancho, sequência ou estrutura, direção de copy, direção visual e CTA; não peça texto dentro da imagem gerada.
-- Varie os ângulos entre educativo, comercial, autoridade, objeção, comparação, produto/serviço e relacionamento quando fizer sentido.
-- Respeite integralmente o Brand Kit e o objetivo atual.
-- Não invente preços, resultados, depoimentos, estatísticas, clientes, funcionalidades, garantias ou fatos da empresa.
-- Pessoas e interfaces só devem ser sugeridas quando o briefing/Brand Kit exigir explicitamente.` },
-        { role: "user", content: `${brandContextAsPrompt(brand)}
-
-Objetivo atual: ${data.objective}
-Quantidade: ${data.quantity}` },
+        { role: "system", content: `Analise um manual de identidade de marca. Retorne somente JSON com: name, primaryColor, secondaryColor, accentColor, toneOfVoice, audience, visualStyle, notes, contentPillars (array), prohibitedTerms (array), guideSummary. Cores devem ser HEX #RRGGBB. Não invente regras; quando ausentes use vazio. Resuma tipografia, composição, uso de logo, fotografia, ícones, linguagem, público, pilares e proibições.` },
+        { role: "user", content: `Fontes detectadas: ${fonts.join(", ") || "nenhuma"}\n\nTexto do PDF:\n${extractedText.slice(0, 24000)}` },
       ],
-    };
+    }),
+  });
+  if (!response.ok) throw new Error(`Não foi possível analisar o PDF (${response.status}).`);
+  const json = await response.json() as any;
+  return cleanJson(String(json.choices?.[0]?.message?.content || "{}"));
+}
 
-    let response: Response | null = null;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify(requestBody),
-      });
-      if (response.ok) break;
-      if (response.status !== 429 && response.status < 500) break;
-      const retryAfter = Number(response.headers.get("retry-after") || "0");
-      const delayMs = retryAfter > 0 ? retryAfter * 1000 : Math.min(1100 * (2 ** attempt) + Math.floor(Math.random() * 500), 6000);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+async function ensureBucket(sb: ReturnType<typeof admin>) {
+  const { data } = await sb.storage.getBucket("brand-documents");
+  if (data) return;
+  const { error } = await sb.storage.createBucket("brand-documents", {
+    public: false,
+    allowedMimeTypes: ["application/pdf"],
+    fileSizeLimit: 15 * 1024 * 1024,
+  });
+  if (error && !/already exists/i.test(error.message)) throw new Error(error.message);
+}
+
+
+async function processBrandGuideBuffer({
+  sb,
+  context,
+  buffer,
+  brandId: inputBrandId,
+  fileName,
+  mimeType,
+  storagePath,
+}: {
+  sb: ReturnType<typeof admin>;
+  context: TenantContext;
+  buffer: Buffer;
+  brandId?: string | null;
+  fileName: string;
+  mimeType: "application/pdf";
+  storagePath: string;
+}) {
+  if (buffer.byteLength > 15 * 1024 * 1024) throw new Error("O PDF deve ter no máximo 15 MB.");
+  if (!buffer.byteLength) throw new Error("O PDF enviado está vazio.");
+
+  const { extractText, extractTextItems, getDocumentProxy } = await import("unpdf");
+  let pdf: Awaited<ReturnType<typeof getDocumentProxy>>;
+  try {
+    pdf = await getDocumentProxy(new Uint8Array(buffer), { maxImageSize: 16_777_216 });
+  } catch {
+    throw new Error("Não foi possível abrir este PDF. Tente exportar o manual novamente como PDF padrão.");
+  }
+  if (pdf.numPages > 100) throw new Error("O manual deve ter no máximo 100 páginas.");
+
+  const extraction = Promise.all([
+    extractText(pdf, { mergePages: true }),
+    extractTextItems(pdf),
+  ]);
+  const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("O PDF demorou demais para ser processado.")), 35_000));
+  const [{ text, totalPages }, structured] = await Promise.race([extraction, timeout]);
+  const extractedText = String(text || "").trim();
+  if (extractedText.length < 40) throw new Error("Não foi possível ler texto suficiente deste PDF. Use um PDF com texto selecionável.");
+
+  const fontCount = new Map<string, number>();
+  for (const page of structured.items) for (const item of page) {
+    const name = String(item.fontFamily || "").trim();
+    if (name) fontCount.set(name, (fontCount.get(name) || 0) + 1);
+  }
+  const fonts = [...fontCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([name]) => name);
+  const analysis = await analyzeGuide(extractedText, fonts);
+
+  let brandId = inputBrandId || null;
+  if (!brandId) {
+    await ensureBrandLimit(sb, context, true);
+    const { data: created, error } = await (sb as any).from("brand_profiles").insert({
+      tenant_id: context.tenant.id,
+      access_key_id: context.access.id,
+      created_by_member_id: context.member.id,
+      name: String(analysis.name || fileName.replace(/\.pdf$/i, "")),
+      primary_color: /^#[0-9a-f]{6}$/i.test(String(analysis.primaryColor)) ? analysis.primaryColor : "#4D6BFF",
+      secondary_color: /^#[0-9a-f]{6}$/i.test(String(analysis.secondaryColor)) ? analysis.secondaryColor : "#8B5CF6",
+      accent_color: /^#[0-9a-f]{6}$/i.test(String(analysis.accentColor)) ? analysis.accentColor : "#12C7FF",
+      tone_of_voice: String(analysis.toneOfVoice || ""),
+      audience: String(analysis.audience || ""),
+      visual_style: String(analysis.visualStyle || ""),
+      notes: String(analysis.notes || ""),
+      typography: fonts,
+      content_pillars: asArray(analysis.contentPillars),
+      prohibited_terms: asArray(analysis.prohibitedTerms),
+      guide_summary: String(analysis.guideSummary || ""),
+      guide_text: extractedText.slice(0, 50000),
+      guide_updated_at: new Date().toISOString(),
+      is_primary: true,
+    }).select("*").single();
+    if (error) throw new Error(error.message);
+    brandId = created.id;
+  } else {
+    const existing = await resolveBrandContext(sb, context, brandId);
+    if (!existing) throw new Error("Marca não encontrada nesta empresa.");
+    const { error } = await (sb as any).from("brand_profiles").update({
+      name: String(analysis.name || existing.name),
+      primary_color: /^#[0-9a-f]{6}$/i.test(String(analysis.primaryColor)) ? analysis.primaryColor : existing.primaryColor,
+      secondary_color: /^#[0-9a-f]{6}$/i.test(String(analysis.secondaryColor)) ? analysis.secondaryColor : existing.secondaryColor,
+      accent_color: /^#[0-9a-f]{6}$/i.test(String(analysis.accentColor)) ? analysis.accentColor : existing.accentColor,
+      tone_of_voice: String(analysis.toneOfVoice || existing.toneOfVoice),
+      audience: String(analysis.audience || existing.audience),
+      visual_style: String(analysis.visualStyle || existing.visualStyle),
+      notes: String(analysis.notes || existing.notes),
+      typography: fonts,
+      content_pillars: asArray(analysis.contentPillars),
+      prohibited_terms: asArray(analysis.prohibitedTerms),
+      guide_summary: String(analysis.guideSummary || ""),
+      guide_text: extractedText.slice(0, 50000),
+      guide_updated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq("id", brandId).eq("tenant_id", context.tenant.id);
+    if (error) throw new Error(error.message);
+  }
+
+  const extractedData = { ...analysis, typography: fonts };
+  const { error: docError } = await (sb as any).from("brand_documents").insert({
+    tenant_id: context.tenant.id,
+    brand_profile_id: brandId,
+    uploaded_by_member_id: context.member.id,
+    file_name: fileName,
+    storage_path: storagePath,
+    mime_type: mimeType,
+    size_bytes: buffer.byteLength,
+    page_count: totalPages,
+    extracted_text: extractedText.slice(0, 50000),
+    extracted_data: extractedData,
+  });
+  if (docError) throw new Error(docError.message);
+
+  const { data: brand, error: brandError } = await (sb as any).from("brand_profiles").select("*").eq("id", brandId).eq("tenant_id", context.tenant.id).single();
+  if (brandError) throw new Error(brandError.message);
+  return { brand, totalPages, fonts, summary: String(analysis.guideSummary || "") };
+}
+
+export const prepareBrandGuidePdfUpload = createServerFn({ method: "POST" })
+  .inputValidator((value: unknown) => PreparePdfUploadInput.parse(value))
+  .handler(async ({ data }) => {
+    const sb = admin();
+    const context = await requirePlanFeature(sb, data.accessKey, "brand_kit");
+    if (data.brandId) {
+      const existing = await resolveBrandContext(sb, context, data.brandId);
+      if (!existing) throw new Error("Marca não encontrada nesta empresa.");
+    } else {
+      await ensureBrandLimit(sb, context, true);
     }
+    await ensureBucket(sb);
+    const safeName = data.fileName.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(-120) || "brand-guide.pdf";
+    const brandFolder = data.brandId || "new";
+    const storagePath = `${context.tenant.id}/${brandFolder}/${randomUUID()}-${safeName}`;
+    const { data: signed, error } = await sb.storage.from("brand-documents").createSignedUploadUrl(storagePath);
+    if (error || !signed?.token) throw new Error(error?.message || "Não foi possível preparar o upload do PDF.");
+    return { storagePath, token: signed.token };
+  });
 
-    if (!response?.ok) {
-      console.warn(`[brand-ideas] Groq indisponível (${response?.status || "sem resposta"}); usando fallback local baseado no Brand Kit.`);
-      return { ideas: fallbackIdeas() };
+export const processUploadedBrandGuidePdf = createServerFn({ method: "POST" })
+  .inputValidator((value: unknown) => ProcessPdfUploadInput.parse(value))
+  .handler(async ({ data }) => {
+    const sb = admin();
+    const context = await requirePlanFeature(sb, data.accessKey, "brand_kit");
+    if (!data.storagePath.startsWith(`${context.tenant.id}/`)) throw new Error("Arquivo inválido para esta empresa.");
+    const { data: file, error: downloadError } = await sb.storage.from("brand-documents").download(data.storagePath);
+    if (downloadError || !file) throw new Error(downloadError?.message || "Não foi possível recuperar o PDF enviado.");
+    const buffer = Buffer.from(await file.arrayBuffer());
+    if (buffer.byteLength !== data.fileSize) {
+      console.warn("Brand PDF size mismatch", { expected: data.fileSize, actual: buffer.byteLength, path: data.storagePath });
     }
-
     try {
-      const json = await response.json() as any;
-      const raw = String(json.choices?.[0]?.message?.content || "{}").replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
-      const parsed = JSON.parse(raw) as { ideas?: Array<Record<string, unknown>> };
-      const ideas = (parsed.ideas || []).slice(0, data.quantity).map((idea) => ({
-        title: String(idea.title || "Ideia de conteúdo"),
-        angle: String(idea.angle || ""),
-        format: String(idea.format || "carrossel"),
-        objective: String(idea.objective || data.objective),
-        prompt: String(idea.prompt || idea.title || "").slice(0, 1200),
-      })).filter((idea) => idea.title.trim().length > 0);
-      return { ideas: ideas.length ? ideas : fallbackIdeas() };
+      return await processBrandGuideBuffer({
+        sb,
+        context,
+        buffer,
+        brandId: data.brandId,
+        fileName: data.fileName,
+        mimeType: data.mimeType,
+        storagePath: data.storagePath,
+      });
     } catch (error) {
-      console.warn("[brand-ideas] Resposta inválida da Groq; usando fallback local.", error);
-      return { ideas: fallbackIdeas() };
+      await sb.storage.from("brand-documents").remove([data.storagePath]);
+      throw error;
     }
+  });
+
+export const uploadBrandGuidePdf = createServerFn({ method: "POST" })
+  .inputValidator((value: unknown) => PdfInput.parse(value))
+  .handler(async ({ data }) => {
+    const sb = admin();
+    const context = await requirePlanFeature(sb, data.accessKey, "brand_kit");
+    const buffer = Buffer.from(data.base64.replace(/^data:application\/pdf;base64,/, ""), "base64");
+    if (buffer.byteLength > 15 * 1024 * 1024) throw new Error("O PDF deve ter no máximo 15 MB.");
+
+    const { extractText, extractTextItems, getDocumentProxy } = await import("unpdf");
+    const pdf = await getDocumentProxy(new Uint8Array(buffer), { maxImageSize: 16_777_216 });
+    if (pdf.numPages > 100) throw new Error("O manual deve ter no máximo 100 páginas.");
+    const extraction = Promise.all([
+      extractText(pdf, { mergePages: true }),
+      extractTextItems(pdf),
+    ]);
+    const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("O PDF demorou demais para ser processado.")), 35_000));
+    const [{ text, totalPages }, structured] = await Promise.race([extraction, timeout]);
+    const extractedText = String(text || "").trim();
+    if (extractedText.length < 40) throw new Error("Não foi possível ler texto suficiente deste PDF. Use um PDF com texto selecionável.");
+
+    const fontCount = new Map<string, number>();
+    for (const page of structured.items) for (const item of page) {
+      const name = String(item.fontFamily || "").trim();
+      if (name) fontCount.set(name, (fontCount.get(name) || 0) + 1);
+    }
+    const fonts = [...fontCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([name]) => name);
+    const analysis = await analyzeGuide(extractedText, fonts);
+
+    let brandId = data.brandId || null;
+    if (!brandId) {
+      await ensureBrandLimit(sb, context, true);
+      const { data: created, error } = await (sb as any).from("brand_profiles").insert({
+        tenant_id: context.tenant.id,
+        access_key_id: context.access.id,
+        created_by_member_id: context.member.id,
+        name: String(analysis.name || data.fileName.replace(/\.pdf$/i, "")),
+        primary_color: /^#[0-9a-f]{6}$/i.test(String(analysis.primaryColor)) ? analysis.primaryColor : "#4D6BFF",
+        secondary_color: /^#[0-9a-f]{6}$/i.test(String(analysis.secondaryColor)) ? analysis.secondaryColor : "#8B5CF6",
+        accent_color: /^#[0-9a-f]{6}$/i.test(String(analysis.accentColor)) ? analysis.accentColor : "#12C7FF",
+        tone_of_voice: String(analysis.toneOfVoice || ""),
+        audience: String(analysis.audience || ""),
+        visual_style: String(analysis.visualStyle || ""),
+        notes: String(analysis.notes || ""),
+        typography: fonts,
+        content_pillars: asArray(analysis.contentPillars),
+        prohibited_terms: asArray(analysis.prohibitedTerms),
+        guide_summary: String(analysis.guideSummary || ""),
+        guide_text: extractedText.slice(0, 50000),
+        guide_updated_at: new Date().toISOString(),
+        is_primary: true,
+      }).select("*").single();
+      if (error) throw new Error(error.message);
+      brandId = created.id;
+    } else {
+      const existing = await resolveBrandContext(sb, context, brandId);
+      if (!existing) throw new Error("Marca não encontrada nesta empresa.");
+      const { error } = await (sb as any).from("brand_profiles").update({
+        name: String(analysis.name || existing.name),
+        primary_color: /^#[0-9a-f]{6}$/i.test(String(analysis.primaryColor)) ? analysis.primaryColor : existing.primaryColor,
+        secondary_color: /^#[0-9a-f]{6}$/i.test(String(analysis.secondaryColor)) ? analysis.secondaryColor : existing.secondaryColor,
+        accent_color: /^#[0-9a-f]{6}$/i.test(String(analysis.accentColor)) ? analysis.accentColor : existing.accentColor,
+        tone_of_voice: String(analysis.toneOfVoice || existing.toneOfVoice),
+        audience: String(analysis.audience || existing.audience),
+        visual_style: String(analysis.visualStyle || existing.visualStyle),
+        notes: String(analysis.notes || existing.notes),
+        typography: fonts,
+        content_pillars: asArray(analysis.contentPillars),
+        prohibited_terms: asArray(analysis.prohibitedTerms),
+        guide_summary: String(analysis.guideSummary || ""),
+        guide_text: extractedText.slice(0, 50000),
+        guide_updated_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("id", brandId).eq("tenant_id", context.tenant.id);
+      if (error) throw new Error(error.message);
+    }
+
+    await ensureBucket(sb);
+    const safeName = data.fileName.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(-120);
+    const storagePath = `${context.tenant.id}/${brandId}/${randomUUID()}-${safeName}`;
+    const { error: uploadError } = await sb.storage.from("brand-documents").upload(storagePath, buffer, { contentType: "application/pdf", upsert: false });
+    if (uploadError) throw new Error(uploadError.message);
+
+    const extractedData = { ...analysis, typography: fonts };
+    const { error: docError } = await (sb as any).from("brand_documents").insert({
+      tenant_id: context.tenant.id,
+      brand_profile_id: brandId,
+      uploaded_by_member_id: context.member.id,
+      file_name: data.fileName,
+      storage_path: storagePath,
+      mime_type: data.mimeType,
+      size_bytes: buffer.byteLength,
+      page_count: totalPages,
+      extracted_text: extractedText.slice(0, 50000),
+      extracted_data: extractedData,
+    });
+    if (docError) throw new Error(docError.message);
+
+    const { data: brand, error: brandError } = await (sb as any).from("brand_profiles").select("*").eq("id", brandId).eq("tenant_id", context.tenant.id).single();
+    if (brandError) throw new Error(brandError.message);
+    return { brand, totalPages, fonts, summary: String(analysis.guideSummary || "") };
+  });
+
+export const listBrandDocuments = createServerFn({ method: "POST" })
+  .inputValidator((value: unknown) => AccessInput.extend({ brandId: z.string().uuid() }).parse(value))
+  .handler(async ({ data }) => {
+    const sb = admin();
+    const context = await requirePlanFeature(sb, data.accessKey, "brand_kit");
+    const { data: rows, error } = await (sb as any).from("brand_documents").select("id,file_name,size_bytes,page_count,created_at").eq("tenant_id", context.tenant.id).eq("brand_profile_id", data.brandId).order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return rows ?? [];
   });
