@@ -46,6 +46,15 @@ const rnd = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const px = (value: number) => Math.round(value);
 
+function stableVariant(value: string, count: number) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % Math.max(1, count);
+}
+
 export const LAYOUT_IDS = [
   "text-over-image",
   "side-text",
@@ -222,7 +231,7 @@ function addTechShowcase(els: ElementDesc[], x: number, y: number, w: number, h:
 }
 
 function buildTechLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
-  const { title, body, imageUrl, palette, width: W, height: H, fonts } = input;
+  const { title, body, cta, imageUrl, palette, width: W, height: H, fonts } = input;
   const [bg, primary, accent, text] = palette;
   const els: ElementDesc[] = [];
   const dark = (input.slideNumber || 1) % 2 === 1;
@@ -247,8 +256,10 @@ function buildTechLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
     if (body) {
       els.push({ kind: "text", x: W * 0.22, y: H * 0.52, w: W * 0.56, text: fitTextToLines(body, W * 0.56, 30, 4), size: 30, color: secondaryText, align: "center", weight: 450, font: fonts.body, lineHeight: 1.16, name: "Texto", role: "body" });
     }
-    els.push({ kind: "rect", x: W * 0.23, y: H * 0.74, w: W * 0.54, h: 92, fill: primary || brandAccent, rx: 46, selectable: false, name: "CTA", role: "accent" });
-    els.push({ kind: "text", x: W * 0.26, y: H * 0.8, w: W * 0.48, text: "Conhecer agora", size: 34, color: dark ? "#ffffff" : "#0f172a", align: "center", weight: 700, font: fonts.display, lineHeight: 1, name: "CTA texto", role: "body" });
+    if (cta) {
+      els.push({ kind: "rect", x: W * 0.23, y: H * 0.74, w: W * 0.54, h: 92, fill: primary || brandAccent, rx: 46, selectable: false, name: "CTA", role: "accent" });
+      els.push({ kind: "text", x: W * 0.26, y: H * 0.8, w: W * 0.48, text: fitTextToLines(cta, W * 0.48, 34, 1), size: 34, color: dark ? "#ffffff" : "#0f172a", align: "center", weight: 700, font: fonts.display, lineHeight: 1, name: "CTA texto", role: "body" });
+    }
     return els;
   }
 
@@ -259,7 +270,7 @@ function buildTechLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
       els.push({ kind: "text", x: pagePad, y: H * 0.47, w: W * 0.36, text: fitTextToLines(body, W * 0.36, 28, 5), size: 28, color: secondaryText, align: "left", weight: 440, font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
     }
     addTechShowcase(els, W * 0.52, H * 0.18, W * 0.36, H * 0.54, imageUrl, brandAccent, dark);
-    const stats = chunks.length ? chunks.slice(0, 3) : ["Planejamento", "Conteúdo", "Publicação"];
+    const stats = chunks.slice(0, 3);
     stats.forEach((item, index) => {
       const x = pagePad + index * (W * 0.25);
       els.push({ kind: "rect", x, y: H * 0.78, w: W * 0.21, h: 120, fill: dark ? "#0f172a" : "#ffffff", opacity: 0.96, rx: 24, selectable: false, name: "Métrica", role: "panel" });
@@ -280,7 +291,7 @@ function buildTechLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
     const titleSize = fittedTitleSize(title, W * 0.56, W * 0.08, W * 0.046, 3);
     els.push({ kind: "text", x: pagePad, y: H * 0.2, w: W * 0.56, text: title, size: titleSize, color: textColor, align: "left", weight: 780, font: fonts.display, lineHeight: 0.95, charSpacing: -5, name: "Título", role: "title" });
     if (body) els.push({ kind: "text", x: pagePad, y: H * 0.38, w: W * 0.52, text: fitTextToLines(body, W * 0.52, 28, 4), size: 28, color: secondaryText, align: "left", weight: 440, font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
-    const pillItems = chunks.length ? chunks : ["Modelo profissional", "Visual consistente", "Pronto para publicar"];
+    const pillItems = chunks;
     pillItems.slice(0, 4).forEach((item, index) => addTechPill(els, pagePad, H * 0.54 + index * 108, W * 0.62, item, dark, brandAccent, fonts));
     if (imageUrl && id === "diagonal") addTechShowcase(els, W * 0.62, H * 0.54, W * 0.26, H * 0.24, imageUrl, brandAccent, dark);
     return els;
@@ -412,16 +423,22 @@ function buildSocialLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
   const primaryAccent = primary || "#4d6bff";
   const darkBase = luminance(bg || "#09090b") < 0.42 ? (bg || "#09090b") : "#0a0b12";
   const lightBase = "#f7f7f4";
+  const ctaVariant = id === "social-cta"
+    ? stableVariant(`${input.theme || ""}|${input.brandName || ""}|${title}|${body || ""}|${cta || ""}`, 3)
+    : 0;
   const dark = id === "social-hero" || id === "social-cards" || id === "social-feature-grid"
     ? true
     : id === "social-workflow" || id === "social-cta"
-      ? false
+      ? id === "social-cta" && ctaVariant === 1
       : slide % 2 === 1;
   const minimalBrandSurface = id === "social-minimal" && slide % 3 === 0 ? primaryAccent : undefined;
-  const background = minimalBrandSurface || (dark ? darkBase : lightBase);
-  const minimalSurfaceDark = minimalBrandSurface ? luminance(minimalBrandSurface) < 0.52 : dark;
-  const textColor = minimalSurfaceDark ? "#ffffff" : "#0f172a";
-  const secondary = minimalSurfaceDark ? "#e5e7eb" : "#334155";
+  const ctaBrandSurface = id === "social-cta" && ctaVariant === 2 ? primaryAccent : undefined;
+  const background = ctaBrandSurface || minimalBrandSurface || (dark ? darkBase : lightBase);
+  const surfaceDark = (ctaBrandSurface || minimalBrandSurface)
+    ? luminance(ctaBrandSurface || minimalBrandSurface || darkBase) < 0.52
+    : dark;
+  const textColor = surfaceDark ? "#ffffff" : "#0f172a";
+  const secondary = surfaceDark ? "#e5e7eb" : "#334155";
   const els: ElementDesc[] = [];
 
   els.push({ kind: "rect", x: 0, y: 0, w: W, h: H, fill: background, selectable: false, name: "Fundo", role: "background" });
@@ -441,6 +458,35 @@ function buildSocialLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
   }
 
   if (id === "social-cta") {
+    if (ctaVariant === 1) {
+      const titleSize = fittedTitleSize(title, W * 0.57, W * 0.084, W * 0.048, 3);
+      els.push({ kind: "rect", x: W * 0.72, y: H * 0.3, w: W * 0.2, h: H * 0.34, fill: brandAccent, opacity: 0.16, rx: 42, selectable: false, name: "Painel visual", role: "panel" });
+      els.push({ kind: "circle", cx: W * 0.82, cy: H * 0.47, r: W * 0.07, fill: brandAccent, opacity: 0.9, selectable: false, name: "Selo", role: "accent" });
+      els.push({ kind: "text", x: 72, y: H * 0.25, w: W * 0.57, text: title, size: titleSize, color: textColor, align: "left", weight: 820, font: fonts.display, lineHeight: 0.93, charSpacing: -6, name: "Título", role: "title" });
+      addBrandAccent(els, 72, H * 0.22, W * 0.12, brandAccent);
+      if (body) els.push({ kind: "text", x: 72, y: H * 0.57, w: W * 0.56, text: fitTextToLines(body, W * 0.56, 29, 4), size: 29, color: secondary, align: "left", weight: 440, font: fonts.body, lineHeight: 1.16, name: "Texto", role: "body" });
+      if (cta) {
+        els.push({ kind: "rect", x: 72, y: H * 0.8, w: W * 0.38, h: 88, fill: brandAccent, rx: 44, selectable: false, name: "CTA", role: "accent" });
+        els.push({ kind: "text", x: 96, y: H * 0.854, w: W * 0.335, text: fitTextToLines(cta, W * 0.335, 28, 1), size: 28, color: "#ffffff", align: "center", weight: 780, font: fonts.display, lineHeight: 1, name: "CTA texto", role: "body" });
+      }
+      return els;
+    }
+
+    if (ctaVariant === 2) {
+      const panelFill = surfaceDark ? "#ffffff" : darkBase;
+      const panelText = surfaceDark ? "#0f172a" : "#ffffff";
+      const panelSecondary = surfaceDark ? "#334155" : "#e5e7eb";
+      els.push({ kind: "rect", x: W * 0.08, y: H * 0.2, w: W * 0.84, h: H * 0.66, fill: panelFill, opacity: 0.96, rx: 46, selectable: false, name: "Card final", role: "panel" });
+      const titleSize = fittedTitleSize(title, W * 0.68, W * 0.082, W * 0.048, 3);
+      els.push({ kind: "text", x: W * 0.16, y: H * 0.3, w: W * 0.68, text: title, size: titleSize, color: panelText, align: "center", weight: 820, font: fonts.display, lineHeight: 0.93, charSpacing: -5, name: "Título", role: "title" });
+      if (body) els.push({ kind: "text", x: W * 0.2, y: H * 0.55, w: W * 0.6, text: fitTextToLines(body, W * 0.6, 27, 3), size: 27, color: panelSecondary, align: "center", weight: 440, font: fonts.body, lineHeight: 1.15, name: "Texto", role: "body" });
+      if (cta) {
+        els.push({ kind: "rect", x: W * 0.27, y: H * 0.72, w: W * 0.46, h: 84, fill: brandAccent, rx: 42, selectable: false, name: "CTA", role: "accent" });
+        els.push({ kind: "text", x: W * 0.3, y: H * 0.772, w: W * 0.4, text: fitTextToLines(cta, W * 0.4, 28, 1), size: 28, color: "#ffffff", align: "center", weight: 780, font: fonts.display, lineHeight: 1, name: "CTA texto", role: "body" });
+      }
+      return els;
+    }
+
     const titleSize = fittedTitleSize(title, W * 0.72, W * 0.082, W * 0.048, 3);
     els.push({ kind: "text", x: W * 0.14, y: H * 0.28, w: W * 0.72, text: title, size: titleSize, color: textColor, align: "center", weight: 800, font: fonts.display, lineHeight: 0.94, charSpacing: -5, name: "Título", role: "title" });
     els.push({ kind: "rect", x: W * 0.39, y: H * 0.57, w: W * 0.22, h: 7, fill: brandAccent, rx: 4, selectable: false, name: "Acento", role: "accent" });
@@ -453,33 +499,34 @@ function buildSocialLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
   }
 
   if (id === "social-workflow") {
+    const items = shortBodyItems(body, 3);
+    const structured = items.length >= 2;
     const titleSize = fittedTitleSize(title, W * 0.74, W * 0.077, W * 0.046, 2);
     els.push({ kind: "text", x: 72, y: H * 0.2, w: W * 0.74, text: title, size: titleSize, color: textColor, align: "left", weight: 800, font: fonts.display, lineHeight: 0.95, charSpacing: -5, name: "Título", role: "title" });
     addBrandAccent(els, 72, H * 0.18, W * 0.13, brandAccent);
-    if (body) els.push({ kind: "text", x: 72, y: H * 0.42, w: W * 0.72, text: fitTextToLines(body, W * 0.72, 28, 3), size: 28, color: secondary, align: "left", weight: 430, font: fonts.body, lineHeight: 1.16, name: "Texto", role: "body" });
-    const items = shortBodyItems(body, 3);
-    const labels = items.length >= 3 ? items : [title.split(/\s+/).slice(0, 3).join(" ") || "Sua ideia", "IA organiza", "Conteúdo pronto"];
+    if (body && !structured) els.push({ kind: "text", x: 72, y: H * 0.42, w: W * 0.72, text: fitTextToLines(body, W * 0.72, 28, 3), size: 28, color: secondary, align: "left", weight: 430, font: fonts.body, lineHeight: 1.16, name: "Texto", role: "body" });
+    const labels = structured ? items : [];
     const y = H * 0.72;
-    const xs = [W * 0.2, W * 0.5, W * 0.8];
+    const xs = labels.map((_, index) => labels.length === 1 ? W * 0.5 : W * (0.2 + (0.6 * index) / (labels.length - 1)));
     xs.forEach((cx, index) => {
       els.push({ kind: "circle", cx, cy: y, r: 76, fill: index === 1 ? brandAccent : "#ece9ff", opacity: 0.98, selectable: false, name: "Etapa", role: "panel" });
       els.push({ kind: "text", x: cx - 30, y: y + 12, w: 60, text: String(index + 1), size: 28, color: index === 1 ? "#ffffff" : brandAccent, align: "center", weight: 800, font: fonts.display, lineHeight: 1, name: "Etapa", role: "meta" });
       els.push({ kind: "text", x: cx - 120, y: y + 120, w: 240, text: fitTextToLines(labels[index] || "", 240, 23, 2), size: 23, color: textColor, align: "center", weight: 620, font: fonts.body, lineHeight: 1.08, name: "Rótulo", role: "body" });
-      if (index < 2) {
-        els.push({ kind: "rect", x: cx + 86, y: y - 2, w: W * 0.13, h: 4, fill: brandAccent, opacity: 0.5, rx: 2, selectable: false, name: "Conector", role: "accent" });
+      if (index < xs.length - 1) {
+        els.push({ kind: "rect", x: cx + 86, y: y - 2, w: Math.max(24, xs[index + 1] - cx - 172), h: 4, fill: brandAccent, opacity: 0.5, rx: 2, selectable: false, name: "Conector", role: "accent" });
       }
     });
     return els;
   }
 
   if (id === "social-feature-grid") {
+    const items = shortBodyItems(body, 4);
+    const structured = items.length >= 2;
     const titleSize = fittedTitleSize(title, W * 0.72, W * 0.076, W * 0.045, 3);
     els.push({ kind: "text", x: 72, y: H * 0.19, w: W * 0.72, text: title, size: titleSize, color: textColor, align: "left", weight: 800, font: fonts.display, lineHeight: 0.94, charSpacing: -5, name: "Título", role: "title" });
     addBrandAccent(els, 72, H * 0.17, W * 0.11, brandAccent);
-    if (body) els.push({ kind: "text", x: 72, y: H * 0.43, w: W * 0.72, text: fitTextToLines(body, W * 0.72, 27, 3), size: 27, color: secondary, align: "left", weight: 430, font: fonts.body, lineHeight: 1.15, name: "Texto", role: "body" });
-    const items = shortBodyItems(body, 4);
-    const fallback = ["Visual consistente", "Criação mais rápida", "Identidade preservada", "Conteúdo profissional"];
-    const list = [...items, ...fallback].slice(0, 4);
+    if (body && !structured) els.push({ kind: "text", x: 72, y: H * 0.43, w: W * 0.72, text: fitTextToLines(body, W * 0.72, 27, 3), size: 27, color: secondary, align: "left", weight: 430, font: fonts.body, lineHeight: 1.15, name: "Texto", role: "body" });
+    const list = structured ? items : [];
     const cardW = W * 0.39;
     const cardH = H * 0.14;
     list.forEach((item, index) => {
@@ -494,14 +541,17 @@ function buildSocialLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
   }
 
   if (id === "social-cards") {
+    const items = shortBodyItems(body, 3);
+    const structured = items.length >= 2;
     const titleSize = fittedTitleSize(title, W * 0.76, W * 0.078, W * 0.047, 2);
     els.push({ kind: "text", x: 72, y: H * 0.2, w: W * 0.76, text: title, size: titleSize, color: textColor, align: "left", weight: 800, font: fonts.display, lineHeight: 0.94, charSpacing: -5, name: "Título", role: "title" });
-    if (body) els.push({ kind: "text", x: 72, y: H * 0.42, w: W * 0.72, text: fitTextToLines(body, W * 0.72, 27, 3), size: 27, color: secondary, align: "left", weight: 430, font: fonts.body, lineHeight: 1.15, name: "Texto", role: "body" });
-    const items = shortBodyItems(body, 3);
-    const list = [...items, "Estratégia que conecta", "Ideias em movimento", "Resultado com identidade"].slice(0, 3);
-    const cardW = W * 0.26;
+    if (body && !structured) els.push({ kind: "text", x: 72, y: H * 0.42, w: W * 0.72, text: fitTextToLines(body, W * 0.72, 27, 3), size: 27, color: secondary, align: "left", weight: 430, font: fonts.body, lineHeight: 1.15, name: "Texto", role: "body" });
+    const list = structured ? items : [];
+    const cardW = list.length === 2 ? W * 0.38 : W * 0.26;
+    const totalCardsWidth = list.length * cardW + Math.max(0, list.length - 1) * W * 0.04;
+    const startX = (W - totalCardsWidth) / 2;
     list.forEach((item, index) => {
-      const x = 74 + index * (cardW + W * 0.04);
+      const x = startX + index * (cardW + W * 0.04);
       const y = H * (0.64 + (index % 2) * 0.035);
       els.push({ kind: "rect", x, y, w: cardW, h: H * 0.25, fill: index === 1 ? "#f8fafc" : index === 2 ? primaryAccent : "#0e172a", opacity: 0.98, rx: 28, selectable: false, name: "Card", role: "panel" });
       els.push({ kind: "rect", x: x + 24, y: y + 24, w: cardW - 48, h: 6, fill: brandAccent, rx: 3, selectable: false, name: "Acento", role: "accent" });
