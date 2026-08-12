@@ -173,6 +173,10 @@ function isTechCampaign(input: LayoutInput) {
   return /zunexi|\bia\b|artificial|software|saas|plataforma|sistema|app|aplicativo|conte[uú]do|cri(a|á)r|carrossel|post|branding|agenda|publica[cç][aã]o|calend[aá]rio|analytics|automa[cç][aã]o|templates?|legendas?|copy|marketing/.test(campaignSource(input));
 }
 
+function isFoodCampaign(input: LayoutInput) {
+  return /hamb|burger|food|comida|restaurante|lanche|pizza|sorvet|bebida|drink|caf[eé]|gastron|card[aá]pio|menu|combo|artesanal|bacon|cheddar|batata/.test(campaignSource(input));
+}
+
 function slideCounter(input: LayoutInput) {
   if (!input.slideNumber || !input.slideTotal) return "";
   return `${String(input.slideNumber).padStart(2, "0")}/${String(input.slideTotal).padStart(2, "0")}`;
@@ -604,6 +608,197 @@ function addBottomScrim(els: ElementDesc[], W: number, H: number) {
   els.push({ kind: "rect", x: 0, y: H * 0.67, w: W, h: H * 0.33, fill: "#000000", opacity: 0.26, selectable: false });
 }
 
+type FoodLayoutVariant = "cover" | "editorial" | "feature" | "detail" | "minimal" | "cta" | "menu";
+
+function foodVariantForLayout(id: LayoutId, input: LayoutInput): FoodLayoutVariant {
+  if (id === "menu-board") return "menu";
+  if (id === "social-cta" || id === "center-text") return "cta";
+  if (id === "social-minimal") return "minimal";
+  if (id === "social-workflow" || id === "social-feature-grid" || id === "side-text") return "feature";
+  if (id === "social-cards" || id === "bottom-text") return "detail";
+  if (id === "social-editorial" || id === "diagonal") return "editorial";
+  if (id === "social-hero" || id === "text-over-image") return "cover";
+  if ((input.slideNumber || 1) === (input.slideTotal || -1)) return "cta";
+  return "cover";
+}
+
+function foodAccentColor(input: LayoutInput) {
+  const [, primary, accent] = input.palette;
+  const candidates = [primary, accent].filter(Boolean);
+  return candidates.find((color) => {
+    const light = luminance(color);
+    return light > 0.16 && light < 0.86;
+  }) || primary || accent || "#d59a2e";
+}
+
+function addFoodFrame(els: ElementDesc[], W: number, H: number, accent: string) {
+  const inset = 26;
+  const thickness = 3;
+  const horizontal = W - inset * 2;
+  const vertical = H - inset * 2;
+  els.push({ kind: "rect", x: inset, y: inset, w: horizontal, h: thickness, fill: accent, opacity: 0.9, selectable: false, name: "Moldura", role: "accent" });
+  els.push({ kind: "rect", x: inset, y: H - inset - thickness, w: horizontal, h: thickness, fill: accent, opacity: 0.9, selectable: false, name: "Moldura", role: "accent" });
+  els.push({ kind: "rect", x: inset, y: inset, w: thickness, h: vertical, fill: accent, opacity: 0.9, selectable: false, name: "Moldura", role: "accent" });
+  els.push({ kind: "rect", x: W - inset - thickness, y: inset, w: thickness, h: vertical, fill: accent, opacity: 0.9, selectable: false, name: "Moldura", role: "accent" });
+  els.push({ kind: "rect", x: inset, y: inset + 24, w: 72, h: thickness + 1, fill: accent, selectable: false, name: "Canto", role: "accent" });
+  els.push({ kind: "rect", x: W - inset - 72, y: H - inset - 28, w: 72, h: thickness + 1, fill: accent, selectable: false, name: "Canto", role: "accent" });
+}
+
+function addFoodHeader(els: ElementDesc[], input: LayoutInput, accent: string, color = "#ffffff") {
+  const brand = cleanBrandName(input);
+  const counter = slideCounter(input);
+  if (brand) {
+    els.push({ kind: "text", x: 58, y: 54, w: input.width * 0.56, text: brand.toUpperCase(), size: 27, color, align: "left", weight: 800, font: input.fonts.display, lineHeight: 1, charSpacing: 90, name: "Marca", role: "brand" });
+  }
+  if (counter) {
+    els.push({ kind: "text", x: input.width - 210, y: 54, w: 150, text: counter, size: 24, color: accent, align: "right", weight: 760, font: input.fonts.body, lineHeight: 1, charSpacing: 40, name: "Contador", role: "meta" });
+  }
+  els.push({ kind: "rect", x: 58, y: 96, w: input.width - 116, h: 2, fill: accent, opacity: 0.72, selectable: false, name: "Linha superior", role: "accent" });
+}
+
+function addFoodCta(els: ElementDesc[], input: LayoutInput, x: number, y: number, width: number, accent: string, centered = false) {
+  if (!input.cta?.trim()) return;
+  els.push({ kind: "rect", x, y, w: width, h: 78, fill: accent, rx: 16, selectable: false, name: "CTA", role: "accent" });
+  els.push({ kind: "text", x: x + 24, y: y + 24, w: width - 48, text: fitTextToLines(input.cta.trim(), width - 48, 27, 1), size: 27, color: luminance(accent) > 0.46 ? "#090909" : "#ffffff", align: centered ? "center" : "left", weight: 800, font: input.fonts.display, lineHeight: 1, charSpacing: 20, name: "CTA texto", role: "body" });
+}
+
+function addFoodFeatureList(els: ElementDesc[], input: LayoutInput, x: number, y: number, width: number, accent: string, maxItems = 4) {
+  const items = shortBodyItems(input.body, maxItems);
+  if (items.length <= 1) {
+    if (input.body) {
+      els.push({ kind: "text", x, y, w: width, text: fitTextToLines(input.body, width, 29, 5), size: 29, color: "rgba(255,255,255,0.92)", align: "left", weight: 480, font: input.fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
+    }
+    return;
+  }
+
+  items.forEach((item, index) => {
+    const itemY = y + index * 102;
+    els.push({ kind: "circle", cx: x + 12, cy: itemY + 18, r: 7, fill: accent, selectable: false, name: "Marcador", role: "accent" });
+    els.push({ kind: "text", x: x + 34, y: itemY, w: width - 34, text: item, size: 26, color: "#ffffff", align: "left", weight: 650, font: input.fonts.body, lineHeight: 1.08, name: "Item", role: "body" });
+    if (index < items.length - 1) {
+      els.push({ kind: "rect", x: x + 34, y: itemY + 72, w: width - 34, h: 2, fill: accent, opacity: 0.44, selectable: false, name: "Separador", role: "accent" });
+    }
+  });
+}
+
+function addFoodMenuContent(els: ElementDesc[], input: LayoutInput, accent: string) {
+  const { body, width: W, height: H, fonts } = input;
+  let lines = parseRichBody(body || "");
+  if (!lines.length && body) lines = [{ kind: "meta", text: body }];
+
+  const contentTop = 290;
+  const contentBottom = H - (input.cta ? 156 : 74);
+  const contentWidth = W * 0.53;
+  let y = contentTop;
+
+  for (const line of lines.slice(0, 11)) {
+    if (line.kind === "separator") {
+      y += 10;
+      continue;
+    }
+    if (y > contentBottom - 38) break;
+    const heading = line.kind === "heading" || line.kind === "subheading";
+    const size = heading ? 27 : line.kind === "meta" ? 24 : 23;
+    const estimated = estimatedLineCount(line.text, contentWidth, size);
+    els.push({ kind: "text", x: 64, y, w: contentWidth, text: line.text, size, color: heading ? accent : "#ffffff", align: "left", weight: heading ? 820 : line.kind === "item" ? 680 : 480, font: heading ? fonts.display : fonts.body, lineHeight: 1.08, name: heading ? "Seção" : "Item", role: heading ? "section" : "body" });
+    y += estimated * size * 1.02 + (heading ? 24 : 17);
+    if (!heading && y < contentBottom - 24) {
+      els.push({ kind: "rect", x: 64, y: y - 8, w: contentWidth * 0.88, h: 2, fill: accent, opacity: 0.36, selectable: false, name: "Separador", role: "accent" });
+    }
+  }
+}
+
+function buildFoodLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
+  const { title, body, imageUrl, width: W, height: H, fonts } = input;
+  const accent = foodAccentColor(input);
+  const els: ElementDesc[] = [];
+  const variant = foodVariantForLayout(id, input);
+  const pageX = 64;
+
+  els.push({ kind: "rect", x: 0, y: 0, w: W, h: H, fill: "#080808", selectable: false, name: "Fundo", role: "background" });
+  if (imageUrl) els.push({ kind: "image", x: 0, y: 0, w: W, h: H, url: imageUrl, name: "Imagem gastronômica", role: "hero" });
+  els.push({ kind: "rect", x: 0, y: 0, w: W, h: H, fill: "#000000", opacity: 0.16, selectable: false, name: "Tratamento", role: "scrim" });
+
+  if (variant === "menu") {
+    els.push({ kind: "rect", x: 0, y: 0, w: W * 0.69, h: H, fill: "#050505", opacity: 0.93, selectable: false, name: "Painel do cardápio", role: "panel" });
+    els.push({ kind: "rect", x: W * 0.62, y: 0, w: W * 0.2, h: H, fill: "#000000", opacity: 0.3, selectable: false, name: "Transição", role: "scrim" });
+    addFoodHeader(els, input, accent);
+    const titleSize = fittedTitleSize(title, W * 0.57, 68, 43, 2);
+    els.push({ kind: "text", x: pageX, y: 130, w: W * 0.57, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 850, font: fonts.display, lineHeight: 0.94, charSpacing: -4, name: "Título", role: "title" });
+    els.push({ kind: "rect", x: pageX, y: 246, w: W * 0.12, h: 7, fill: accent, rx: 3, selectable: false, name: "Acento", role: "accent" });
+    addFoodMenuContent(els, input, accent);
+    addFoodCta(els, input, pageX, H - 126, W * 0.5, accent);
+    addFoodFrame(els, W, H, accent);
+    return els;
+  }
+
+  if (variant === "cover") {
+    els.push({ kind: "rect", x: 0, y: 0, w: W * 0.55, h: H, fill: "#050505", opacity: 0.75, selectable: false, name: "Painel editorial", role: "panel" });
+    els.push({ kind: "rect", x: W * 0.49, y: 0, w: W * 0.2, h: H, fill: "#000000", opacity: 0.26, selectable: false, name: "Transição", role: "scrim" });
+    addFoodHeader(els, input, accent);
+    const titleWidth = W * 0.43;
+    const titleSize = fittedTitleSize(title, titleWidth, 88, 54, 3);
+    const titleLines = Math.min(3, estimatedLineCount(title, titleWidth, titleSize));
+    els.push({ kind: "rect", x: pageX, y: H * 0.25, w: 82, h: 7, fill: accent, rx: 3, selectable: false, name: "Acento", role: "accent" });
+    els.push({ kind: "text", x: pageX, y: H * 0.29, w: titleWidth, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 860, font: fonts.display, lineHeight: 0.9, charSpacing: -5, shadow: "soft", name: "Título", role: "title" });
+    if (body) els.push({ kind: "text", x: pageX, y: H * 0.29 + titleLines * titleSize * 0.94 + 34, w: W * 0.4, text: fitTextToLines(body, W * 0.4, 28, 4), size: 28, color: "rgba(255,255,255,0.92)", align: "left", weight: 480, font: fonts.body, lineHeight: 1.18, name: "Texto", role: "body" });
+    addFoodCta(els, input, pageX, H * 0.79, W * 0.38, accent);
+    addFoodFrame(els, W, H, accent);
+    return els;
+  }
+
+  if (variant === "feature") {
+    els.push({ kind: "rect", x: 0, y: 0, w: W * 0.5, h: H, fill: "#050505", opacity: 0.86, selectable: false, name: "Painel de conteúdo", role: "panel" });
+    els.push({ kind: "rect", x: W * 0.5, y: H * 0.12, w: 5, h: H * 0.76, fill: accent, opacity: 0.88, selectable: false, name: "Divisor", role: "accent" });
+    addFoodHeader(els, input, accent);
+    const titleSize = fittedTitleSize(title, W * 0.38, 66, 43, 3);
+    const titleLines = Math.min(3, estimatedLineCount(title, W * 0.38, titleSize));
+    els.push({ kind: "text", x: pageX, y: H * 0.16, w: W * 0.38, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 840, font: fonts.display, lineHeight: 0.92, charSpacing: -4, name: "Título", role: "title" });
+    addFoodFeatureList(els, input, pageX, H * 0.16 + titleLines * titleSize + 42, W * 0.37, accent, 4);
+    addFoodCta(els, input, pageX, H * 0.82, W * 0.36, accent);
+    addFoodFrame(els, W, H, accent);
+    return els;
+  }
+
+  if (variant === "detail") {
+    els.push({ kind: "rect", x: 0, y: H * 0.57, w: W, h: H * 0.43, fill: "#050505", opacity: 0.9, selectable: false, name: "Painel inferior", role: "panel" });
+    els.push({ kind: "rect", x: 0, y: H * 0.5, w: W, h: H * 0.16, fill: "#000000", opacity: 0.28, selectable: false, name: "Transição", role: "scrim" });
+    addFoodHeader(els, input, accent);
+    const titleSize = fittedTitleSize(title, W * 0.76, 70, 47, 2);
+    els.push({ kind: "text", x: pageX, y: H * 0.63, w: W * 0.76, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 850, font: fonts.display, lineHeight: 0.92, charSpacing: -5, name: "Título", role: "title" });
+    if (body) els.push({ kind: "text", x: pageX, y: H * 0.77, w: W * 0.6, text: fitTextToLines(body, W * 0.6, 29, 3), size: 29, color: "rgba(255,255,255,0.9)", align: "left", weight: 480, font: fonts.body, lineHeight: 1.16, name: "Texto", role: "body" });
+    addFoodCta(els, input, W * 0.7, H * 0.82, W * 0.22, accent, true);
+    addFoodFrame(els, W, H, accent);
+    return els;
+  }
+
+  if (variant === "editorial") {
+    els.push({ kind: "rect", x: 0, y: 0, w: W * 0.46, h: H, fill: "#050505", opacity: 0.72, selectable: false, name: "Painel lateral", role: "panel" });
+    els.push({ kind: "rect", x: pageX, y: H * 0.22, w: W * 0.36, h: H * 0.51, fill: "#080808", opacity: 0.78, rx: 22, selectable: false, name: "Card editorial", role: "panel" });
+    els.push({ kind: "rect", x: pageX, y: H * 0.22, w: W * 0.36, h: 5, fill: accent, selectable: false, name: "Acento", role: "accent" });
+    addFoodHeader(els, input, accent);
+    const titleSize = fittedTitleSize(title, W * 0.3, 67, 43, 3);
+    const titleLines = Math.min(3, estimatedLineCount(title, W * 0.3, titleSize));
+    els.push({ kind: "text", x: pageX + 32, y: H * 0.29, w: W * 0.3, text: title, size: titleSize, color: "#ffffff", align: "left", weight: 850, font: fonts.display, lineHeight: 0.92, charSpacing: -4, name: "Título", role: "title" });
+    if (body) els.push({ kind: "text", x: pageX + 32, y: H * 0.29 + titleLines * titleSize + 28, w: W * 0.29, text: fitTextToLines(body, W * 0.29, 27, 5), size: 27, color: "rgba(255,255,255,0.9)", align: "left", weight: 470, font: fonts.body, lineHeight: 1.16, name: "Texto", role: "body" });
+    addFoodCta(els, input, pageX + 32, H * 0.61, W * 0.26, accent);
+    addFoodFrame(els, W, H, accent);
+    return els;
+  }
+
+  els.push({ kind: "rect", x: 0, y: 0, w: W, h: H, fill: "#000000", opacity: variant === "cta" ? 0.5 : 0.34, selectable: false, name: "Sombra", role: "scrim" });
+  els.push({ kind: "rect", x: W * 0.13, y: H * 0.24, w: W * 0.74, h: H * 0.5, fill: "#050505", opacity: 0.86, rx: 26, selectable: false, name: "Placa editorial", role: "panel" });
+  els.push({ kind: "rect", x: W * 0.25, y: H * 0.24, w: W * 0.5, h: 5, fill: accent, selectable: false, name: "Acento", role: "accent" });
+  addFoodHeader(els, input, accent);
+  const titleSize = fittedTitleSize(title, W * 0.62, 76, 48, 2);
+  const titleLines = Math.min(3, estimatedLineCount(title, W * 0.62, titleSize));
+  els.push({ kind: "text", x: W * 0.19, y: H * 0.33, w: W * 0.62, text: title, size: titleSize, color: "#ffffff", align: "center", weight: 860, font: fonts.display, lineHeight: 0.92, charSpacing: -5, name: "Título", role: "title" });
+  if (body) els.push({ kind: "text", x: W * 0.23, y: H * 0.33 + titleLines * titleSize + 26, w: W * 0.54, text: fitTextToLines(body, W * 0.54, 28, 3), size: 28, color: "rgba(255,255,255,0.9)", align: "center", weight: 480, font: fonts.body, lineHeight: 1.16, name: "Texto", role: "body" });
+  addFoodCta(els, input, W * 0.3, H * 0.64, W * 0.4, accent, true);
+  addFoodFrame(els, W, H, accent);
+  return els;
+}
+
 function addMenuBoardLayout(els: ElementDesc[], input: LayoutInput, bg: string, accent: string) {
   const { title, body, imageUrl, width: W, height: H, fonts } = input;
   const panelFill = luminance(bg) > 0.35 ? "#09090b" : bg;
@@ -696,30 +891,27 @@ export function buildLayout(id: LayoutId, input: LayoutInput): ElementDesc[] {
   const bodySize = px(clamp(denseMode ? W * 0.024 : W * 0.032, denseMode ? 20 : 27, denseMode ? 31 : 38));
   const baseEffectiveId: LayoutId = denseMode && !requestedSocial ? "menu-board" : id;
   const techMode = !denseMode && isTechCampaign(input);
-
-  // Quando a API produziu uma imagem, ela precisa ser protagonista da arte final.
-  // Os layouts social-* antigos eram 100% geométricos e descartavam esse ativo.
-  // A sequência abaixo gira por campanha e por slide, como uma direção de arte
-  // contínua, preservando o texto editável sobre composições realmente distintas.
-  const imageLayouts: LayoutId[] = [
-    "text-over-image",
-    "side-text",
-    "bottom-text",
-    "hero-image",
-    "diagonal",
-    "center-text",
-  ];
-  const campaignKey = [
-    input.brandName || "",
-    input.theme || "",
-    input.styleHint || "",
-  ].join("|");
-  const campaignOffset = stableVariant(campaignKey, imageLayouts.length);
-  const slideOffset = Math.max(0, (input.slideNumber || 1) - 1);
-  const imageFirstId = imageLayouts[(campaignOffset + slideOffset) % imageLayouts.length];
+  const imageLayoutMap: Partial<Record<LayoutId, LayoutId>> = {
+    "social-hero": "text-over-image",
+    "social-editorial": "side-text",
+    "social-workflow": "side-text",
+    "social-feature-grid": "diagonal",
+    "social-cards": "bottom-text",
+    "social-minimal": "hero-image",
+    "social-cta": "center-text",
+  };
   const effectiveId: LayoutId = imageUrl
-    ? (denseMode ? "menu-board" : imageFirstId)
+    ? denseMode
+      ? "menu-board"
+      : imageLayoutMap[id] || id
     : baseEffectiveId;
+
+  // Gastronomia recebe direção de arte própria e mantém o mesmo layout que
+  // orientou a geração da imagem. Assim, a área livre nunca troca de lado
+  // entre o prompt visual e a montagem final.
+  if (imageUrl && isFoodCampaign(input)) {
+    return buildFoodLayout(denseMode ? "menu-board" : id, input);
+  }
 
   if (!imageUrl && String(effectiveId).startsWith("social-")) {
     return buildSocialLayout(effectiveId, input);
@@ -921,19 +1113,19 @@ export function layoutForSlide(index: number, kind: string, title = "", body = "
 export function compositionForLayout(layout: LayoutId): string {
   switch (layout) {
     case "social-hero":
-      return "Create a bold full-bleed campaign key visual with one dominant subject, strong depth and natural negative space. Do not generate text.";
+      return "Place one bold hero subject in the right 48–58% of the frame. Keep the left 42% naturally darker, calm and low-detail for a large headline. Do not generate text.";
     case "social-editorial":
-      return "Create an asymmetric editorial campaign scene with a dominant subject on one side and a naturally calm copy-safe area on the other. Do not generate text.";
+      return "Create an asymmetric editorial scene with the hero subject on the right half and a naturally calm, darker left area for an editorial card. Do not generate text.";
     case "social-workflow":
-      return "Create a cinematic visual that communicates progression through depth, motion or ordered objects, while remaining one coherent scene. Do not generate text or UI labels.";
+      return "Keep the hero subject and supporting details in the right half. Preserve the left 46% as a darker, low-detail area for a structured feature list. Do not generate text or UI labels.";
     case "social-feature-grid":
-      return "Create a premium campaign scene with layered visual details and one clear focal subject; keep secondary elements controlled and realistic. Do not generate text.";
+      return "Place the dominant hero on the right 52% with controlled secondary details. Keep the left side calm and dark enough for four concise feature lines. Do not generate text.";
     case "social-cards":
-      return "Create a rich advertising visual with foreground, midground and background separation, one hero subject and strong editorial cropping. Do not generate text.";
+      return "Keep the hero subject in the upper 58% with rich foreground and background separation. Let the lower 38% fall naturally darker for a strong headline and short copy. Do not generate text.";
     case "social-minimal":
-      return "Create a refined minimal key visual with one sculptural or photographic focal subject and generous natural breathing room. Do not generate text.";
+      return "Create a refined key visual with the focal subject visible around the outer edges and a calm central area suitable for one short high-impact message. Do not generate text.";
     case "social-cta":
-      return "Create a confident closing visual with strong contrast, a memorable hero subject and clean space for a short call to action. Do not generate text.";
+      return "Create a confident closing visual with the hero subject in the upper/right area and a calmer central-to-lower zone for a short call to action. Do not generate text.";
     case "bottom-text":
       return "Keep the hero subject in the upper 55% with clear separation. Preserve the lower 35% as a darker, calmer copy-safe area without artificial blank panels.";
     case "side-text":
