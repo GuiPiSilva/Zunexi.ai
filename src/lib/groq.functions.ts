@@ -61,6 +61,98 @@ export interface CarrosselOut {
 }
 
 const TIMEOUT_MS = 45_000;
+const DEFAULT_GROQ_TEXT_MODEL = "llama-3.3-70b-versatile";
+
+type GroqChatRequest = {
+  temperature?: number;
+  top_p?: number;
+  max_completion_tokens?: number;
+  response_format?: { type: "json_object" };
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+};
+
+function configuredGroqModel() {
+  let value = (process.env.GROQ_TEXT_MODEL || DEFAULT_GROQ_TEXT_MODEL).trim();
+  if (/^GROQ_TEXT_MODEL\s*=/i.test(value)) value = value.replace(/^GROQ_TEXT_MODEL\s*=\s*/i, "");
+  return value.replace(/^["']|["']$/g, "").trim() || DEFAULT_GROQ_TEXT_MODEL;
+}
+
+function groqErrorDetail(body: string) {
+  try {
+    const payload = JSON.parse(body) as { error?: { message?: unknown; code?: unknown }; message?: unknown };
+    const detail = payload.error?.message ?? payload.message;
+    if (typeof detail === "string" && detail.trim()) return compactWhitespace(detail).slice(0, 280);
+  } catch {
+    // Some proxy and provider errors are returned as plain text.
+  }
+  return compactWhitespace(body).slice(0, 280);
+}
+
+function isUnavailableGroqModel(status: number, detail: string) {
+  return status === 400 && /model/i.test(detail) && /(?:decommission|deprecated|not found|does not exist|invalid|unavailable|permission)/i.test(detail);
+}
+
+function isGroqJsonModeFailure(status: number, detail: string) {
+  return status === 400 && /(?:json_validate_failed|failed to generate json|json mode|valid json)/i.test(detail);
+}
+
+function groqResponseError(status: number, body: string, model: string) {
+  const detail = groqErrorDetail(body);
+  if (status === 401 || status === 403) return new Error("Chave da Groq inválida ou sem permissão.");
+  if (status === 429) return new Error("Limite da Groq API atingido. Tente novamente em instantes.");
+  if (status === 413) return new Error("O pedido ficou grande demais para a Groq. Reduza as informações adicionais e tente novamente.");
+  if (isUnavailableGroqModel(status, detail)) {
+    return new Error(`O modelo da Groq \"${model}\" não está disponível. Configure GROQ_TEXT_MODEL=${DEFAULT_GROQ_TEXT_MODEL} na Vercel.`);
+  }
+  if (status >= 500) return new Error(`A Groq está temporariamente indisponível (erro ${status}). Tente novamente em instantes.`);
+  return new Error(detail ? `A Groq recusou a solicitação (erro ${status}): ${detail}` : `A Groq recusou a solicitação (erro ${status}).`);
+}
+
+async function requestGroqChat(apiKey: string, request: GroqChatRequest, signal: AbortSignal) {
+  const selectedModel = configuredGroqModel();
+  const models = Array.from(new Set([selectedModel, DEFAULT_GROQ_TEXT_MODEL]));
+  let lastError: Error | undefined;
+
+  async function send(model: string, payload: GroqChatRequest) {
+    return fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      signal,
+      body: JSON.stringify({ ...payload, model }),
+    });
+  }
+
+  for (const model of models) {
+    let response = await send(model, request);
+
+    if (response.ok) return { response, model };
+
+    let body = await response.text();
+    let detail = groqErrorDetail(body);
+    console.error("Groq error", response.status, model, detail);
+
+    if (request.response_format && isGroqJsonModeFailure(response.status, detail)) {
+      console.warn(`Modo JSON da Groq falhou no modelo ${model}; repetindo com validação local.`);
+      const { response_format: _responseFormat, ...requestWithoutJsonMode } = request;
+      response = await send(model, requestWithoutJsonMode);
+      if (response.ok) return { response, model };
+      body = await response.text();
+      detail = groqErrorDetail(body);
+      console.error("Groq retry error", response.status, model, detail);
+    }
+
+    lastError = groqResponseError(response.status, body, model);
+
+    const hasFallback = model !== models[models.length - 1];
+    if (!hasFallback || !isUnavailableGroqModel(response.status, detail)) throw lastError;
+    console.warn(`Modelo Groq ${model} indisponível; tentando ${DEFAULT_GROQ_TEXT_MODEL}.`);
+  }
+
+  throw lastError || new Error("Não foi possível consultar a Groq.");
+}
 
 const PLACEHOLDER_LINE = /(?:\[(?:inserir|adicione|preencha|coloque)[^\]]*\]|<(?:inserir|adicione|preencha|coloque)[^>]*>|\b(?:a definir|não informado|nao informado|não fornecido|nao fornecido|exemplo|seu telefone|seu endereço|seu endereco)\b)/i;
 const WEAK_COPY = /^(?:bem[- ]?vindo|conheça|descubra|aproveite|saiba mais|qualidade que|sabor que|uma experiência|experiência única|o melhor para você|feito para você|não perca|crie agora|crie melhor|desbloqueie o poder|eleve sua marca|leve sua marca)(?:\b|[!.:]|$)/i;
@@ -113,6 +205,16 @@ function sanitizeBody(value: unknown, dense: boolean) {
     .replace(/(^|\n)(?:texto|descrição|descricao|copy)\s*:\s*/gi, "$1")
     .trim();
   return trimAtWord(cleaned, dense ? 900 : 150);
+}
+
+function sanitizeCta(value: unknown) {
+  const cleaned = compactWhitespace(removePlaceholderLines(stripMarkdown(String(value ?? ""))))
+    .split("\n")
+    .find(Boolean)
+    ?.replace(/^(?:cta|chamada para a[cç][aã]o)\s*:\s*/i, "")
+    .replace(/^[“"']|[”"']$/g, "")
+    .trim() || "";
+  return trimAtWord(cleaned, 54);
 }
 
 function sanitizePromptImage(value: unknown) {
@@ -246,10 +348,10 @@ async function reviewCampaignWithGroq({
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       signal: controller.signal,
       body: JSON.stringify({
-        model: process.env.GROQ_REVIEW_MODEL || process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile",
+        model: (process.env.GROQ_REVIEW_MODEL || configuredGroqModel()).trim(),
         temperature: 0.25,
         top_p: 0.8,
-        max_tokens: 6500,
+        max_completion_tokens: 5000,
         response_format: { type: "json_object" },
         messages: [
           {
@@ -544,38 +646,21 @@ Semente de variação criativa: ${Math.random().toString(36).slice(2)}-${Date.no
     const t = setTimeout(() => controller.abort(), TIMEOUT_MS);
     let response: Response;
     try {
-      response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile",
+      ({ response } = await requestGroqChat(apiKey, {
           temperature: 0.55,
           top_p: 0.86,
-          max_tokens: 6500,
+          max_completion_tokens: 5000,
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
           ],
-        }),
-      });
+        }, controller.signal));
     } catch (e) {
       const err = e as Error;
       if (err.name === "AbortError") throw new Error("Tempo esgotado ao gerar. Tente novamente.");
-      throw new Error("Falha ao chamar a Groq API.");
+      throw err.message ? err : new Error("Falha ao chamar a Groq API.");
     } finally { clearTimeout(t); }
-
-    if (!response.ok) {
-      const body = await response.text();
-      console.error("Groq error", response.status, body.slice(0, 500));
-      if (response.status === 429) throw new Error("Limite da Groq API atingido. Tente novamente em instantes.");
-      if (response.status === 401 || response.status === 403) throw new Error("Chave da Groq inválida ou sem permissão.");
-      throw new Error("A Groq retornou um erro. Tente novamente.");
-    }
 
     const json = await response.json() as { choices?: { message?: { content?: string } }[] };
     const raw = json.choices?.[0]?.message?.content ?? "";
@@ -689,38 +774,23 @@ export const updateSlide = createServerFn({ method: "POST" })
 export const testGroqConnection = createServerFn({ method: "POST" })
   .handler(async (): Promise<{ ok: boolean; model: string; message: string }> => {
     const apiKey = process.env.GROQ_API_KEY;
-    const model = process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile";
+    const model = configuredGroqModel();
     if (!apiKey) return { ok: false, model, message: "GROQ_API_KEY não configurada no servidor." };
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 15_000);
     try {
-      const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model,
+      const { response: r, model: activeModel } = await requestGroqChat(apiKey, {
           temperature: 0,
-          max_tokens: 10,
+          max_completion_tokens: 10,
           messages: [{ role: "user", content: "Responda apenas: OK" }],
-        }),
-      });
-      if (!r.ok) {
-        const body = await r.text();
-        if (r.status === 401 || r.status === 403) return { ok: false, model, message: "Chave da Groq inválida ou sem permissão." };
-        if (r.status === 429) return { ok: false, model, message: "Limite da Groq atingido no momento." };
-        return { ok: false, model, message: `Erro Groq ${r.status}: ${body.slice(0, 160)}` };
-      }
+        }, controller.signal);
       const j = await r.json() as { choices?: { message?: { content?: string } }[] };
       const txt = j.choices?.[0]?.message?.content?.trim() ?? "";
-      return { ok: true, model, message: `Conexão OK. Resposta: "${txt || "(vazia)"}"` };
+      return { ok: true, model: activeModel, message: `Conexão OK com ${activeModel}. Resposta: "${txt || "(vazia)"}"` };
     } catch (e) {
       const err = e as Error;
       if (err.name === "AbortError") return { ok: false, model, message: "Tempo esgotado ao contatar a Groq." };
-      return { ok: false, model, message: "Falha de rede ao contatar a Groq." };
+      return { ok: false, model, message: err.message || "Falha de rede ao contatar a Groq." };
     } finally { clearTimeout(t); }
   });
 
@@ -908,16 +978,9 @@ export const generateCarouselPrompt = createServerFn({ method: "POST" })
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     try {
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: process.env.GROQ_TEXT_MODEL || "llama-3.3-70b-versatile",
+      const { response } = await requestGroqChat(apiKey, {
           temperature: 0.45,
+          max_completion_tokens: 3000,
           response_format: { type: "json_object" },
           messages: [
             {
@@ -930,14 +993,7 @@ Retorne SOMENTE JSON válido com as chaves: prompt, tema, empresa, produto, obje
 
 Pedido do usuário: ${data.pedido}` },
           ],
-        }),
-      });
-
-      if (!response.ok) {
-        if (response.status === 429) throw new Error("Limite da Groq atingido. Tente novamente em instantes.");
-        if (response.status === 401 || response.status === 403) throw new Error("Chave da Groq inválida ou sem permissão.");
-        throw new Error("A Groq não conseguiu criar o prompt.");
-      }
+        }, controller.signal);
 
       const json = await response.json() as { choices?: { message?: { content?: string } }[] };
       const content = json.choices?.[0]?.message?.content?.trim();
