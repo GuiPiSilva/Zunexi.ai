@@ -17,6 +17,13 @@ Plataforma multi-tenant para criação e gerenciamento de redes sociais com inte
 - Equipe com funções e chaves de acesso individuais.
 - Automações e publicação programada pela Vercel Cron.
 - Biblioteca, projetos, agenda e painel administrativo existentes.
+- Suporte 24 horas com chat por IA, base de conhecimento das funções e fallback local para erros de provedor.
+
+## Suporte 24 horas
+
+A área **Suporte 24h** reúne guias das funções e soluções para os erros mais comuns de acesso, Groq, geração de imagens, Supabase, integrações sociais, publicação, cache, navegador e planos. O botão flutuante abre o chat em qualquer tela autenticada.
+
+O chat valida a chave de acesso, usa a mesma `GROQ_API_KEY` configurada para os demais textos e não consome créditos do cliente. Se a Groq estiver sem configuração, fora do ar ou atingir o limite, a resposta é montada automaticamente com a base local em `src/lib/support-knowledge.ts`.
 
 ## Instalação
 
