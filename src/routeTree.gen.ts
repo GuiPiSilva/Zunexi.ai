@@ -9,38 +9,44 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as ProjetosRouteImport } from './routes/projetos'
-import { Route as AgendaRouteImport } from './routes/agenda'
-import { Route as BrandKitRouteImport } from './routes/brand-kit'
-import { Route as ConfiguracoesRouteImport } from './routes/configuracoes'
-import { Route as CriadorPromptsRouteImport } from './routes/criador-prompts'
-import { Route as CartazRouteImport } from './routes/cartaz'
-import { Route as CarrosselRouteImport } from './routes/carrossel'
-import { Route as BibliotecaRouteImport } from './routes/biblioteca'
-import { Route as AdminRouteImport } from './routes/admin'
-import { Route as AcessoRouteImport } from './routes/acesso'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as EditorIdRouteImport } from './routes/editor.$id'
-import { Route as PublicacoesRouteImport } from './routes/publicacoes'
-import { Route as RedesRouteImport } from './routes/redes'
-import { Route as CaixaEntradaRouteImport } from './routes/caixa-entrada'
+import { Route as AcessoRouteImport } from './routes/acesso'
+import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AgendaRouteImport } from './routes/agenda'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as AutomacoesRouteImport } from './routes/automacoes'
+import { Route as BibliotecaRouteImport } from './routes/biblioteca'
+import { Route as BrandKitRouteImport } from './routes/brand-kit'
+import { Route as CaixaEntradaRouteImport } from './routes/caixa-entrada'
+import { Route as CarrosselRouteImport } from './routes/carrossel'
+import { Route as CartazRouteImport } from './routes/cartaz'
+import { Route as ConfiguracoesRouteImport } from './routes/configuracoes'
+import { Route as CriadorPromptsRouteImport } from './routes/criador-prompts'
 import { Route as EquipeRouteImport } from './routes/equipe'
+import { Route as ProjetosRouteImport } from './routes/projetos'
+import { Route as PublicacoesRouteImport } from './routes/publicacoes'
+import { Route as RedesRouteImport } from './routes/redes'
+import { Route as SuporteRouteImport } from './routes/suporte'
+import { Route as EditorIdRouteImport } from './routes/editor.$id'
 
-const PublicacoesRoute = PublicacoesRouteImport.update({
-  id: '/publicacoes',
-  path: '/publicacoes',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const RedesRoute = RedesRouteImport.update({
-  id: '/redes',
-  path: '/redes',
+const AcessoRoute = AcessoRouteImport.update({
+  id: '/acesso',
+  path: '/acesso',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CaixaEntradaRoute = CaixaEntradaRouteImport.update({
-  id: '/caixa-entrada',
-  path: '/caixa-entrada',
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgendaRoute = AgendaRouteImport.update({
+  id: '/agenda',
+  path: '/agenda',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AnalyticsRoute = AnalyticsRouteImport.update({
@@ -53,14 +59,9 @@ const AutomacoesRoute = AutomacoesRouteImport.update({
   path: '/automacoes',
   getParentRoute: () => rootRouteImport,
 } as any)
-const EquipeRoute = EquipeRouteImport.update({
-  id: '/equipe',
-  path: '/equipe',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgendaRoute = AgendaRouteImport.update({
-  id: '/agenda',
-  path: '/agenda',
+const BibliotecaRoute = BibliotecaRouteImport.update({
+  id: '/biblioteca',
+  path: '/biblioteca',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BrandKitRoute = BrandKitRouteImport.update({
@@ -68,24 +69,9 @@ const BrandKitRoute = BrandKitRouteImport.update({
   path: '/brand-kit',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ProjetosRoute = ProjetosRouteImport.update({
-  id: '/projetos',
-  path: '/projetos',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CriadorPromptsRoute = CriadorPromptsRouteImport.update({
-  id: '/criador-prompts',
-  path: '/criador-prompts',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ConfiguracoesRoute = ConfiguracoesRouteImport.update({
-  id: '/configuracoes',
-  path: '/configuracoes',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CartazRoute = CartazRouteImport.update({
-  id: '/cartaz',
-  path: '/cartaz',
+const CaixaEntradaRoute = CaixaEntradaRouteImport.update({
+  id: '/caixa-entrada',
+  path: '/caixa-entrada',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CarrosselRoute = CarrosselRouteImport.update({
@@ -93,24 +79,44 @@ const CarrosselRoute = CarrosselRouteImport.update({
   path: '/carrossel',
   getParentRoute: () => rootRouteImport,
 } as any)
-const BibliotecaRoute = BibliotecaRouteImport.update({
-  id: '/biblioteca',
-  path: '/biblioteca',
+const CartazRoute = CartazRouteImport.update({
+  id: '/cartaz',
+  path: '/cartaz',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AdminRoute = AdminRouteImport.update({
-  id: '/admin',
-  path: '/admin',
+const ConfiguracoesRoute = ConfiguracoesRouteImport.update({
+  id: '/configuracoes',
+  path: '/configuracoes',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AcessoRoute = AcessoRouteImport.update({
-  id: '/acesso',
-  path: '/acesso',
+const CriadorPromptsRoute = CriadorPromptsRouteImport.update({
+  id: '/criador-prompts',
+  path: '/criador-prompts',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const EquipeRoute = EquipeRouteImport.update({
+  id: '/equipe',
+  path: '/equipe',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjetosRoute = ProjetosRouteImport.update({
+  id: '/projetos',
+  path: '/projetos',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PublicacoesRoute = PublicacoesRouteImport.update({
+  id: '/publicacoes',
+  path: '/publicacoes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RedesRoute = RedesRouteImport.update({
+  id: '/redes',
+  path: '/redes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SuporteRoute = SuporteRouteImport.update({
+  id: '/suporte',
+  path: '/suporte',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EditorIdRoute = EditorIdRouteImport.update({
@@ -121,170 +127,184 @@ const EditorIdRoute = EditorIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/publicacoes': typeof PublicacoesRoute
-  '/redes': typeof RedesRoute
-  '/caixa-entrada': typeof CaixaEntradaRoute
-  '/analytics': typeof AnalyticsRoute
-  '/automacoes': typeof AutomacoesRoute
-  '/equipe': typeof EquipeRoute
   '/acesso': typeof AcessoRoute
   '/admin': typeof AdminRoute
   '/agenda': typeof AgendaRoute
-  '/brand-kit': typeof BrandKitRoute
+  '/analytics': typeof AnalyticsRoute
+  '/automacoes': typeof AutomacoesRoute
   '/biblioteca': typeof BibliotecaRoute
+  '/brand-kit': typeof BrandKitRoute
+  '/caixa-entrada': typeof CaixaEntradaRoute
   '/carrossel': typeof CarrosselRoute
   '/cartaz': typeof CartazRoute
   '/configuracoes': typeof ConfiguracoesRoute
   '/criador-prompts': typeof CriadorPromptsRoute
+  '/equipe': typeof EquipeRoute
   '/projetos': typeof ProjetosRoute
+  '/publicacoes': typeof PublicacoesRoute
+  '/redes': typeof RedesRoute
+  '/suporte': typeof SuporteRoute
   '/editor/$id': typeof EditorIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/publicacoes': typeof PublicacoesRoute
-  '/redes': typeof RedesRoute
-  '/caixa-entrada': typeof CaixaEntradaRoute
-  '/analytics': typeof AnalyticsRoute
-  '/automacoes': typeof AutomacoesRoute
-  '/equipe': typeof EquipeRoute
   '/acesso': typeof AcessoRoute
   '/admin': typeof AdminRoute
   '/agenda': typeof AgendaRoute
-  '/brand-kit': typeof BrandKitRoute
+  '/analytics': typeof AnalyticsRoute
+  '/automacoes': typeof AutomacoesRoute
   '/biblioteca': typeof BibliotecaRoute
+  '/brand-kit': typeof BrandKitRoute
+  '/caixa-entrada': typeof CaixaEntradaRoute
   '/carrossel': typeof CarrosselRoute
   '/cartaz': typeof CartazRoute
   '/configuracoes': typeof ConfiguracoesRoute
   '/criador-prompts': typeof CriadorPromptsRoute
+  '/equipe': typeof EquipeRoute
   '/projetos': typeof ProjetosRoute
+  '/publicacoes': typeof PublicacoesRoute
+  '/redes': typeof RedesRoute
+  '/suporte': typeof SuporteRoute
   '/editor/$id': typeof EditorIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/publicacoes': typeof PublicacoesRoute
-  '/redes': typeof RedesRoute
-  '/caixa-entrada': typeof CaixaEntradaRoute
-  '/analytics': typeof AnalyticsRoute
-  '/automacoes': typeof AutomacoesRoute
-  '/equipe': typeof EquipeRoute
   '/acesso': typeof AcessoRoute
   '/admin': typeof AdminRoute
   '/agenda': typeof AgendaRoute
-  '/brand-kit': typeof BrandKitRoute
+  '/analytics': typeof AnalyticsRoute
+  '/automacoes': typeof AutomacoesRoute
   '/biblioteca': typeof BibliotecaRoute
+  '/brand-kit': typeof BrandKitRoute
+  '/caixa-entrada': typeof CaixaEntradaRoute
   '/carrossel': typeof CarrosselRoute
   '/cartaz': typeof CartazRoute
   '/configuracoes': typeof ConfiguracoesRoute
   '/criador-prompts': typeof CriadorPromptsRoute
+  '/equipe': typeof EquipeRoute
   '/projetos': typeof ProjetosRoute
+  '/publicacoes': typeof PublicacoesRoute
+  '/redes': typeof RedesRoute
+  '/suporte': typeof SuporteRoute
   '/editor/$id': typeof EditorIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/publicacoes'
-    | '/redes'
-    | '/caixa-entrada'
+    | '/acesso'
+    | '/admin'
+    | '/agenda'
     | '/analytics'
     | '/automacoes'
-    | '/equipe'
-    | '/acesso'
-    | '/agenda'
-    | '/brand-kit'
-    | '/admin'
     | '/biblioteca'
+    | '/brand-kit'
+    | '/caixa-entrada'
     | '/carrossel'
     | '/cartaz'
     | '/configuracoes'
     | '/criador-prompts'
+    | '/equipe'
     | '/projetos'
+    | '/publicacoes'
+    | '/redes'
+    | '/suporte'
     | '/editor/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/publicacoes'
-    | '/redes'
-    | '/caixa-entrada'
+    | '/acesso'
+    | '/admin'
+    | '/agenda'
     | '/analytics'
     | '/automacoes'
-    | '/equipe'
-    | '/acesso'
-    | '/agenda'
-    | '/brand-kit'
-    | '/admin'
     | '/biblioteca'
+    | '/brand-kit'
+    | '/caixa-entrada'
     | '/carrossel'
     | '/cartaz'
     | '/configuracoes'
     | '/criador-prompts'
+    | '/equipe'
     | '/projetos'
+    | '/publicacoes'
+    | '/redes'
+    | '/suporte'
     | '/editor/$id'
   id:
     | '__root__'
     | '/'
-    | '/publicacoes'
-    | '/redes'
-    | '/caixa-entrada'
+    | '/acesso'
+    | '/admin'
+    | '/agenda'
     | '/analytics'
     | '/automacoes'
-    | '/equipe'
-    | '/acesso'
-    | '/agenda'
-    | '/brand-kit'
-    | '/admin'
     | '/biblioteca'
+    | '/brand-kit'
+    | '/caixa-entrada'
     | '/carrossel'
     | '/cartaz'
     | '/configuracoes'
     | '/criador-prompts'
+    | '/equipe'
     | '/projetos'
+    | '/publicacoes'
+    | '/redes'
+    | '/suporte'
     | '/editor/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  PublicacoesRoute: typeof PublicacoesRoute
-  RedesRoute: typeof RedesRoute
-  CaixaEntradaRoute: typeof CaixaEntradaRoute
+  AcessoRoute: typeof AcessoRoute
+  AdminRoute: typeof AdminRoute
+  AgendaRoute: typeof AgendaRoute
   AnalyticsRoute: typeof AnalyticsRoute
   AutomacoesRoute: typeof AutomacoesRoute
-  EquipeRoute: typeof EquipeRoute
-  AcessoRoute: typeof AcessoRoute
-  AgendaRoute: typeof AgendaRoute
-  BrandKitRoute: typeof BrandKitRoute
-  AdminRoute: typeof AdminRoute
   BibliotecaRoute: typeof BibliotecaRoute
+  BrandKitRoute: typeof BrandKitRoute
+  CaixaEntradaRoute: typeof CaixaEntradaRoute
   CarrosselRoute: typeof CarrosselRoute
   CartazRoute: typeof CartazRoute
   ConfiguracoesRoute: typeof ConfiguracoesRoute
   CriadorPromptsRoute: typeof CriadorPromptsRoute
+  EquipeRoute: typeof EquipeRoute
   ProjetosRoute: typeof ProjetosRoute
+  PublicacoesRoute: typeof PublicacoesRoute
+  RedesRoute: typeof RedesRoute
+  SuporteRoute: typeof SuporteRoute
   EditorIdRoute: typeof EditorIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/publicacoes': {
-      id: '/publicacoes'
-      path: '/publicacoes'
-      fullPath: '/publicacoes'
-      preLoaderRoute: typeof PublicacoesRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/redes': {
-      id: '/redes'
-      path: '/redes'
-      fullPath: '/redes'
-      preLoaderRoute: typeof RedesRouteImport
+    '/acesso': {
+      id: '/acesso'
+      path: '/acesso'
+      fullPath: '/acesso'
+      preLoaderRoute: typeof AcessoRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/caixa-entrada': {
-      id: '/caixa-entrada'
-      path: '/caixa-entrada'
-      fullPath: '/caixa-entrada'
-      preLoaderRoute: typeof CaixaEntradaRouteImport
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agenda': {
+      id: '/agenda'
+      path: '/agenda'
+      fullPath: '/agenda'
+      preLoaderRoute: typeof AgendaRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/analytics': {
@@ -301,18 +321,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AutomacoesRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/equipe': {
-      id: '/equipe'
-      path: '/equipe'
-      fullPath: '/equipe'
-      preLoaderRoute: typeof EquipeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/agenda': {
-      id: '/agenda'
-      path: '/agenda'
-      fullPath: '/agenda'
-      preLoaderRoute: typeof AgendaRouteImport
+    '/biblioteca': {
+      id: '/biblioteca'
+      path: '/biblioteca'
+      fullPath: '/biblioteca'
+      preLoaderRoute: typeof BibliotecaRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/brand-kit': {
@@ -322,32 +335,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BrandKitRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/projetos': {
-      id: '/projetos'
-      path: '/projetos'
-      fullPath: '/projetos'
-      preLoaderRoute: typeof ProjetosRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/criador-prompts': {
-      id: '/criador-prompts'
-      path: '/criador-prompts'
-      fullPath: '/criador-prompts'
-      preLoaderRoute: typeof CriadorPromptsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/configuracoes': {
-      id: '/configuracoes'
-      path: '/configuracoes'
-      fullPath: '/configuracoes'
-      preLoaderRoute: typeof ConfiguracoesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/cartaz': {
-      id: '/cartaz'
-      path: '/cartaz'
-      fullPath: '/cartaz'
-      preLoaderRoute: typeof CartazRouteImport
+    '/caixa-entrada': {
+      id: '/caixa-entrada'
+      path: '/caixa-entrada'
+      fullPath: '/caixa-entrada'
+      preLoaderRoute: typeof CaixaEntradaRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/carrossel': {
@@ -357,32 +349,60 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CarrosselRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/biblioteca': {
-      id: '/biblioteca'
-      path: '/biblioteca'
-      fullPath: '/biblioteca'
-      preLoaderRoute: typeof BibliotecaRouteImport
+    '/cartaz': {
+      id: '/cartaz'
+      path: '/cartaz'
+      fullPath: '/cartaz'
+      preLoaderRoute: typeof CartazRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/admin': {
-      id: '/admin'
-      path: '/admin'
-      fullPath: '/admin'
-      preLoaderRoute: typeof AdminRouteImport
+    '/configuracoes': {
+      id: '/configuracoes'
+      path: '/configuracoes'
+      fullPath: '/configuracoes'
+      preLoaderRoute: typeof ConfiguracoesRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/acesso': {
-      id: '/acesso'
-      path: '/acesso'
-      fullPath: '/acesso'
-      preLoaderRoute: typeof AcessoRouteImport
+    '/criador-prompts': {
+      id: '/criador-prompts'
+      path: '/criador-prompts'
+      fullPath: '/criador-prompts'
+      preLoaderRoute: typeof CriadorPromptsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/equipe': {
+      id: '/equipe'
+      path: '/equipe'
+      fullPath: '/equipe'
+      preLoaderRoute: typeof EquipeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projetos': {
+      id: '/projetos'
+      path: '/projetos'
+      fullPath: '/projetos'
+      preLoaderRoute: typeof ProjetosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/publicacoes': {
+      id: '/publicacoes'
+      path: '/publicacoes'
+      fullPath: '/publicacoes'
+      preLoaderRoute: typeof PublicacoesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/redes': {
+      id: '/redes'
+      path: '/redes'
+      fullPath: '/redes'
+      preLoaderRoute: typeof RedesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/suporte': {
+      id: '/suporte'
+      path: '/suporte'
+      fullPath: '/suporte'
+      preLoaderRoute: typeof SuporteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/editor/$id': {
@@ -397,24 +417,35 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  PublicacoesRoute: PublicacoesRoute,
-  RedesRoute: RedesRoute,
-  CaixaEntradaRoute: CaixaEntradaRoute,
+  AcessoRoute: AcessoRoute,
+  AdminRoute: AdminRoute,
+  AgendaRoute: AgendaRoute,
   AnalyticsRoute: AnalyticsRoute,
   AutomacoesRoute: AutomacoesRoute,
-  EquipeRoute: EquipeRoute,
-  AcessoRoute: AcessoRoute,
-  AgendaRoute: AgendaRoute,
-  BrandKitRoute: BrandKitRoute,
-  AdminRoute: AdminRoute,
   BibliotecaRoute: BibliotecaRoute,
+  BrandKitRoute: BrandKitRoute,
+  CaixaEntradaRoute: CaixaEntradaRoute,
   CarrosselRoute: CarrosselRoute,
   CartazRoute: CartazRoute,
   ConfiguracoesRoute: ConfiguracoesRoute,
   CriadorPromptsRoute: CriadorPromptsRoute,
+  EquipeRoute: EquipeRoute,
   ProjetosRoute: ProjetosRoute,
+  PublicacoesRoute: PublicacoesRoute,
+  RedesRoute: RedesRoute,
+  SuporteRoute: SuporteRoute,
   EditorIdRoute: EditorIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
