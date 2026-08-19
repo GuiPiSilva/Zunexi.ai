@@ -277,12 +277,13 @@ export const runAgencyWorkflow = createServerFn({ method: "POST" })
   });
 
 export const listAgencyTasks = createServerFn({ method: "POST" })
-  .inputValidator((value: unknown) => AccessInput.extend({ projectId: z.string().uuid().optional().nullable(), status: TaskStatus.optional() }).parse(value))
+  .inputValidator((value: unknown) => AccessInput.extend({ projectId: z.string().uuid().optional().nullable(), module: AgencyModule.optional(), status: TaskStatus.optional() }).parse(value))
   .handler(async ({ data }) => {
     const sb = admin();
     const context = await requireTenantContext(sb, data.accessKey);
     let query = (sb as any).from("agency_tasks").select("*, agency_projects(name)").eq("tenant_id", context.tenant.id).order("due_date", { ascending: true, nullsFirst: false }).order("created_at", { ascending: false }).limit(400);
     if (data.projectId) query = query.eq("project_id", data.projectId);
+    if (data.module) query = query.eq("module", data.module);
     if (data.status) query = query.eq("status", data.status);
     const { data: rows, error } = await query;
     if (error) throw new Error(error.message);
